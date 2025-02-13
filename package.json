@@ -1,0 +1,16 @@
+{
+	"name": "zorsh",
+	"version": "1.0.0",
+	"description": "",
+	"main": "index.js",
+	"scripts": {
+		"test": "vitest"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"devDependencies": {
+		"typescript": "^5.7.3",
+		"vitest": "^3.0.5"
+	}
+}
