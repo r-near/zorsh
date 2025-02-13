@@ -1,20 +1,26 @@
 {
   "name": "zorsh",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "version": "0.1.0",
+  "description": "A TypeScript-first implementation of the Borsh binary serialization format, with a modern Zod-like API and full type inference.",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "files": ["dist/src"],
+  "packageManager": "pnpm@10.3.0",
   "scripts": {
     "build": "tsc",
     "test": "vitest",
     "lint": "biome check --write .",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm build",
-    "lefthook": "lefthook install"
+    "lefthook": "lefthook install",
+    "check-exports": "attw --pack .",
+    "release": "pnpm build && changeset publish"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.17.3",
     "@biomejs/biome": "^1.9.4",
     "@changesets/cli": "^2.27.12",
     "@types/node": "^22.13.1",
