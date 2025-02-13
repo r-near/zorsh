@@ -4,5 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-borsh = { version = "1.5.5", features = ["borsh-derive", "derive"] }
+borsh = { version = "1.5.5", features = [
+    "borsh-derive",
+    "derive",
+    "unstable__schema",
+] }
+genco = "0.17.10"
 serde = { version = "1.0.217", features = ["derive"] }
+
+[[bin]]
+name = "schema"
+path = "src/schema.rs"
