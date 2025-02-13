@@ -1,17 +1,24 @@
 {
-	"name": "zorsh",
-	"version": "1.0.0",
-	"description": "",
-	"main": "index.js",
-	"scripts": {
-		"test": "vitest"
-	},
-	"keywords": [],
-	"author": "",
-	"license": "ISC",
-	"devDependencies": {
-		"@types/node": "^22.13.1",
-		"typescript": "^5.7.3",
-		"vitest": "^3.0.5"
-	}
+  "name": "zorsh",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "lint": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build",
+    "lefthook": "lefthook install"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.13.1",
+    "lefthook": "^1.10.10",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
 }
