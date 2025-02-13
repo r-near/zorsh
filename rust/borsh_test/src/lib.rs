@@ -2,8 +2,8 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use std::collections::{HashMap, HashSet};
 
+mod complex;
 mod float_test;
-mod generate;
 mod schema;
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
@@ -84,10 +84,6 @@ pub struct GameState {
     pub current_round: u32,
     pub events: Vec<GameEvent>, // Vec of enum
     pub game_version: String,
-}
-
-fn main() {
-    schema::main().unwrap();
 }
 
 #[cfg(test)]
