@@ -50,7 +50,7 @@ describe("Borsh-RS Compatibility (Complex Schema)", () => {
 							},
 						],
 						equipped_items: new Map([["hand", "sword_001"]]),
-						quest_log: new Set(["collect_herbs", "quest_start"]),
+						quest_log: new Set(["quest_start", "collect_herbs"]),
 						last_login: 1678886400n, // Use BigInt for u64
 					},
 				],

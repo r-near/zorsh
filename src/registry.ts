@@ -34,53 +34,103 @@ export const registry = new TypeRegistry();
 
 // Unsigned integers
 registry.register<number>("u8", {
-	write: (writer, value) => writer.writeUint8(value),
+	write: (writer, value) => {
+		if (value < 0 || value > 255 || !Number.isInteger(value)) {
+			throw new Error("Value out of range for u8");
+		}
+		writer.writeUint8(value);
+	},
 	read: (reader) => reader.readUint8(),
 });
 
 registry.register<number>("u16", {
-	write: (writer, value) => writer.writeUint16(value),
+	write: (writer, value) => {
+		if (value < 0 || value > 65535 || !Number.isInteger(value)) {
+			throw new Error("Value out of range for u16");
+		}
+		writer.writeUint16(value);
+	},
 	read: (reader) => reader.readUint16(),
 });
 
 registry.register<number>("u32", {
-	write: (writer, value) => writer.writeUint32(value),
+	write: (writer, value) => {
+		if (value < 0 || value > 4294967295 || !Number.isInteger(value)) {
+			throw new Error("Value out of range for u32");
+		}
+		writer.writeUint32(value);
+	},
 	read: (reader) => reader.readUint32(),
 });
 
 registry.register<bigint>("u64", {
-	write: (writer, value) => writer.writeUint64(value),
+	write: (writer, value) => {
+		if (value < 0n || value > 18446744073709551615n) {
+			throw new Error("Value out of range for u64");
+		}
+		writer.writeUint64(value);
+	},
 	read: (reader) => reader.readUint64(),
 });
 
 registry.register<bigint>("u128", {
-	write: (writer, value) => writer.writeUint128(value),
+	write: (writer, value) => {
+		if (value < 0n || value > 340282366920938463463374607431768211455n) {
+			throw new Error("Value out of range for u128");
+		}
+		writer.writeUint128(value);
+	},
 	read: (reader) => reader.readUint128(),
 });
 
 // Signed integers
 registry.register<number>("i8", {
-	write: (writer, value) => writer.writeInt8(value),
+	write: (writer, value) => {
+		if (value < -128 || value > 127 || !Number.isInteger(value)) {
+			throw new Error("Value out of range for i8");
+		}
+		writer.writeInt8(value);
+	},
 	read: (reader) => reader.readInt8(),
 });
 
 registry.register<number>("i16", {
-	write: (writer, value) => writer.writeInt16(value),
+	write: (writer, value) => {
+		if (value < -32768 || value > 32767 || !Number.isInteger(value)) {
+			throw new Error("Value out of range for i16");
+		}
+		writer.writeInt16(value);
+	},
 	read: (reader) => reader.readInt16(),
 });
 
 registry.register<number>("i32", {
-	write: (writer, value) => writer.writeInt32(value),
+	write: (writer, value) => {
+		if (value < -2147483648 || value > 2147483647 || !Number.isInteger(value)) {
+			throw new Error("Value out of range for i32");
+		}
+		writer.writeInt32(value);
+	},
 	read: (reader) => reader.readInt32(),
 });
 
 registry.register<bigint>("i64", {
-	write: (writer, value) => writer.writeInt64(value),
+	write: (writer, value) => {
+		if (value < -9223372036854775808n || value > 9223372036854775807n) {
+			throw new Error("Value out of range for i64");
+		}
+		writer.writeInt64(value);
+	},
 	read: (reader) => reader.readInt64(),
 });
 
 registry.register<bigint>("i128", {
-	write: (writer, value) => writer.writeInt128(value),
+	write: (writer, value) => {
+		if (value < -170141183460469231731687303715884105728n || value > 170141183460469231731687303715884105727n) {
+			throw new Error("Value out of range for i128");
+		}
+		writer.writeInt128(value);
+	},
 	read: (reader) => reader.readInt128(),
 });
 
@@ -91,7 +141,12 @@ registry.register<number>("f32", {
 });
 
 registry.register<number>("f64", {
-	write: (writer, value) => writer.writeFloat64(value),
+	write: (writer, value) => {
+		if (Number.isNaN(value)) {
+			throw new Error("For portability reasons we do not allow serializing NaN values.");
+		}
+		writer.writeFloat64(value);
+	},
 	read: (reader) => reader.readFloat64(),
 });
 
@@ -206,7 +261,7 @@ registry.register<Set<unknown>, SetOptions<unknown>>("set", {
 	write: (writer, value, options) => {
 		if (!options) return;
 		const { elementType, elementOptions } = options;
-		const array = Array.from(value);
+		const array = Array.from(value).sort();
 		writer.writeUint32(array.length);
 		const handler = registry.getHandler<unknown>(elementType);
 		for (const item of array) {
@@ -237,7 +292,7 @@ registry.register<Map<unknown, unknown>, MapOptions<unknown, unknown>>("map", {
 	write: (writer, value, options) => {
 		if (!options) return;
 		const { keyType, keyOptions, valueType, valueOptions } = options;
-		const entries = Array.from(value.entries());
+		const entries = Array.from(value.entries()).sort();
 		writer.writeUint32(entries.length);
 		const keyHandler = registry.getHandler<unknown>(keyType);
 		const valueHandler = registry.getHandler<unknown>(valueType);

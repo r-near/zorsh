@@ -236,6 +236,22 @@ type T = b.infer<typeof schema>;
 // }
 ```
 
+## Testing
+
+Zorsh includes a comprehensive test suite that verifies both its TypeScript implementation and cross-language compatibility:
+
+- **Unit Tests**: Extensive testing of all serialization types and edge cases
+- **Rust Compatibility**: Tests against Rust's Borsh implementation to ensure perfect compatibility
+- **Complex Scenarios**: Verification of nested and complex data structure handling
+
+To run the test suite:
+
+```bash
+npm test
+```
+
+For details about running the Rust compatibility tests, see the [Rust tests documentation](test/rust/README.md).
+
 ## Contributing
 
 Contributions are welcome! Feel free to:

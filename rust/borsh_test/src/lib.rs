@@ -2,6 +2,8 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use std::collections::{HashMap, HashSet};
 
+mod float_test;
+
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub enum GameEvent {
     PlayerJoined {
@@ -138,7 +140,7 @@ mod tests {
                 },
             ],
             equipped_items: HashMap::from([("hand".to_string(), "sword_001".to_string())]),
-            quest_log: HashSet::from(["collect_herbs".to_string(), "quest_start".to_string()]),
+            quest_log: HashSet::from(["quest_start".to_string(), "collect_herbs".to_string()]),
             last_login: Some(1678886400), // Example timestamp
         };
 

@@ -10,13 +10,22 @@ export class BinaryWriter {
 		this.view = new DataView(this.buffer.buffer);
 	}
 
-	private ensureCapacity(additionalBytes: number) {
-		if (this.offset + additionalBytes > this.buffer.length) {
-			const newBuffer = new Uint8Array(this.buffer.length * 2);
-			newBuffer.set(this.buffer);
-			this.buffer = newBuffer;
-			this.view = new DataView(this.buffer.buffer);
+	private ensureCapacity(additionalBytes: number): void {
+		const requiredSize = this.offset + additionalBytes;
+		if (requiredSize <= this.buffer.length) {
+			return;
 		}
+
+		// Double the buffer size until it's large enough
+		let newSize = this.buffer.length;
+		while (newSize < requiredSize) {
+			newSize *= 2;
+		}
+
+		const newBuffer = new Uint8Array(newSize);
+		newBuffer.set(this.buffer);
+		this.buffer = newBuffer;
+		this.view = new DataView(this.buffer.buffer);
 	}
 
 	// Unsigned integers
@@ -44,7 +53,6 @@ export class BinaryWriter {
 		this.offset += 8;
 	}
 
-	// For u128, we write it as two u64s (low bits then high bits)
 	writeUint128(value: bigint): void {
 		this.ensureCapacity(16);
 		const low = value & BigInt("0xFFFFFFFFFFFFFFFF");
@@ -78,7 +86,6 @@ export class BinaryWriter {
 		this.offset += 8;
 	}
 
-	// For i128, we write it as two i64s (low bits then high bits)
 	writeInt128(value: bigint): void {
 		this.ensureCapacity(16);
 		const low = value & BigInt("0xFFFFFFFFFFFFFFFF");
@@ -182,8 +189,8 @@ export class BinaryReader {
 	}
 
 	readInt128(): bigint {
-		const low = this.readInt64();
-		const high = this.readInt64();
+		const low = this.readUint64(); // Read as unsigned to preserve bit pattern
+		const high = this.readInt64(); // Read high bits as signed
 		return (high << BigInt(64)) | low;
 	}
 
