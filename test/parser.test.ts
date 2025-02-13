@@ -40,8 +40,7 @@ describe("TypeParser", () => {
   ]
 
   test.each(testCases)("parses and generates code for $input", ({ input, expected }) => {
-    const ast = parser.parse(input)
-    const generated = parser.generateZorshCode(ast)
+    const generated = parser.parse(input)
     expect(generated).toBe(expected)
   })
 
@@ -49,8 +48,7 @@ describe("TypeParser", () => {
     const input = "HashMap<String, Vec<Option<(u32, String)>>>"
     const expected = "b.hashMap(b.string(), b.vec(b.option(b.tuple([b.u32(), b.string()]))))"
 
-    const ast = parser.parse(input)
-    const generated = parser.generateZorshCode(ast)
+    const generated = parser.parse(input)
     expect(generated).toBe(expected)
   })
 })

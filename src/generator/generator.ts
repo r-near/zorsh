@@ -85,7 +85,7 @@ class CodeGenerator {
 
   private generateTypeReference(type: string): string {
     const parser = new TypeParser()
-    return parser.generateZorshCode(parser.parse(type))
+    return parser.parse(type)
   }
 }
 
