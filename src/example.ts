@@ -31,7 +31,7 @@ type User = b.infer<typeof UserSchema>;
 const user: User = {
 	name: "Alice",
 	age: 25,
-	scores: [100, 95, 98],
+	scores: new Uint16Array([100, 95, 98]),
 	metadata: {
 		joinDate: BigInt(Date.now()),
 		rank: "Gold",

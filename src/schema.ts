@@ -1,9 +1,10 @@
 import { BinaryReader, BinaryWriter } from "./binary-io";
 import { type TypeRegistry, registry } from "./registry";
+import type { VecType } from "./types";
 
-export class Schema<T> {
+export class Schema<T, Type extends string = string> {
 	constructor(
-		public readonly type: string,
+		public readonly type: Type,
 		public readonly options: unknown,
 		private registry: TypeRegistry,
 	) {}
@@ -34,29 +35,29 @@ export const b = {
 	// Primitive types
 
 	// Unsigned integers
-	u8: () => new Schema<number>("u8", null, registry),
-	u16: () => new Schema<number>("u16", null, registry),
-	u32: () => new Schema<number>("u32", null, registry),
-	u64: () => new Schema<bigint>("u64", null, registry),
-	u128: () => new Schema<bigint>("u128", null, registry),
+	u8: () => new Schema<number, "u8">("u8", null, registry),
+	u16: () => new Schema<number, "u16">("u16", null, registry),
+	u32: () => new Schema<number, "u32">("u32", null, registry),
+	u64: () => new Schema<bigint, "u64">("u64", null, registry),
+	u128: () => new Schema<bigint, "u128">("u128", null, registry),
 
 	// Signed integers
-	i8: () => new Schema<number>("i8", null, registry),
-	i16: () => new Schema<number>("i16", null, registry),
-	i32: () => new Schema<number>("i32", null, registry),
-	i64: () => new Schema<bigint>("i64", null, registry),
-	i128: () => new Schema<bigint>("i128", null, registry),
+	i8: () => new Schema<number, "i8">("i8", null, registry),
+	i16: () => new Schema<number, "i16">("i16", null, registry),
+	i32: () => new Schema<number, "i32">("i32", null, registry),
+	i64: () => new Schema<bigint, "i64">("i64", null, registry),
+	i128: () => new Schema<bigint, "i128">("i128", null, registry),
 
 	// Floating point
-	f32: () => new Schema<number>("f32", null, registry),
-	f64: () => new Schema<number>("f64", null, registry),
+	f32: () => new Schema<number, "f32">("f32", null, registry),
+	f64: () => new Schema<number, "f64">("f64", null, registry),
 
 	// Other primitives
-	string: () => new Schema<string>("string", null, registry),
-	unit: () => new Schema<Record<string, never>>("unit", null, registry),
+	string: () => new Schema<string, "string">("string", null, registry),
+	unit: () => new Schema<Record<string, never>, "unit">("unit", null, registry),
 
 	// Complex container types
-	vec: <T>(elementSchema: Schema<T>): Schema<T[]> => {
+	vec: <T extends Schema<unknown>>(elementSchema: T): Schema<VecType<T>> => {
 		return new Schema(
 			"vec",
 			{

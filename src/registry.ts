@@ -1,4 +1,5 @@
 import type { BinaryReader, BinaryWriter } from "./binary-io";
+import type { TypedArrayType } from "./types";
 
 export interface TypeHandler<TValue, TOptions = unknown> {
 	write: (writer: BinaryWriter, value: TValue, options?: TOptions) => void;
@@ -138,22 +139,60 @@ interface VecOptions<T> {
 	elementOptions: T;
 }
 
-registry.register<unknown[], VecOptions<unknown>>("vec", {
+registry.register<unknown[] | TypedArrayType, VecOptions<unknown>>("vec", {
 	write: (writer, value, options) => {
 		if (!options) return;
 		const { elementType, elementOptions } = options;
-		writer.writeUint32(value.length); // Write length prefix
-		const handler = registry.getHandler<unknown>(elementType);
-		for (const item of value) {
-			handler.write(writer, item, elementOptions);
+
+		// Handle TypedArrays and regular arrays
+		const length = ArrayBuffer.isView(value) ? value.length : value.length;
+		writer.writeUint32(length);
+
+		const handler = registry.getHandler(elementType);
+		if (ArrayBuffer.isView(value)) {
+			for (let i = 0; i < length; i++) {
+				handler.write(writer, value[i], elementOptions);
+			}
+		} else {
+			for (const item of value) {
+				handler.write(writer, item, elementOptions);
+			}
 		}
 	},
 	read: (reader, options) => {
 		if (!options) return [];
 		const { elementType, elementOptions } = options;
 		const length = reader.readUint32();
-		const handler = registry.getHandler<unknown>(elementType);
-		return Array.from({ length }, () => handler.read(reader, elementOptions));
+		const handler = registry.getHandler(elementType);
+
+		// Create array of raw values first
+		const values = Array.from({ length }, () =>
+			handler.read(reader, elementOptions),
+		);
+
+		// Convert to appropriate TypedArray if needed
+		switch (elementType) {
+			case "u8":
+				return new Uint8Array(values as number[]);
+			case "u16":
+				return new Uint16Array(values as number[]);
+			case "u32":
+				return new Uint32Array(values as number[]);
+			case "i8":
+				return new Int8Array(values as number[]);
+			case "i16":
+				return new Int16Array(values as number[]);
+			case "i32":
+				return new Int32Array(values as number[]);
+			case "i64":
+				return new BigInt64Array(values as bigint[]);
+			case "f32":
+				return new Float32Array(values as number[]);
+			case "f64":
+				return new Float64Array(values as number[]);
+			default:
+				return values;
+		}
 	},
 });
 

@@ -66,7 +66,7 @@ describe("complex types", () => {
 
 	test("dynamic vec", () => {
 		const schema = b.vec(b.u8());
-		const value = [1, 2, 3, 4, 5];
+		const value = new Uint8Array([1, 2, 3, 4, 5]);
 		const buffer = schema.serialize(value);
 		expect(buffer).toMatchSnapshot();
 		expect(schema.deserialize(buffer)).toEqual(value);
@@ -115,7 +115,7 @@ describe("complex types", () => {
 		const value = {
 			name: "alice",
 			age: 25,
-			scores: [90, 95, 100],
+			scores: new Uint16Array([90, 95, 100]),
 		};
 
 		const buffer = schema.serialize(value);
@@ -187,7 +187,7 @@ describe("complex nested structures", () => {
 						]),
 						achievements: new Set(["first_kill", "speedrun"]),
 						guild: "Warriors",
-						recentScores: [100, 95, 98],
+						recentScores: new Uint16Array([100, 95, 98]),
 					},
 				],
 			]),
@@ -221,7 +221,7 @@ describe("type inference", () => {
 		const user: User = {
 			name: "Alice",
 			age: 25,
-			scores: [100, 95, 98],
+			scores: new Uint16Array([100, 95, 98]),
 			metadata: {
 				joinDate: BigInt(Date.now()),
 				rank: "Gold",
