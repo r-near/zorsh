@@ -13,6 +13,7 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
+    "noErrorTruncation": true,
 
     /* If transpiling with TypeScript: */
     "module": "NodeNext",
