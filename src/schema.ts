@@ -144,4 +144,17 @@ export const b = {
     )
     return new Schema("struct", fieldDefs, registry)
   },
+
+  // Tuple type
+  tuple: <T extends Schema<unknown>[]>(
+    ...elements: T
+  ): Schema<{
+    [K in keyof T]: T[K] extends Schema<infer U> ? U : never
+  }> => {
+    const types = elements.map((schema) => ({
+      type: schema.type,
+      options: schema.options,
+    }))
+    return new Schema("tuple", types, registry)
+  },
 }

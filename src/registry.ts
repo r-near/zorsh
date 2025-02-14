@@ -396,6 +396,42 @@ registry.register<Record<string, unknown>, EnumOptions>("enum", {
   },
 })
 
+// Define the type for a single tuple element's type info
+interface TupleElement {
+  type: string
+  options: unknown
+}
+
+// The full tuple type is an array of these elements
+type TupleTypes = TupleElement[]
+
+// Add the tuple handler to the registry
+registry.register<unknown[], TupleTypes>("tuple", {
+  write: (writer, value, types) => {
+    if (!types) return
+    if (value.length !== types.length) {
+      throw new Error(`Tuple length mismatch: expected ${types.length}, got ${value.length}`)
+    }
+    for (let i = 0; i < types.length; i++) {
+      const typeInfo = types[i]
+      if (!typeInfo) {
+        throw new Error(`Missing type information for tuple element at index ${i}`)
+      }
+      const handler = registry.getHandler(typeInfo.type)
+      handler.write(writer, value[i], typeInfo.options)
+    }
+  },
+  read: (reader, types) => {
+    if (!types) return []
+    const result = []
+    for (const type of types) {
+      const handler = registry.getHandler(type.type)
+      result.push(handler.read(reader, type.options))
+    }
+    return result
+  },
+})
+
 // Add fixed-length array handler
 interface ArrayOptions<T> {
   elementType: string
