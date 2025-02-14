@@ -13,17 +13,17 @@ A TypeScript-first implementation of the [Borsh](https://borsh.io) binary serial
 ## Installation
 
 ```bash
-npm install zorsh
+npm install @zorsh/zorsh
 # or
-yarn add zorsh
+yarn add @zorsh/zorsh
 # or
-pnpm add zorsh
+pnpm add @zorsh/zorsh
 ```
 
 ## Quick Start
 
 ```typescript
-import { b } from "zorsh";
+import { b } from "@zorsh/zorsh";
 
 // Define your schema
 const UserSchema = b.struct({
