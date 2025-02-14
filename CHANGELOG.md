@@ -1,5 +1,11 @@
 # zorsh
 
+## 0.2.1
+
+### Patch Changes
+
+- 3238e1f: Linting
+
 ## 0.2.0
 
 ### Minor Changes
