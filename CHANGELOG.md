@@ -1,5 +1,11 @@
 # zorsh
 
+## 0.2.2
+
+### Patch Changes
+
+- 5e296d6: Bump @types/node from 22.13.2 to 22.13.4 in the dev-dependencies group
+
 ## 0.2.1
 
 ### Patch Changes
