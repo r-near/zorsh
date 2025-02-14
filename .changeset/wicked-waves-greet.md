@@ -1,0 +1,5 @@
+---
+"@zorsh/zorsh": patch
+---
+
+Linting
