@@ -1,5 +1,11 @@
 # zorsh
 
+## 0.2.3
+
+### Patch Changes
+
+- 5aee991: Bump the dev-dependencies group across 1 directory with 5 updates
+
 ## 0.2.2
 
 ### Patch Changes
