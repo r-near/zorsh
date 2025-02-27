@@ -152,6 +152,50 @@ describe("complex types", () => {
     expect(errBuffer).toMatchSnapshot("enum with data - err")
     expect(ResultSchema.deserialize(errBuffer)).toEqual(errValue)
   })
+
+  test("nativeEnum", () => {
+    // String enum
+    enum StringStatus {
+      Pending = "PENDING",
+      Fulfilled = "FULFILLED",
+      Rejected = "REJECTED"
+    }
+
+    const StringStatusSchema = b.nativeEnum(StringStatus)
+
+    const stringValue = StringStatus.Pending
+    const stringBuffer = StringStatusSchema.serialize(stringValue)
+    expect(stringBuffer).toMatchSnapshot("string enum")
+    expect(StringStatusSchema.deserialize(stringBuffer)).toEqual(stringValue)
+
+    // Numeric enum
+    enum NumericStatus {
+      Pending,
+      Fulfilled,
+      Rejected
+    }
+
+    const NumericStatusSchema = b.nativeEnum(NumericStatus)
+
+    const numericValue = NumericStatus.Fulfilled
+    const numericBuffer = NumericStatusSchema.serialize(numericValue)
+    expect(numericBuffer).toMatchSnapshot("numeric enum")
+    expect(NumericStatusSchema.deserialize(numericBuffer)).toEqual(numericValue)
+
+    // Explicit numeric enum
+    enum ExplicitStatus {
+      Pending = 10,
+      Fulfilled = 20,
+      Rejected = 30
+    }
+
+    const ExplicitStatusSchema = b.nativeEnum(ExplicitStatus)
+
+    const explicitValue = ExplicitStatus.Rejected
+    const explicitBuffer = ExplicitStatusSchema.serialize(explicitValue)
+    expect(explicitBuffer).toMatchSnapshot("explicit numeric enum")
+    expect(ExplicitStatusSchema.deserialize(explicitBuffer)).toEqual(explicitValue)
+  })
 })
 
 describe("complex nested structures", () => {

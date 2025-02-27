@@ -132,6 +132,24 @@ export const b = {
     return new Schema("enum", { variants: variantArray }, registry)
   },
 
+  // Native TypeScript enum
+  nativeEnum: <T extends Record<string, number | string>>(
+    tsEnum: T
+  ): Schema<T[keyof T]> => {
+    // Convert the TypeScript enum to an array of variants
+    const variants = Object.entries(tsEnum)
+      .filter(([key]) => isNaN(Number(key))) // Filter out reverse mappings in numeric enums
+      .map(([name, value], index) => ({
+        index: typeof value === "number" ? value : index,
+        name,
+        value, // Store the actual enum value
+        type: "unit",
+        options: null,
+      }))
+
+    return new Schema("nativeEnum", { variants }, registry)
+  },
+
   // Complex types
   struct: <T extends Record<string, Schema<unknown>>>(
     fields: T,

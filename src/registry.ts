@@ -396,6 +396,38 @@ registry.register<Record<string, unknown>, EnumOptions>("enum", {
   },
 })
 
+// Add native enum handler for TypeScript enums
+registry.register<number | string, EnumOptions>("nativeEnum", {
+  write: (writer, value, options) => {
+    if (!options) return
+
+    // Find the variant definition by value
+    const variant = options.variants.find((v) => {
+      // Check if the value matches the variant's stored value
+      return v.value === value
+    })
+
+    if (!variant) {
+      throw new Error(`Unknown enum value: ${value}`)
+    }
+
+    // Write variant index
+    writer.writeUint8(variant.index)
+  },
+  read: (reader, options) => {
+    if (!options) return 0
+
+    const index = reader.readUint8()
+    const variant = options.variants.find((v) => v.index === index)
+    if (!variant) {
+      throw new Error(`Unknown enum variant index: ${index}`)
+    }
+
+    // Return the enum value
+    return variant.value
+  },
+})
+
 // Define the type for a single tuple element's type info
 interface TupleElement {
   type: string

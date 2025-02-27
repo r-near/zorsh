@@ -129,7 +129,7 @@ const PersonSchema = b.struct({
 #### Enums
 
 ```typescript
-// Simple enum
+// Regular enum with variants
 const StatusSchema = b.enum({
   Pending: b.unit(),
   Fulfilled: b.unit(),
@@ -147,6 +147,16 @@ const ShapeSchema = b.enum({
     radius: b.u32(),
   }),
 });
+
+// Native TypeScript enum support
+enum Status {
+  Pending,
+  Fulfilled,
+  Rejected
+}
+
+// Use nativeEnum for simple Rust enums that map directly to TypeScript enums
+const StatusSchema = b.nativeEnum(Status);
 ```
 
 ## Complex Example

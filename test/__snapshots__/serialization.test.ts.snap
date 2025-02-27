@@ -245,6 +245,24 @@ Uint8Array [
 ]
 `;
 
+exports[`complex types > nativeEnum > explicit numeric enum 1`] = `
+Uint8Array [
+  30,
+]
+`;
+
+exports[`complex types > nativeEnum > numeric enum 1`] = `
+Uint8Array [
+  1,
+]
+`;
+
+exports[`complex types > nativeEnum > string enum 1`] = `
+Uint8Array [
+  0,
+]
+`;
+
 exports[`complex types > option > none value 1`] = `
 Uint8Array [
   0,
