@@ -10,7 +10,7 @@
   "packageManager": "pnpm@10.3.0",
   "scripts": {
     "build": "tsc",
-    "test": "vitest",
+    "test": "vitest run",
     "lint": "biome check --write .",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm build",

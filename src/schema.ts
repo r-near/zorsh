@@ -1,4 +1,5 @@
 import { BinaryReader, BinaryWriter } from "./binary-io"
+import { nativeEnum } from "./native-enum"
 import { type TypeRegistry, registry } from "./registry"
 import type { VecType } from "./types"
 
@@ -131,6 +132,8 @@ export const b = {
 
     return new Schema("enum", { variants: variantArray }, registry)
   },
+
+  nativeEnum: nativeEnum,
 
   // Complex types
   struct: <T extends Record<string, Schema<unknown>>>(

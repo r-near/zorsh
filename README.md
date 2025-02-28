@@ -126,7 +126,43 @@ const PersonSchema = b.struct({
 });
 ```
 
+### Native Enums
+
+Zorsh provides a `nativeEnum` builder for serializing and deserializing simple Rust enums (without associated data) as TypeScript enums. This approach uses the variant index for serialization, ensuring compatibility with how Rust enums are handled in Borsh. It supports TypeScript enums with explicitly assigned numeric values by performing a reverse lookup during serialization.
+
+```typescript
+import { b } from "@zorsh/zorsh";
+
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+const ColorSchema = b.nativeEnum(Color);
+
+// Serialize
+const bytes = ColorSchema.serialize("Green"); // Serializes to [1]
+
+// Deserialize
+const color = ColorSchema.deserialize(new Uint8Array([1])); // "Green"
+```
+
+Enums with explicit values:
+```typescript
+enum HttpCodes {
+ OK = 200,
+ BadRequest = 400,
+ NotFound = 404
+}
+
+const HttpCodesSchema = b.nativeEnum(HttpCodes);
+const bytes = HttpCodesSchema.serialize("NotFound"); // Serializes to [2]
+```
+
 #### Enums
+
+**Note:** The `enum` builder is for Rust-like enums with optional associated data. For simple enums that can be represented as TypeScript enums, use `nativeEnum` instead.
 
 ```typescript
 // Simple enum
