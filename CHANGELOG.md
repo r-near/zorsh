@@ -1,5 +1,15 @@
 # zorsh
 
+## 0.3.0
+
+### Minor Changes
+
+- 32b75ea: Add support for TypeScript native enums via the new `b.nativeEnum()` function
+
+### Patch Changes
+
+- e479f0f: Bump lefthook from 1.11.1 to 1.11.2 in the dev-dependencies group
+
 ## 0.2.3
 
 ### Patch Changes
