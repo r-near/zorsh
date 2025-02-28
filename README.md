@@ -126,7 +126,41 @@ const PersonSchema = b.struct({
 });
 ```
 
-#### Enums
+#### Native TypeScript Enums
+
+```typescript
+// Define a TypeScript enum
+enum Status {
+  Idle,
+  Running,
+  Paused,
+  Completed,
+  Failed
+}
+
+// Create a schema for the enum
+const schema = b.nativeEnum(Status);
+
+// Use it directly with your TypeScript enum
+const value = Status.Running;
+const bytes = schema.serialize(value);
+const decoded = schema.deserialize(bytes);
+```
+
+Both numeric and string enums are supported:
+
+```typescript
+// String enum
+enum Color {
+  Red = "RED",
+  Green = "GREEN",
+  Blue = "BLUE"
+}
+
+const colorSchema = b.nativeEnum(Color);
+```
+
+#### Enums with Data
 
 ```typescript
 // Simple enum

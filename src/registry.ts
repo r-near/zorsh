@@ -458,3 +458,41 @@ registry.register<unknown[], ArrayOptions<unknown>>("array", {
     return Array.from({ length }, () => handler.read(reader, elementOptions))
   },
 })
+
+// Add native TypeScript enum handler
+registry.register<
+  unknown,
+  {
+    enumObj: Record<string, string | number>
+    valueToIndexMap: Map<string | number, number>
+    indexToValueMap: Map<number, string | number>
+  }
+>("nativeEnum", {
+  write: (writer, value, options) => {
+    if (!options) return
+    const { valueToIndexMap } = options
+
+    // Cast to string | number to satisfy TypeScript
+    const enumValue = value as string | number
+    const index = valueToIndexMap.get(enumValue)
+    if (index === undefined) {
+      throw new Error(`Invalid enum value: ${String(value)}`)
+    }
+
+    // Always encode enum variant as u8, per Borsh spec
+    writer.writeUint8(index)
+  },
+  read: (reader, options) => {
+    if (!options) return null
+    const { indexToValueMap } = options
+
+    const index = reader.readUint8()
+    const value = indexToValueMap.get(index)
+
+    if (value === undefined) {
+      throw new Error(`Invalid enum index: ${index}`)
+    }
+
+    return value
+  },
+})
