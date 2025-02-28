@@ -1,6 +1,6 @@
 import { BinaryReader, BinaryWriter } from "./binary-io"
 import { type TypeRegistry, registry } from "./registry"
-import type { VecType } from "./types"
+import type { EnumLike, EnumValueType, VecType } from "./types"
 
 export class Schema<T, Type extends string = string> {
   constructor(
@@ -26,6 +26,13 @@ export class Schema<T, Type extends string = string> {
 // First declare the namespace type (for type-level stuff)
 export namespace b {
   export type infer<T extends Schema<unknown>> = T extends Schema<infer U> ? U : never
+
+  /**
+   * Helper type for inferring the value type of a TypeScript enum.
+   * Used internally by the nativeEnum function.
+   * @internal
+   */
+  export type inferEnum<T> = T extends EnumLike ? EnumValueType<T> : never
 }
 
 // Builder API
@@ -156,5 +163,47 @@ export const b = {
       options: schema.options,
     }))
     return new Schema("tuple", types, registry)
+  },
+
+  // Native TypeScript enum
+  nativeEnum: <T extends EnumLike>(enumObj: T): Schema<b.inferEnum<T>, "nativeEnum"> => {
+    // First, filter out numeric keys that TypeScript adds to enums
+    const enumEntries = Object.entries(enumObj).filter(
+      ([key]) => typeof key === "string" && Number.isNaN(Number(key)),
+    )
+
+    // Check for mixed enum types (string and numeric values)
+    const enumValues = enumEntries.map(([_, value]) => value)
+    const hasStringValues = enumValues.some((value) => typeof value === "string")
+    const hasNumericValues = enumValues.some((value) => typeof value === "number")
+
+    if (hasStringValues && hasNumericValues) {
+      throw new Error("Mixed string/numeric enums are not supported")
+    }
+
+    // Create mappings between the enum values and their serialized indices
+    const valueToIndexMap = new Map<string | number, number>()
+    const indexToValueMap = new Map<number, string | number>()
+
+    // Process entries in the order they appear in the enum definition
+    enumEntries.forEach(([_key, value], index) => {
+      valueToIndexMap.set(value, index)
+      indexToValueMap.set(index, value)
+    })
+
+    // Check if we have too many variants
+    if (enumEntries.length > 255) {
+      throw new Error("Borsh only supports enums with up to 255 variants")
+    }
+
+    return new Schema(
+      "nativeEnum",
+      {
+        enumObj,
+        valueToIndexMap,
+        indexToValueMap,
+      },
+      registry,
+    )
   },
 }

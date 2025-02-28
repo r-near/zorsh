@@ -38,3 +38,18 @@ export type VecType<T> = T extends Schema<unknown, infer Type>
 export type TypeOf<T extends Schema<unknown, string>> = T extends Schema<infer U, string>
   ? U
   : never
+
+/**
+ * Represents a TypeScript enum type.
+ * This interface is used for type constraints in the nativeEnum function.
+ */
+export interface EnumLike {
+  [key: string]: string | number
+  [numericKey: number]: string
+}
+
+/**
+ * Gets the union type of all possible values in an enum.
+ * For example, if the enum is { A = 'a', B = 1 }, then EnumValueType<typeof MyEnum> would be 'a' | 1.
+ */
+export type EnumValueType<T> = T[keyof T]
