@@ -47,9 +47,3 @@ export interface EnumLike {
   [key: string]: string | number
   [numericKey: number]: string
 }
-
-/**
- * Gets the union type of all possible values in an enum.
- * For example, if the enum is { A = 'a', B = 1 }, then EnumValueType<typeof MyEnum> would be 'a' | 1.
- */
-export type EnumValueType<T> = T[keyof T]
