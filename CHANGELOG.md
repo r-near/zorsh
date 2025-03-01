@@ -1,5 +1,11 @@
 # zorsh
 
+## 0.3.1
+
+### Patch Changes
+
+- d8a78d9: fix(enum): use direct enum types instead of value unions
+
 ## 0.3.0
 
 ### Minor Changes
