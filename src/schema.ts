@@ -1,6 +1,6 @@
 import { BinaryReader, BinaryWriter } from "./binary-io"
 import { type TypeRegistry, registry } from "./registry"
-import type { EnumLike, EnumValueType, VecType } from "./types"
+import type { EnumLike, VecType } from "./types"
 
 export class Schema<T, Type extends string = string> {
   constructor(
@@ -26,13 +26,6 @@ export class Schema<T, Type extends string = string> {
 // First declare the namespace type (for type-level stuff)
 export namespace b {
   export type infer<T extends Schema<unknown>> = T extends Schema<infer U> ? U : never
-
-  /**
-   * Helper type for inferring the value type of a TypeScript enum.
-   * Used internally by the nativeEnum function.
-   * @internal
-   */
-  export type inferEnum<T> = T extends EnumLike ? EnumValueType<T> : never
 }
 
 // Builder API
@@ -166,7 +159,7 @@ export const b = {
   },
 
   // Native TypeScript enum
-  nativeEnum: <T extends EnumLike>(enumObj: T): Schema<b.inferEnum<T>, "nativeEnum"> => {
+  nativeEnum: <T extends EnumLike>(enumObj: T): Schema<T[keyof T], "nativeEnum"> => {
     // First, filter out numeric keys that TypeScript adds to enums
     const enumEntries = Object.entries(enumObj).filter(
       ([key]) => typeof key === "string" && Number.isNaN(Number(key)),
