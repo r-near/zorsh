@@ -1,5 +1,12 @@
 # zorsh
 
+## 0.3.2
+
+### Patch Changes
+
+- 806c6a9: Bump the dev-dependencies group across 1 directory with 3 updates
+- cf60a33: Bump the dev-dependencies group with 2 updates
+
 ## 0.3.1
 
 ### Patch Changes
