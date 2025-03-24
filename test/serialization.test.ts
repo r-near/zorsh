@@ -32,6 +32,15 @@ describe("primitive types", () => {
     expect(schema.deserialize(buffer)).toEqual(value)
   })
 
+  test.each([
+    { schema: b.bool(), value: true },
+    { schema: b.bool(), value: false },
+  ])("bool", ({ schema, value }: TestType<boolean>) => {
+    const buffer = schema.serialize(value)
+    expect(buffer).toMatchSnapshot()
+    expect(schema.deserialize(buffer)).toEqual(value)
+  })
+
   test("string", () => {
     const schema = b.string()
     const value = "Hello, world! 👋"

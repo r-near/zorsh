@@ -107,6 +107,10 @@ export class BinaryWriter {
     this.offset += 8
   }
 
+  writeBool(value: boolean): void {
+    this.writeUint8(value ? 1 : 0)
+  }
+
   writeString(value: string): void {
     const bytes = new TextEncoder().encode(value)
     this.writeUint32(bytes.length)
@@ -201,6 +205,10 @@ export class BinaryReader {
     const value = this.view.getFloat64(this.offset, true)
     this.offset += 8
     return value
+  }
+
+  readBool(): boolean {
+    return Boolean(this.readUint8())
   }
 
   readString(): string {

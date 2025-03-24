@@ -148,7 +148,12 @@ registry.register<number>("f64", {
   read: (reader) => reader.readFloat64(),
 })
 
-// String and unit type
+// Boolean, string and unit type
+registry.register<boolean>("bool", {
+  write: (writer, value) => writer.writeBool(value),
+  read: (reader) => reader.readBool(),
+})
+
 registry.register<string>("string", {
   write: (writer, value) => writer.writeString(value),
   read: (reader) => reader.readString(),
