@@ -1,5 +1,12 @@
 # zorsh
 
+## 0.3.3
+
+### Patch Changes
+
+- 907140d: Bump the dev-dependencies group across 1 directory with 2 updates
+- c7963e6: feat: add support for boolean values
+
 ## 0.3.2
 
 ### Patch Changes
