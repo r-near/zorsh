@@ -291,6 +291,18 @@ Uint8Array [
 ]
 `;
 
+exports[`primitive types > bool 1`] = `
+Uint8Array [
+  1,
+]
+`;
+
+exports[`primitive types > bool 2`] = `
+Uint8Array [
+  0,
+]
+`;
+
 exports[`primitive types > numeric type 'f32' 1`] = `
 Uint8Array [
   0,

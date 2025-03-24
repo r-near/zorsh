@@ -51,6 +51,7 @@ export const b = {
   f64: () => new Schema<number, "f64">("f64", null, registry),
 
   // Other primitives
+  bool: () => new Schema<boolean, "bool">("bool", null, registry),
   string: () => new Schema<string, "string">("string", null, registry),
   unit: () => new Schema<Record<string, never>, "unit">("unit", null, registry),
 
