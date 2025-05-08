@@ -22,7 +22,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@arethetypeswrong/cli": "^0.17.3",
+    "@arethetypeswrong/cli": "^0.18.0",
     "@biomejs/biome": "^1.9.4",
     "@changesets/cli": "^2.27.12",
     "@types/node": "^22.13.2",
