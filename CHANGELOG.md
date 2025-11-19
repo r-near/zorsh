@@ -1,5 +1,15 @@
 # zorsh
 
+## 0.4.0
+
+### Minor Changes
+
+- 677bcdd: Add a first-class bytes() helper for dynamic and fixed byte sequences (Vec<u8> / [u8; N]) and document its usage.
+
+### Patch Changes
+
+- 41425bd: Bump the dev-dependencies group across 1 directory with 5 updates
+
 ## 0.3.3
 
 ### Patch Changes
