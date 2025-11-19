@@ -106,6 +106,17 @@ const fixed = b.array(b.u16(), 3);
 const dynamic = b.vec(b.u16());
 ```
 
+#### Bytes
+
+```typescript
+const DynamicBytes = b.bytes();     // Vec<u8>   → Uint8Array
+const Pubkey = b.bytes(32);        // [u8; 32]  → Uint8Array
+```
+
+- `b.bytes()` encodes as a Borsh `Vec<u8>`: a `u32` length prefix followed by raw bytes.
+- `b.bytes(N)` encodes as a Borsh `[u8; N]`: exactly `N` bytes with no length prefix.
+- For raw byte blobs, prefer `b.bytes()` / `b.bytes(N)` over `b.vec(b.u8())` / `b.array(b.u8(), N)`.
+
 #### Sets and Maps
 
 ```typescript

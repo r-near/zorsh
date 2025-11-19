@@ -464,6 +464,39 @@ registry.register<unknown[], ArrayOptions<unknown>>("array", {
   },
 })
 
+// Add bytes handler - handles raw byte sequences as Uint8Array
+export interface BytesOptions {
+  length?: number
+}
+
+registry.register<Uint8Array, BytesOptions>("bytes", {
+  write: (writer, value, options) => {
+    const length = value.length
+
+    if (options?.length != null) {
+      if (length !== options.length) {
+        throw new Error(`Bytes length mismatch: expected ${options.length}, got ${length}`)
+      }
+      for (let i = 0; i < length; i++) {
+        writer.writeUint8(value[i] as number)
+      }
+    } else {
+      writer.writeUint32(length)
+      for (let i = 0; i < length; i++) {
+        writer.writeUint8(value[i] as number)
+      }
+    }
+  },
+  read: (reader, options) => {
+    const length = options?.length != null ? options.length : reader.readUint32()
+    const bytes = new Uint8Array(length)
+    for (let i = 0; i < length; i++) {
+      bytes[i] = reader.readUint8()
+    }
+    return bytes
+  },
+})
+
 // Add native TypeScript enum handler
 registry.register<
   unknown,

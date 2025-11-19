@@ -24,8 +24,8 @@ describe("tuple serialization", () => {
     const bytes = schema.serialize(value)
     const decoded = schema.deserialize(bytes)
 
-    // Need to check Uint8Array separately since toEqual doesn't handle them well
-    expect(new Uint8Array(decoded[0] as ArrayBuffer)).toEqual(value[0])
+    expect(decoded[0]).toBeInstanceOf(Uint8Array)
+    expect(decoded[0]).toEqual(value[0])
     expect(decoded[1]).toEqual(value[1])
     expect(decoded[2]).toEqual(value[2])
   })
@@ -102,7 +102,8 @@ describe("tuple serialization", () => {
     const decoded = schema.deserialize(bytes)
 
     // Check each component separately due to complex types
-    expect(new Uint8Array(decoded[0] as ArrayBuffer)).toEqual(value[0])
+    expect(decoded[0]).toBeInstanceOf(Uint8Array)
+    expect(decoded[0]).toEqual(value[0])
     expect(decoded[1]).toEqual(value[1])
     expect(decoded[2]).toEqual(value[2])
   })

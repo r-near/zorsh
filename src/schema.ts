@@ -113,6 +113,9 @@ export const b = {
       registry,
     )
   },
+  bytes: (length?: number): Schema<Uint8Array, "bytes"> => {
+    return new Schema("bytes", length != null ? { length } : {}, registry)
+  },
 
   // Enum type
   enum: <T extends Record<string, Schema<unknown>>>(
