@@ -150,4 +150,141 @@ describe("Coverage - Missing Lines", () => {
       )
     })
   })
+
+  describe("Handler Early Return Coverage", () => {
+    test("struct write handler with undefined fields", () => {
+      const handler = registry.getHandler("struct")
+      const writer = new BinaryWriter()
+      handler.write(writer, {}, undefined)
+      // Should return early without writing anything
+      expect(writer.getBuffer().length).toBe(0)
+    })
+
+    test("struct read handler with undefined fields", () => {
+      const handler = registry.getHandler("struct")
+      const reader = new BinaryReader(new Uint8Array([]))
+      const result = handler.read(reader, undefined)
+      expect(result).toEqual({})
+    })
+
+    test("vec write handler with undefined options", () => {
+      const handler = registry.getHandler("vec")
+      const writer = new BinaryWriter()
+      handler.write(writer, [], undefined)
+      // Should return early without writing anything
+      expect(writer.getBuffer().length).toBe(0)
+    })
+
+    test("vec read handler with undefined options", () => {
+      const handler = registry.getHandler("vec")
+      const reader = new BinaryReader(new Uint8Array([]))
+      const result = handler.read(reader, undefined)
+      expect(result).toEqual([])
+    })
+
+    test("set write handler with undefined options", () => {
+      const handler = registry.getHandler("set")
+      const writer = new BinaryWriter()
+      handler.write(writer, new Set(), undefined)
+      // Should return early without writing anything
+      expect(writer.getBuffer().length).toBe(0)
+    })
+
+    test("set read handler with undefined options", () => {
+      const handler = registry.getHandler("set")
+      const reader = new BinaryReader(new Uint8Array([]))
+      const result = handler.read(reader, undefined)
+      expect(result).toEqual(new Set())
+    })
+
+    test("map write handler with undefined options", () => {
+      const handler = registry.getHandler("map")
+      const writer = new BinaryWriter()
+      handler.write(writer, new Map(), undefined)
+      // Should return early without writing anything
+      expect(writer.getBuffer().length).toBe(0)
+    })
+
+    test("map read handler with undefined options", () => {
+      const handler = registry.getHandler("map")
+      const reader = new BinaryReader(new Uint8Array([]))
+      const result = handler.read(reader, undefined)
+      expect(result).toEqual(new Map())
+    })
+
+    test("tuple write handler with undefined types", () => {
+      const handler = registry.getHandler("tuple")
+      const writer = new BinaryWriter()
+      handler.write(writer, [], undefined)
+      // Should return early without writing anything
+      expect(writer.getBuffer().length).toBe(0)
+    })
+
+    test("tuple read handler with undefined types", () => {
+      const handler = registry.getHandler("tuple")
+      const reader = new BinaryReader(new Uint8Array([]))
+      const result = handler.read(reader, undefined)
+      expect(result).toEqual([])
+    })
+
+    test("array write handler with undefined options", () => {
+      const handler = registry.getHandler("array")
+      const writer = new BinaryWriter()
+      handler.write(writer, [], undefined)
+      // Should return early without writing anything
+      expect(writer.getBuffer().length).toBe(0)
+    })
+
+    test("array read handler with undefined options", () => {
+      const handler = registry.getHandler("array")
+      const reader = new BinaryReader(new Uint8Array([]))
+      const result = handler.read(reader, undefined)
+      expect(result).toEqual([])
+    })
+
+    test("option write handler with undefined options", () => {
+      const handler = registry.getHandler("option")
+      const writer = new BinaryWriter()
+      handler.write(writer, null, undefined)
+      // Should return early without writing anything
+      expect(writer.getBuffer().length).toBe(0)
+    })
+
+    test("option read handler with undefined options", () => {
+      const handler = registry.getHandler("option")
+      const reader = new BinaryReader(new Uint8Array([]))
+      const result = handler.read(reader, undefined)
+      expect(result).toBe(null)
+    })
+
+    test("enum write handler with undefined options", () => {
+      const handler = registry.getHandler("enum")
+      const writer = new BinaryWriter()
+      handler.write(writer, {}, undefined)
+      // Should return early without writing anything
+      expect(writer.getBuffer().length).toBe(0)
+    })
+
+    test("enum read handler with undefined options", () => {
+      const handler = registry.getHandler("enum")
+      const reader = new BinaryReader(new Uint8Array([]))
+      const result = handler.read(reader, undefined)
+      expect(result).toEqual({})
+    })
+
+    test("nativeEnum write handler with undefined options", () => {
+      const handler = registry.getHandler("nativeEnum")
+      const writer = new BinaryWriter()
+      handler.write(writer, 0, undefined)
+      // Should return early without writing anything
+      expect(writer.getBuffer().length).toBe(0)
+    })
+
+    test("nativeEnum read handler with undefined options", () => {
+      const handler = registry.getHandler("nativeEnum")
+      const reader = new BinaryReader(new Uint8Array([0]))
+      const result = handler.read(reader, undefined)
+      expect(result).toBe(null)
+    })
+  })
 })
