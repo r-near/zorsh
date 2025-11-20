@@ -83,7 +83,7 @@ describe("Coverage - Missing Lines", () => {
       })
 
       // Create an invalid enum value with a variant that doesn't exist
-      const invalidValue = { UnknownVariant: {} } as { A: Record<string, never> }
+      const invalidValue = { UnknownVariant: {} } as unknown as { A: Record<string, never> }
 
       expect(() => schema.serialize(invalidValue)).toThrow("Unknown enum variant: UnknownVariant")
     })
