@@ -7,33 +7,50 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  lint-and-typecheck:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        name: Install pnpm
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          version: 10.3.0
-          run_install: false
+          bun-version: latest
 
-      - name: Install Node.js
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run typecheck
+        run: bun run typecheck
+
+      - name: Run lint
+        run: bun run lint
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: "pnpm"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
       - name: Install dependencies
-        run: pnpm install
+        run: bun install
 
-      - name: Run type checking
-        run: pnpm typecheck
+      - name: Run tests with coverage
+        run: bun run test
 
-      - name: Run Biome lint
-        run: pnpm biome check .
-
-      - name: Run tests
-        run: pnpm test
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage/lcov.info
