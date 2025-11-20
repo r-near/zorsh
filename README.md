@@ -1,5 +1,7 @@
 # Zorsh
 
+[![codecov](https://codecov.io/gh/r-near/zorsh/graph/badge.svg?token=CODECOV_TOKEN)](https://codecov.io/gh/r-near/zorsh)
+
 A TypeScript-first implementation of the [Borsh](https://borsh.io) binary serialization format, with a modern Zod-like API and full type inference.
 
 ## Features
