@@ -77,7 +77,7 @@ describe("Vec returns plain arrays", () => {
 
     const value = {
       name: "Alice",
-      position: [1.100000023841858, 2.200000047683716, 3.299999952316284],
+      position: [1.1, 2.2, 3.3].map((v) => new Float32Array([v])[0]),
       inventory: [1, 2, 3],
       scores: [100, 200, 300],
     }
