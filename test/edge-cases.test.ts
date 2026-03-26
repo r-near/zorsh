@@ -155,8 +155,8 @@ describe("Zorsh Edge Cases", () => {
       const setSchema = b.hashSet(b.string())
 
       // Empty collections
-      expect(vecSchema.deserialize(vecSchema.serialize(new Uint8Array([])))).toEqual(
-        new Uint8Array([]),
+      expect(vecSchema.deserialize(vecSchema.serialize([]))).toEqual(
+        [],
       )
       expect(mapSchema.deserialize(mapSchema.serialize(new Map()))).toEqual(new Map())
       expect(setSchema.deserialize(setSchema.serialize(new Set()))).toEqual(new Set())
@@ -174,9 +174,7 @@ describe("Zorsh Edge Cases", () => {
           .map((_, i) => `item${i}`),
       )
 
-      expect(vecSchema.deserialize(vecSchema.serialize(new Uint8Array(largeVec)))).toEqual(
-        new Uint8Array(largeVec),
-      )
+      expect(vecSchema.deserialize(vecSchema.serialize(largeVec))).toEqual(largeVec)
       expect(mapSchema.deserialize(mapSchema.serialize(new Map(largeMap)))).toEqual(largeMap)
       expect(setSchema.deserialize(setSchema.serialize(new Set(largeSet)))).toEqual(largeSet)
     })
@@ -185,12 +183,12 @@ describe("Zorsh Edge Cases", () => {
       const deepSchema = b.vec(b.vec(b.vec(b.vec(b.u8()))))
       const deep = [
         [
-          [new Uint8Array([1]), new Uint8Array([2])],
-          [new Uint8Array([3]), new Uint8Array([4])],
+          [[1], [2]],
+          [[3], [4]],
         ],
         [
-          [new Uint8Array([5]), new Uint8Array([6])],
-          [new Uint8Array([7]), new Uint8Array([8])],
+          [[5], [6]],
+          [[7], [8]],
         ],
       ]
 
@@ -208,11 +206,11 @@ describe("Zorsh Edge Cases", () => {
       )
 
       const map = new Map([
-        ["", { data: new Uint8Array([]), metadata: null, tags: new Set([]) }],
+        ["", { data: [], metadata: null, tags: new Set([]) }],
         [
           "key1",
           {
-            data: new Uint8Array([1, 2, 3]),
+            data: [1, 2, 3],
             metadata: "test",
             tags: new Set(["tag1", "tag2"]),
           },
@@ -276,12 +274,12 @@ describe("Zorsh Edge Cases", () => {
         { Empty: {} },
         { Single: 42 },
         { Nested: { A: "test" } },
-        { Nested: { B: new Uint8Array([1, 2, 3]) } },
+        { Nested: { B: [1, 2, 3] } },
         { Nested: { C: new Map([["key", 42]]) } },
         {
           Complex: {
             data: [null, "test", null],
-            metadata: new Map([["key", new Uint8Array([1, 2, 3])]]),
+            metadata: new Map([["key", [1, 2, 3]]]),
           },
         },
       ]
@@ -330,7 +328,7 @@ describe("Zorsh Edge Cases", () => {
         text: "Hello 🌍",
         floating: Number.POSITIVE_INFINITY,
         optional: null,
-        list: new Uint8Array([1, 2, 3]),
+        list: [1, 2, 3],
         mapping: new Map([
           ["key1", 42],
           ["key2", 43],

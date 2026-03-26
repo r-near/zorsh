@@ -278,7 +278,7 @@ const schema = b.struct({
 type T = b.infer<typeof schema>;
 // {
 //   id: string
-//   data: Uint8Array | null
+//   data: number[] | null
 //   metadata: Map<string, bigint>
 // }
 ```
