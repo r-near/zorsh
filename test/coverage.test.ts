@@ -23,54 +23,54 @@ describe("Coverage - Missing Lines", () => {
     })
   })
 
-  describe("TypedArray Coverage", () => {
-    test("u32 vec returns Uint32Array", () => {
+  describe("Vec returns plain arrays", () => {
+    test("u32 vec returns number[]", () => {
       const schema = b.vec(b.u32())
-      const value = new Uint32Array([1, 2, 3, 4, 5])
+      const value = [1, 2, 3, 4, 5]
 
       const buffer = schema.serialize(value)
       const decoded = schema.deserialize(buffer)
-      expect(decoded).toBeInstanceOf(Uint32Array)
+      expect(Array.isArray(decoded)).toBe(true)
       expect(decoded).toEqual(value)
     })
 
-    test("i8 vec returns Int8Array", () => {
+    test("i8 vec returns number[]", () => {
       const schema = b.vec(b.i8())
-      const value = new Int8Array([-1, 2, -3, 4, -5])
+      const value = [-1, 2, -3, 4, -5]
 
       const buffer = schema.serialize(value)
       const decoded = schema.deserialize(buffer)
-      expect(decoded).toBeInstanceOf(Int8Array)
+      expect(Array.isArray(decoded)).toBe(true)
       expect(decoded).toEqual(value)
     })
 
-    test("i16 vec returns Int16Array", () => {
+    test("i16 vec returns number[]", () => {
       const schema = b.vec(b.i16())
-      const value = new Int16Array([-1000, 2000, -3000, 4000])
+      const value = [-1000, 2000, -3000, 4000]
 
       const buffer = schema.serialize(value)
       const decoded = schema.deserialize(buffer)
-      expect(decoded).toBeInstanceOf(Int16Array)
+      expect(Array.isArray(decoded)).toBe(true)
       expect(decoded).toEqual(value)
     })
 
-    test("i32 vec returns Int32Array", () => {
+    test("i32 vec returns number[]", () => {
       const schema = b.vec(b.i32())
-      const value = new Int32Array([-100000, 200000, -300000])
+      const value = [-100000, 200000, -300000]
 
       const buffer = schema.serialize(value)
       const decoded = schema.deserialize(buffer)
-      expect(decoded).toBeInstanceOf(Int32Array)
+      expect(Array.isArray(decoded)).toBe(true)
       expect(decoded).toEqual(value)
     })
 
-    test("f64 vec returns Float64Array", () => {
+    test("f64 vec returns number[]", () => {
       const schema = b.vec(b.f64())
-      const value = new Float64Array([1.1, 2.2, 3.3, 4.4, 5.5])
+      const value = [1.1, 2.2, 3.3, 4.4, 5.5]
 
       const buffer = schema.serialize(value)
       const decoded = schema.deserialize(buffer)
-      expect(decoded).toBeInstanceOf(Float64Array)
+      expect(Array.isArray(decoded)).toBe(true)
       expect(decoded).toEqual(value)
     })
   })

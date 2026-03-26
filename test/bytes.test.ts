@@ -13,7 +13,7 @@ describe("bytes helper", () => {
     expect(Array.from(decoded)).toEqual(Array.from(original))
 
     const vecSchema = b.vec(b.u8())
-    const vecEncoded = vecSchema.serialize(original)
+    const vecEncoded = vecSchema.serialize(Array.from(original))
 
     expect(encoded).toEqual(vecEncoded)
   })

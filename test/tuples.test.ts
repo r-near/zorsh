@@ -20,11 +20,11 @@ describe("tuple serialization", () => {
 
   it("handles tuples with complex types", () => {
     const schema = b.tuple(b.vec(b.u8()), b.option(b.string()), b.tuple(b.f32(), b.f32()))
-    const value: b.infer<typeof schema> = [new Uint8Array([1, 2, 3]), "optional", [1.5, 2.5]]
+    const value: b.infer<typeof schema> = [[1, 2, 3], "optional", [1.5, 2.5]]
     const bytes = schema.serialize(value)
     const decoded = schema.deserialize(bytes)
 
-    expect(decoded[0]).toBeInstanceOf(Uint8Array)
+    expect(Array.isArray(decoded[0])).toBe(true)
     expect(decoded[0]).toEqual(value[0])
     expect(decoded[1]).toEqual(value[1])
     expect(decoded[2]).toEqual(value[2])
@@ -91,7 +91,7 @@ describe("tuple serialization", () => {
   it("handles tuples with collections", () => {
     const schema = b.tuple(b.vec(b.u8()), b.hashSet(b.string()), b.hashMap(b.string(), b.u32()))
     const value: b.infer<typeof schema> = [
-      new Uint8Array([1, 2, 3]),
+      [1, 2, 3],
       new Set(["a", "b", "c"]),
       new Map([
         ["key1", 1],
@@ -102,7 +102,7 @@ describe("tuple serialization", () => {
     const decoded = schema.deserialize(bytes)
 
     // Check each component separately due to complex types
-    expect(decoded[0]).toBeInstanceOf(Uint8Array)
+    expect(Array.isArray(decoded[0])).toBe(true)
     expect(decoded[0]).toEqual(value[0])
     expect(decoded[1]).toEqual(value[1])
     expect(decoded[2]).toEqual(value[2])
