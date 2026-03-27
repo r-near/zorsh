@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { type Schema, b } from "../src/schema"
+import { b, type Schema } from "../src/schema"
 
 interface TestType<T> {
   schema: Schema<T>

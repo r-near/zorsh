@@ -1,7 +1,7 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { describe, expect, test } from "vitest"
-import { type Schema, b } from "../src/schema"
+import { b, type Schema } from "../src/schema"
 
 interface TestType<T> {
   schema: Schema<T>
@@ -155,9 +155,7 @@ describe("Zorsh Edge Cases", () => {
       const setSchema = b.hashSet(b.string())
 
       // Empty collections
-      expect(vecSchema.deserialize(vecSchema.serialize([]))).toEqual(
-        [],
-      )
+      expect(vecSchema.deserialize(vecSchema.serialize([]))).toEqual([])
       expect(mapSchema.deserialize(mapSchema.serialize(new Map()))).toEqual(new Map())
       expect(setSchema.deserialize(setSchema.serialize(new Set()))).toEqual(new Set())
 
