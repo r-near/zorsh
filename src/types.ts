@@ -8,9 +8,8 @@ export type VecType<T> = T extends Schema<unknown, string> ? Array<TypeOf<T>> : 
 /**
  * Extracts the inner type from a Schema
  */
-export type TypeOf<T extends Schema<unknown, string>> = T extends Schema<infer U, string>
-  ? U
-  : never
+export type TypeOf<T extends Schema<unknown, string>> =
+  T extends Schema<infer U, string> ? U : never
 
 /**
  * Represents a TypeScript enum type.

@@ -66,4 +66,4 @@ const GameStateSchema = b.struct({
 })
 type GameState = b.infer<typeof GameStateSchema>
 
-export { GameStateSchema, type GameState, PlayerSchema, type Player, ItemSchema, type Item }
+export { type GameState, GameStateSchema, type Item, ItemSchema, type Player, PlayerSchema }

@@ -1,5 +1,5 @@
 import { BinaryReader, BinaryWriter } from "./binary-io"
-import { type TypeRegistry, registry } from "./registry"
+import { registry, type TypeRegistry } from "./registry"
 import type { EnumLike, VecType } from "./types"
 
 export class Schema<T, Type extends string = string> {
