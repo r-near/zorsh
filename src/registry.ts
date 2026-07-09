@@ -501,3 +501,32 @@ registry.register<
     return value
   },
 })
+
+// Add lazy handler - enables recursive/self-referential schemas
+interface LazyOptions {
+  factory: () => { type: string; options: unknown }
+  _cached?: { type: string; options: unknown }
+}
+
+function resolveLazy(options: LazyOptions): { type: string; options: unknown } {
+  if (!options._cached) {
+    const resolved = options.factory()
+    options._cached = { type: resolved.type, options: resolved.options }
+  }
+  return options._cached
+}
+
+registry.register<unknown, LazyOptions>("lazy", {
+  write: (writer, value, options) => {
+    if (!options) return
+    const resolved = resolveLazy(options)
+    const handler = registry.getHandler(resolved.type)
+    handler.write(writer, value, resolved.options)
+  },
+  read: (reader, options) => {
+    if (!options) return undefined
+    const resolved = resolveLazy(options)
+    const handler = registry.getHandler(resolved.type)
+    return handler.read(reader, resolved.options)
+  },
+})
