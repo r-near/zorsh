@@ -3,6 +3,16 @@ import type { BinaryReader, BinaryWriter } from "./binary-io"
 export interface TypeHandler<TValue, TOptions = unknown> {
   write: (writer: BinaryWriter, value: TValue, options?: TOptions) => void
   read: (reader: BinaryReader, options?: TOptions) => TValue
+  /**
+   * Total order over values of this type, mirroring Rust's `Ord` for the
+   * corresponding Borsh type. Returns a negative number, zero, or a positive
+   * number, like an `Array.prototype.sort` comparator.
+   *
+   * Borsh writes `HashMap` keys and `HashSet` elements in ascending `Ord`
+   * order so that equal collections always encode to identical bytes. The
+   * map and set handlers sort with this comparator to produce that order.
+   */
+  compare: (a: TValue, b: TValue, options?: TOptions) => number
 }
 
 export class TypeRegistry {
@@ -24,6 +34,96 @@ export class TypeRegistry {
 // Create and initialize the global registry with primitive types
 export const registry = new TypeRegistry()
 
+// ==================== Canonical ordering helpers ====================
+//
+// Rust's `Ord` is the reference for every comparator below: integers and
+// floats compare numerically, `bool` orders `false < true`, strings and byte
+// strings compare lexicographically with a shorter prefix first, `Option`
+// orders `None < Some`, and structs, tuples, and enums compare field by field
+// (enums by variant index first).
+
+/** Numeric comparison for `number` and `bigint` values. */
+function compareNumeric(a: number | bigint, b: number | bigint): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+/**
+ * Compare two strings by Unicode code point, which is the order of their
+ * UTF-8 encodings and therefore Rust's `str` ordering. JavaScript's own string
+ * comparison orders by UTF-16 code unit, which disagrees for characters outside
+ * the Basic Multilingual Plane. Lone surrogates compare as U+FFFD, the
+ * replacement character `TextEncoder` writes for them.
+ */
+function compareStrings(a: string, b: string): number {
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    const [codePointA, lengthA] = codePointAt(a, i)
+    const [codePointB, lengthB] = codePointAt(b, j)
+    if (codePointA !== codePointB) return codePointA - codePointB
+    i += lengthA
+    j += lengthB
+  }
+  return a.length - i - (b.length - j)
+}
+
+/** Decode the code point at `index`, returning it with the number of UTF-16 units it spans. */
+function codePointAt(value: string, index: number): [codePoint: number, length: number] {
+  const unit = value.charCodeAt(index)
+  if (unit >= 0xd800 && unit <= 0xdbff && index + 1 < value.length) {
+    const next = value.charCodeAt(index + 1)
+    if (next >= 0xdc00 && next <= 0xdfff) {
+      return [(unit - 0xd800) * 0x400 + (next - 0xdc00) + 0x10000, 2]
+    }
+  }
+  if (unit >= 0xd800 && unit <= 0xdfff) return [0xfffd, 1]
+  return [unit, 1]
+}
+
+/** Lexicographic comparison of byte strings, shorter prefix first. */
+function compareBytes(a: Uint8Array, b: Uint8Array): number {
+  const length = Math.min(a.length, b.length)
+  for (let i = 0; i < length; i++) {
+    const difference = (a[i] as number) - (b[i] as number)
+    if (difference !== 0) return difference
+  }
+  return a.length - b.length
+}
+
+/** Lexicographic comparison of sequences whose elements share one handler, shorter prefix first. */
+function compareSequences(
+  a: unknown[],
+  b: unknown[],
+  handler: TypeHandler<unknown, unknown>,
+  options: unknown,
+): number {
+  const length = Math.min(a.length, b.length)
+  for (let i = 0; i < length; i++) {
+    const result = handler.compare(a[i], b[i], options)
+    if (result !== 0) return result
+  }
+  return a.length - b.length
+}
+
+/**
+ * Sort a collection into canonical Borsh order. Entries that compare equal are
+ * rejected: a Rust `HashSet`/`HashMap` cannot hold them, and strict decoders
+ * (borsh-rs with `de_strict_order`) reject keys that are not strictly ascending.
+ */
+function toCanonicalOrder<T>(
+  items: Iterable<T>,
+  compare: (a: T, b: T) => number,
+  duplicateMessage: string,
+): T[] {
+  const sorted = Array.from(items).sort(compare)
+  for (let i = 1; i < sorted.length; i++) {
+    if (compare(sorted[i - 1] as T, sorted[i] as T) === 0) {
+      throw new Error(duplicateMessage)
+    }
+  }
+  return sorted
+}
+
 // Register all primitive type handlers
 
 // Unsigned integers
@@ -35,6 +135,7 @@ registry.register<number>("u8", {
     writer.writeUint8(value)
   },
   read: (reader) => reader.readUint8(),
+  compare: compareNumeric,
 })
 
 registry.register<number>("u16", {
@@ -45,6 +146,7 @@ registry.register<number>("u16", {
     writer.writeUint16(value)
   },
   read: (reader) => reader.readUint16(),
+  compare: compareNumeric,
 })
 
 registry.register<number>("u32", {
@@ -55,6 +157,7 @@ registry.register<number>("u32", {
     writer.writeUint32(value)
   },
   read: (reader) => reader.readUint32(),
+  compare: compareNumeric,
 })
 
 registry.register<bigint>("u64", {
@@ -65,6 +168,7 @@ registry.register<bigint>("u64", {
     writer.writeUint64(value)
   },
   read: (reader) => reader.readUint64(),
+  compare: compareNumeric,
 })
 
 registry.register<bigint>("u128", {
@@ -75,6 +179,7 @@ registry.register<bigint>("u128", {
     writer.writeUint128(value)
   },
   read: (reader) => reader.readUint128(),
+  compare: compareNumeric,
 })
 
 // Signed integers
@@ -86,6 +191,7 @@ registry.register<number>("i8", {
     writer.writeInt8(value)
   },
   read: (reader) => reader.readInt8(),
+  compare: compareNumeric,
 })
 
 registry.register<number>("i16", {
@@ -96,6 +202,7 @@ registry.register<number>("i16", {
     writer.writeInt16(value)
   },
   read: (reader) => reader.readInt16(),
+  compare: compareNumeric,
 })
 
 registry.register<number>("i32", {
@@ -106,6 +213,7 @@ registry.register<number>("i32", {
     writer.writeInt32(value)
   },
   read: (reader) => reader.readInt32(),
+  compare: compareNumeric,
 })
 
 registry.register<bigint>("i64", {
@@ -116,6 +224,7 @@ registry.register<bigint>("i64", {
     writer.writeInt64(value)
   },
   read: (reader) => reader.readInt64(),
+  compare: compareNumeric,
 })
 
 registry.register<bigint>("i128", {
@@ -129,12 +238,14 @@ registry.register<bigint>("i128", {
     writer.writeInt128(value)
   },
   read: (reader) => reader.readInt128(),
+  compare: compareNumeric,
 })
 
 // Floating point
 registry.register<number>("f32", {
   write: (writer, value) => writer.writeFloat32(value),
   read: (reader) => reader.readFloat32(),
+  compare: compareNumeric,
 })
 
 registry.register<number>("f64", {
@@ -145,22 +256,26 @@ registry.register<number>("f64", {
     writer.writeFloat64(value)
   },
   read: (reader) => reader.readFloat64(),
+  compare: compareNumeric,
 })
 
 // Boolean, string and unit type
 registry.register<boolean>("bool", {
   write: (writer, value) => writer.writeBool(value),
   read: (reader) => reader.readBool(),
+  compare: (a, b) => Number(a) - Number(b),
 })
 
 registry.register<string>("string", {
   write: (writer, value) => writer.writeString(value),
   read: (reader) => reader.readString(),
+  compare: compareStrings,
 })
 
 registry.register<Record<string, never>>("unit", {
   write: () => {}, // Unit type takes up no space
   read: () => ({}),
+  compare: () => 0,
 })
 
 // Add struct handler - handles objects with named fields
@@ -187,6 +302,15 @@ registry.register<Record<string, unknown>, StructFields>("struct", {
       result[field] = handler.read(reader, def.options)
     }
     return result
+  },
+  compare: (a, b, fields) => {
+    if (!fields) return 0
+    for (const [field, def] of Object.entries(fields)) {
+      const handler = registry.getHandler(def.type)
+      const result = handler.compare(a[field], b[field], def.options)
+      if (result !== 0) return result
+    }
+    return 0
   },
 })
 
@@ -217,6 +341,11 @@ registry.register<unknown[], VecOptions<unknown>>("vec", {
 
     return Array.from({ length }, () => handler.read(reader, elementOptions))
   },
+  compare: (a, b, options) => {
+    if (!options) return 0
+    const { elementType, elementOptions } = options
+    return compareSequences(a, b, registry.getHandler(elementType), elementOptions)
+  },
 })
 
 // Add HashSet handler
@@ -225,11 +354,21 @@ interface SetOptions<T> {
   elementOptions: T
 }
 
+function canonicalSetElements(value: Set<unknown>, options: SetOptions<unknown>): unknown[] {
+  const { elementType, elementOptions } = options
+  const handler = registry.getHandler<unknown>(elementType)
+  return toCanonicalOrder(
+    value,
+    (a, b) => handler.compare(a, b, elementOptions),
+    "hashSet contains elements that compare equal; Borsh requires strictly ascending elements",
+  )
+}
+
 registry.register<Set<unknown>, SetOptions<unknown>>("set", {
   write: (writer, value, options) => {
     if (!options) return
     const { elementType, elementOptions } = options
-    const array = Array.from(value).sort()
+    const array = canonicalSetElements(value, options)
     writer.writeUint32(array.length)
     const handler = registry.getHandler<unknown>(elementType)
     for (const item of array) {
@@ -244,6 +383,16 @@ registry.register<Set<unknown>, SetOptions<unknown>>("set", {
     const items = Array.from({ length }, () => handler.read(reader, elementOptions))
     return new Set(items)
   },
+  compare: (a, b, options) => {
+    if (!options) return 0
+    const { elementType, elementOptions } = options
+    return compareSequences(
+      canonicalSetElements(a, options),
+      canonicalSetElements(b, options),
+      registry.getHandler(elementType),
+      elementOptions,
+    )
+  },
 })
 
 // Add HashMap handler
@@ -254,11 +403,24 @@ interface MapOptions<K, V> {
   valueOptions: V
 }
 
+function canonicalMapEntries(
+  value: Map<unknown, unknown>,
+  options: MapOptions<unknown, unknown>,
+): [unknown, unknown][] {
+  const { keyType, keyOptions } = options
+  const keyHandler = registry.getHandler<unknown>(keyType)
+  return toCanonicalOrder(
+    value.entries(),
+    ([a], [b]) => keyHandler.compare(a, b, keyOptions),
+    "hashMap contains keys that compare equal; Borsh requires strictly ascending keys",
+  )
+}
+
 registry.register<Map<unknown, unknown>, MapOptions<unknown, unknown>>("map", {
   write: (writer, value, options) => {
     if (!options) return
     const { keyType, keyOptions, valueType, valueOptions } = options
-    const entries = Array.from(value.entries()).sort()
+    const entries = canonicalMapEntries(value, options)
     writer.writeUint32(entries.length)
     const keyHandler = registry.getHandler<unknown>(keyType)
     const valueHandler = registry.getHandler<unknown>(valueType)
@@ -279,6 +441,24 @@ registry.register<Map<unknown, unknown>, MapOptions<unknown, unknown>>("map", {
       return [key, value] as const
     })
     return new Map(entries)
+  },
+  compare: (a, b, options) => {
+    if (!options) return 0
+    const { keyType, keyOptions, valueType, valueOptions } = options
+    const keyHandler = registry.getHandler<unknown>(keyType)
+    const valueHandler = registry.getHandler<unknown>(valueType)
+    const entriesA = canonicalMapEntries(a, options)
+    const entriesB = canonicalMapEntries(b, options)
+    const length = Math.min(entriesA.length, entriesB.length)
+    for (let i = 0; i < length; i++) {
+      const [keyA, valueA] = entriesA[i] as [unknown, unknown]
+      const [keyB, valueB] = entriesB[i] as [unknown, unknown]
+      const keyResult = keyHandler.compare(keyA, keyB, keyOptions)
+      if (keyResult !== 0) return keyResult
+      const valueResult = valueHandler.compare(valueA, valueB, valueOptions)
+      if (valueResult !== 0) return valueResult
+    }
+    return entriesA.length - entriesB.length
   },
 })
 
@@ -309,6 +489,12 @@ registry.register<unknown | null, OptionOptions<unknown>>("option", {
     }
     return null
   },
+  compare: (a, b, options) => {
+    if (a === null || b === null) return Number(a !== null) - Number(b !== null)
+    if (!options) return 0
+    const { valueType, valueOptions } = options
+    return registry.getHandler<unknown>(valueType).compare(a, b, valueOptions)
+  },
 })
 
 // Add enum handler
@@ -323,20 +509,29 @@ interface EnumOptions {
   variants: EnumVariant[]
 }
 
+/** Resolve the variant an enum value uses (its single key) and the payload stored under it. */
+function resolveEnumVariant(
+  value: Record<string, unknown>,
+  options: EnumOptions,
+): { variant: EnumVariant; payload: unknown } {
+  // Get the variant name (should be the only key in the object)
+  const variantName = Object.keys(value)[0]
+  // Assert variantName exists and is a string key of the value object
+  const payload = value[variantName as keyof typeof value]
+
+  // Find the variant definition
+  const variant = options.variants.find((v) => v.name === variantName)
+  if (!variant) {
+    throw new Error(`Unknown enum variant: ${variantName}`)
+  }
+  return { variant, payload }
+}
+
 registry.register<Record<string, unknown>, EnumOptions>("enum", {
   write: (writer, value, options) => {
     if (!options) return
 
-    // Get the variant name (should be the only key in the object)
-    const variantName = Object.keys(value)[0]
-    // Assert variantName exists and is a string key of the value object
-    const variantValue = value[variantName as keyof typeof value]
-
-    // Find the variant definition
-    const variant = options.variants.find((v) => v.name === variantName)
-    if (!variant) {
-      throw new Error(`Unknown enum variant: ${variantName}`)
-    }
+    const { variant, payload: variantValue } = resolveEnumVariant(value, options)
 
     // Write variant index
     writer.writeUint8(variant.index)
@@ -365,6 +560,17 @@ registry.register<Record<string, unknown>, EnumOptions>("enum", {
     const handler = registry.getHandler(variant.type)
     const value = handler.read(reader, variant.options)
     return { [variant.name]: value }
+  },
+  compare: (a, b, options) => {
+    if (!options) return 0
+    const left = resolveEnumVariant(a, options)
+    const right = resolveEnumVariant(b, options)
+    if (left.variant.index !== right.variant.index) {
+      return left.variant.index - right.variant.index
+    }
+    if (left.variant.type === "unit") return 0
+    const handler = registry.getHandler(left.variant.type)
+    return handler.compare(left.payload, right.payload, left.variant.options)
   },
 })
 
@@ -402,6 +608,19 @@ registry.register<unknown[], TupleTypes>("tuple", {
     }
     return result
   },
+  compare: (a, b, types) => {
+    if (!types) return 0
+    for (let i = 0; i < types.length; i++) {
+      const typeInfo = types[i]
+      if (!typeInfo) {
+        throw new Error(`Missing type information for tuple element at index ${i}`)
+      }
+      const handler = registry.getHandler(typeInfo.type)
+      const result = handler.compare(a[i], b[i], typeInfo.options)
+      if (result !== 0) return result
+    }
+    return 0
+  },
 })
 
 // Add fixed-length array handler
@@ -428,6 +647,11 @@ registry.register<unknown[], ArrayOptions<unknown>>("array", {
     const { elementType, elementOptions, length } = options
     const handler = registry.getHandler<unknown>(elementType)
     return Array.from({ length }, () => handler.read(reader, elementOptions))
+  },
+  compare: (a, b, options) => {
+    if (!options) return 0
+    const { elementType, elementOptions } = options
+    return compareSequences(a, b, registry.getHandler(elementType), elementOptions)
   },
 })
 
@@ -462,6 +686,7 @@ registry.register<Uint8Array, BytesOptions>("bytes", {
     }
     return bytes
   },
+  compare: compareBytes,
 })
 
 // Add native TypeScript enum handler
@@ -499,5 +724,14 @@ registry.register<
     }
 
     return value
+  },
+  compare: (a, b, options) => {
+    if (!options) return 0
+    const { valueToIndexMap } = options
+    const indexA = valueToIndexMap.get(a as string | number)
+    const indexB = valueToIndexMap.get(b as string | number)
+    if (indexA === undefined) throw new Error(`Invalid enum value: ${String(a)}`)
+    if (indexB === undefined) throw new Error(`Invalid enum value: ${String(b)}`)
+    return indexA - indexB
   },
 })

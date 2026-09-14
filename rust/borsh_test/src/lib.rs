@@ -3,6 +3,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use std::collections::{HashMap, HashSet};
 
 mod float_test;
+mod ordering_test;
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub enum GameEvent {
