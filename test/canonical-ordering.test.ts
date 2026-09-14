@@ -247,7 +247,54 @@ describe("canonical ordering of hashMap keys and hashSet elements", () => {
     ])
   })
 
+  test("lone surrogates compare as U+FFFD, the replacement character TextEncoder writes", () => {
+    const schema = b.hashSet(b.string())
+    // "\uD83Dx" is a high surrogate followed by a non-surrogate, "\uDC00" a lone
+    // low surrogate, and "x\uD83D" a high surrogate at the end of the string.
+    const value = new Set(["\uD83Dx", "\uDC00", "x\uD83D", "\uFFFC", "\uFFFE"])
+
+    // Lone surrogates are written (and therefore read back) as U+FFFD
+    expect(serializedElements(schema, value)).toEqual([
+      "x\uFFFD",
+      "\uFFFC",
+      "\uFFFD",
+      "\uFFFDx",
+      "\uFFFE",
+    ])
+    // Two different lone surrogates encode to the same UTF-8 bytes
+    expect(() => schema.serialize(new Set(["\uD800", "\uDC00"]))).toThrow(
+      /elements that compare equal/,
+    )
+  })
+
+  test("unit values compare equal, so tuples with a unit slot order by the next slot", () => {
+    const schema = b.hashSet(b.tuple(b.unit(), b.u8()))
+    const value = new Set<[Record<string, never>, number]>([
+      [{}, 1],
+      [{}, 0],
+    ])
+
+    expect(serializedElements(schema, value)).toEqual([
+      [{}, 0],
+      [{}, 1],
+    ])
+  })
+
   test("entries that compare equal are rejected", () => {
+    expect(() =>
+      b.hashSet(b.struct({ x: b.u8() })).serialize(new Set([{ x: 1 }, { x: 1 }])),
+    ).toThrow(/elements that compare equal/)
+    expect(() =>
+      b
+        .hashSet(b.hashMap(b.u8(), b.u8()))
+        .serialize(new Set([new Map([[1, 1]]), new Map([[1, 1]])])),
+    ).toThrow(/elements that compare equal/)
+    const tagSchema = b.enum({ Number: b.u8(), Empty: b.unit(), Label: b.string() })
+    expect(() =>
+      b
+        .hashSet(tagSchema)
+        .serialize(new Set<b.infer<typeof tagSchema>>([{ Empty: {} }, { Empty: {} }])),
+    ).toThrow(/elements that compare equal/)
     expect(() => b.hashSet(b.bytes()).serialize(new Set([utf8("a"), utf8("a")]))).toThrow(
       /elements that compare equal/,
     )

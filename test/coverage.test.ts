@@ -288,3 +288,37 @@ describe("Coverage - Missing Lines", () => {
     })
   })
 })
+
+describe("Coverage - compare handlers", () => {
+  test("container compare handlers return 0 without options", () => {
+    expect(registry.getHandler("struct").compare({}, {}, undefined)).toBe(0)
+    expect(registry.getHandler("vec").compare([1], [2], undefined)).toBe(0)
+    expect(registry.getHandler("array").compare([1], [2], undefined)).toBe(0)
+    expect(registry.getHandler("set").compare(new Set([1]), new Set([2]), undefined)).toBe(0)
+    expect(
+      registry.getHandler("map").compare(new Map([[1, 1]]), new Map([[2, 2]]), undefined),
+    ).toBe(0)
+    expect(registry.getHandler("option").compare(1, 2, undefined)).toBe(0)
+    expect(registry.getHandler("enum").compare({ A: 1 }, { B: 2 }, undefined)).toBe(0)
+    expect(registry.getHandler("tuple").compare([1], [2], undefined)).toBe(0)
+    expect(registry.getHandler("nativeEnum").compare("A", "B", undefined)).toBe(0)
+  })
+
+  test("tuple compare rejects missing element type information", () => {
+    const handler = registry.getHandler<unknown[], unknown[]>("tuple")
+    expect(() => handler.compare([1], [2], [undefined])).toThrow(
+      "Missing type information for tuple element at index 0",
+    )
+  })
+
+  test("nativeEnum compare rejects values that are not enum members", () => {
+    enum Color {
+      Red = 0,
+      Green = 1,
+    }
+    const { options } = b.nativeEnum(Color)
+    const handler = registry.getHandler("nativeEnum")
+    expect(() => handler.compare(99, Color.Red, options)).toThrow("Invalid enum value: 99")
+    expect(() => handler.compare(Color.Red, 99, options)).toThrow("Invalid enum value: 99")
+  })
+})
