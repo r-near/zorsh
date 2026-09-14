@@ -129,6 +129,8 @@ const setSchema = b.hashSet(b.string());
 const mapSchema = b.hashMap(b.string(), b.u128());
 ```
 
+Elements and keys are serialized in canonical (Rust `Ord`) order regardless of insertion order, matching borsh-rs. See [Binary Format](#binary-format).
+
 #### Structs
 
 ```typescript
@@ -251,6 +253,7 @@ Zorsh follows the Borsh specification for binary layout:
 
 - Integers are little-endian
 - Dynamic containers (vec, hashmap, hashset) are prefixed with u32 length
+- HashMap keys and HashSet elements are written in canonical order, sorted like Rust's `Ord` (integers numerically, strings and bytes by their UTF-8/byte content with a shorter prefix first, `None` before `Some`, structs and tuples field by field, enums by variant index), so insertion order never changes the output. Entries that compare equal are rejected.
 - Enums are encoded as u8 variant index followed by variant data
 - Strings are length-prefixed UTF-8
 - Structs are encoded in field definition order
