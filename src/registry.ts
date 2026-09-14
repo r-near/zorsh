@@ -245,7 +245,9 @@ registry.register<bigint>("i128", {
 registry.register<number>("f32", {
   write: (writer, value) => writer.writeFloat32(value),
   read: (reader) => reader.readFloat32(),
-  compare: compareNumeric,
+  // Compare the values as they are written: two numbers that round to the same
+  // float32 are the same element on the wire.
+  compare: (a, b) => compareNumeric(Math.fround(a), Math.fround(b)),
 })
 
 registry.register<number>("f64", {

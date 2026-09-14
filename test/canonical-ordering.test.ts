@@ -106,6 +106,26 @@ describe("canonical ordering of hashMap keys and hashSet elements", () => {
     ])
   })
 
+  test("float keys compare numerically, f32 after rounding to single precision", () => {
+    expect(serializedElements(b.hashSet(b.f32()), new Set([2.5, -1.5, 0.5]))).toEqual([
+      -1.5, 0.5, 2.5,
+    ])
+    expect(
+      serializedKeys(
+        b.hashMap(b.f64(), b.u8()),
+        new Map([
+          [10, 0],
+          [2, 0],
+          [-0.5, 0],
+        ]),
+      ),
+    ).toEqual([-0.5, 2, 10])
+    // 1 and 1.00000001 are different numbers but the same float32 on the wire
+    expect(() => b.hashSet(b.f32()).serialize(new Set([1, 1.00000001]))).toThrow(
+      /elements that compare equal/,
+    )
+  })
+
   test("string keys compare by code point (UTF-8 order), not by UTF-16 code unit", () => {
     const schema = b.hashSet(b.string())
     const value = new Set(["\u{10000}", "￿", "a", "", "", "ab"])
