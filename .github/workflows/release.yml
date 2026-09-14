@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - ".changeset/**"
-      - ".github/workflows/changesets.yaml"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
@@ -19,6 +19,8 @@ jobs:
       contents: write
       pull-requests: write
       repository-projects: write
+      # npm trusted publishing (OIDC): no long-lived NPM_TOKEN to expire
+      id-token: write
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -26,7 +28,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -43,4 +46,6 @@ jobs:
           publish: bun run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Empty on purpose: npm authenticates through the workflow's OIDC token
+          # (trusted publisher configured for @zorsh/zorsh on npmjs.com).
+          NPM_TOKEN: ""
