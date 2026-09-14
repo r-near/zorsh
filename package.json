@@ -2,6 +2,14 @@
   "name": "@zorsh/zorsh",
   "version": "0.5.1",
   "description": "A TypeScript-first implementation of the Borsh binary serialization format, with a modern Zod-like API and full type inference.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/r-near/zorsh.git"
+  },
+  "homepage": "https://github.com/r-near/zorsh#readme",
+  "bugs": {
+    "url": "https://github.com/r-near/zorsh/issues"
+  },
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
   "files": [
