@@ -303,7 +303,7 @@ Uint8Array [
 ]
 `;
 
-exports[`primitive types > numeric type 'f32' 1`] = `
+exports[`primitive types > numeric type f32 1`] = `
 Uint8Array [
   0,
   0,
@@ -312,7 +312,7 @@ Uint8Array [
 ]
 `;
 
-exports[`primitive types > numeric type 'f64' 1`] = `
+exports[`primitive types > numeric type f64 1`] = `
 Uint8Array [
   24,
   45,
@@ -325,34 +325,21 @@ Uint8Array [
 ]
 `;
 
-exports[`primitive types > numeric type 'i8' 1`] = `
+exports[`primitive types > numeric type i8 1`] = `
 Uint8Array [
   128,
 ]
 `;
 
-exports[`primitive types > numeric type 'i16' 1`] = `
+exports[`primitive types > numeric type i16 1`] = `
 Uint8Array [
   0,
   128,
 ]
 `;
 
-exports[`primitive types > numeric type 'i32' 1`] = `
+exports[`primitive types > numeric type i32 1`] = `
 Uint8Array [
-  0,
-  0,
-  0,
-  128,
-]
-`;
-
-exports[`primitive types > numeric type 'i64' 1`] = `
-Uint8Array [
-  0,
-  0,
-  0,
-  0,
   0,
   0,
   0,
@@ -360,16 +347,8 @@ Uint8Array [
 ]
 `;
 
-exports[`primitive types > numeric type 'i128' 1`] = `
+exports[`primitive types > numeric type i64 1`] = `
 Uint8Array [
-  0,
-  0,
-  0,
-  0,
-  0,
-  0,
-  0,
-  0,
   0,
   0,
   0,
@@ -381,34 +360,42 @@ Uint8Array [
 ]
 `;
 
-exports[`primitive types > numeric type 'u8' 1`] = `
+exports[`primitive types > numeric type i128 1`] = `
+Uint8Array [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  128,
+]
+`;
+
+exports[`primitive types > numeric type u8 1`] = `
 Uint8Array [
   255,
 ]
 `;
 
-exports[`primitive types > numeric type 'u16' 1`] = `
+exports[`primitive types > numeric type u16 1`] = `
 Uint8Array [
   255,
   255,
 ]
 `;
 
-exports[`primitive types > numeric type 'u32' 1`] = `
+exports[`primitive types > numeric type u32 1`] = `
 Uint8Array [
-  255,
-  255,
-  255,
-  255,
-]
-`;
-
-exports[`primitive types > numeric type 'u64' 1`] = `
-Uint8Array [
-  255,
-  255,
-  255,
-  255,
   255,
   255,
   255,
@@ -416,7 +403,20 @@ Uint8Array [
 ]
 `;
 
-exports[`primitive types > numeric type 'u128' 1`] = `
+exports[`primitive types > numeric type u64 1`] = `
+Uint8Array [
+  255,
+  255,
+  255,
+  255,
+  255,
+  255,
+  255,
+  255,
+]
+`;
+
+exports[`primitive types > numeric type u128 1`] = `
 Uint8Array [
   255,
   255,
