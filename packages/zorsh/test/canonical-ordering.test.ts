@@ -5,7 +5,7 @@
  * `test/rust/canonical-ordering.test.ts` cover the same cases against borsh-rs.
  */
 
-import { describe, expect, test } from "vitest"
+import { describe, expect, test } from "vite-plus/test"
 import { b, type Schema } from "../src/schema"
 
 const utf8 = (text: string) => new TextEncoder().encode(text)

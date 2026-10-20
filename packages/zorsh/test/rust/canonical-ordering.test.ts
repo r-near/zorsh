@@ -9,11 +9,11 @@
 
 import * as fs from "node:fs/promises"
 import * as path from "node:path"
-import { describe, expect, test } from "vitest"
+import { describe, expect, test } from "vite-plus/test"
 import { b, type Schema } from "../../src/schema"
 
 const utf8 = (text: string) => new TextEncoder().encode(text)
-const testDataDir = path.join(__dirname, "..", "..", "rust", "borsh_test", "test_data")
+const testDataDir = path.join(__dirname, "..", "..", "..", "..", "rust", "borsh_test", "test_data")
 
 // Rust: enum Color { Red, Green, Blue }
 enum Color {

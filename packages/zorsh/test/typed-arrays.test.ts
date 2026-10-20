@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test } from "vite-plus/test"
 import { b } from "../src/schema"
 
 describe("Vec returns plain arrays", () => {
@@ -9,8 +9,7 @@ describe("Vec returns plain arrays", () => {
     // Type checking
     type Expected = number[]
     type Actual = b.infer<typeof schema>
-    // biome-ignore lint/correctness/noUnusedVariables: This is a test
-    const typecheck: Expected = {} as Actual // Should compile
+    const _typecheck: Expected = {} as Actual // Should compile
 
     // Runtime test
     const buffer = schema.serialize(value)
@@ -26,8 +25,7 @@ describe("Vec returns plain arrays", () => {
     // Type checking
     type Expected = number[]
     type Actual = b.infer<typeof schema>
-    // biome-ignore lint/correctness/noUnusedVariables: This is a test
-    const typecheck: Expected = {} as Actual // Should compile
+    const _typecheck: Expected = {} as Actual // Should compile
 
     const buffer = schema.serialize(value)
     const decoded = schema.deserialize(buffer)
@@ -42,8 +40,7 @@ describe("Vec returns plain arrays", () => {
     // Type checking
     type Expected = bigint[]
     type Actual = b.infer<typeof schema>
-    // biome-ignore lint/correctness/noUnusedVariables: This is a test
-    const typecheck: Expected = {} as Actual // Should compile
+    const _typecheck: Expected = {} as Actual // Should compile
 
     const buffer = schema.serialize(value)
     const decoded = schema.deserialize(buffer)
@@ -58,8 +55,7 @@ describe("Vec returns plain arrays", () => {
     // Type checking
     type Expected = string[]
     type Actual = b.infer<typeof schema>
-    // biome-ignore lint/correctness/noUnusedVariables: This is a test
-    const typecheck: Expected = {} as Actual // Should compile
+    const _typecheck: Expected = {} as Actual // Should compile
 
     const buffer = schema.serialize(value)
     const decoded = schema.deserialize(buffer)
@@ -90,8 +86,7 @@ describe("Vec returns plain arrays", () => {
       inventory: number[]
       scores: number[]
     }
-    // biome-ignore lint/correctness/noUnusedVariables: This is a test
-    const typecheck: Expected = {} as Player // Should compile
+    const _typecheck: Expected = {} as Player // Should compile
 
     const buffer = PlayerSchema.serialize(value)
     const decoded = PlayerSchema.deserialize(buffer)

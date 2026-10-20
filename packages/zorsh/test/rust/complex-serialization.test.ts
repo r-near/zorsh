@@ -1,10 +1,19 @@
 import * as fs from "node:fs/promises"
 import * as path from "node:path"
-import { describe, expect, test } from "vitest"
+import { describe, expect, test } from "vite-plus/test"
 import { type GameState, GameStateSchema } from "./complex-schema"
 
 describe("Borsh-RS Compatibility (Complex Schema)", () => {
-  const testDataDir = path.join(__dirname, "..", "..", "rust", "borsh_test", "test_data")
+  const testDataDir = path.join(
+    __dirname,
+    "..",
+    "..",
+    "..",
+    "..",
+    "rust",
+    "borsh_test",
+    "test_data",
+  )
 
   test("Complex GameState serialization/deserialization", async () => {
     const binPath = path.join(testDataDir, "complex_game_state.bin")

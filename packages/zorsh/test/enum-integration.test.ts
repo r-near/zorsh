@@ -1,5 +1,5 @@
 // test/enum-integration.test.ts
-import { describe, expect, test } from "vitest"
+import { describe, expect, test } from "vite-plus/test"
 import { b } from "../src/schema"
 
 describe("Native Enum Integration with Borsh Enums", () => {

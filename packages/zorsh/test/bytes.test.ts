@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test } from "vite-plus/test"
 import { b } from "../src/schema"
 
 describe("bytes helper", () => {
@@ -50,9 +50,7 @@ describe("bytes helper", () => {
     type Expected = Uint8Array
 
     // These assignments are type-level checks - if they compile, inference is correct
-    // biome-ignore lint/correctness/noUnusedVariables: This is a type-level test
-    const dynamicCheck: Expected = {} as Dynamic
-    // biome-ignore lint/correctness/noUnusedVariables: This is a type-level test
-    const fixedCheck: Expected = {} as Fixed
+    const _dynamicCheck: Expected = {} as Dynamic
+    const _fixedCheck: Expected = {} as Fixed
   })
 })

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test } from "vite-plus/test"
 import { b, type Schema } from "../src/schema"
 
 interface TestType<T> {
@@ -236,16 +236,13 @@ describe("type inference", () => {
 
     // These should fail type checking:
     // @ts-expect-error - wrong age type
-    // biome-ignore lint/correctness/noUnusedVariables: This is a test
-    const user1: User = { ...user, age: "25" }
+    const _user1: User = { ...user, age: "25" }
 
     // @ts-expect-error - missing field
-    // biome-ignore lint/correctness/noUnusedVariables: This is a test
-    const user2: User = { name: "Bob", age: 30 }
+    const _user2: User = { name: "Bob", age: 30 }
 
     // @ts-expect-error - wrong metadata structure
-    // biome-ignore lint/correctness/noUnusedVariables: This is a test
-    const user3: User = { ...user, metadata: { rank: "Silver" } }
+    const _user3: User = { ...user, metadata: { rank: "Silver" } }
 
     // Runtime test
     const buffer = UserSchema.serialize(user)

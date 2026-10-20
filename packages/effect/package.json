@@ -1,0 +1,12 @@
+{
+  "name": "@zorsh/effect",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Planned Effect-based Borsh package; no runtime implementation yet.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/r-near/zorsh.git",
+    "directory": "packages/effect"
+  }
+}

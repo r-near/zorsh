@@ -13,6 +13,7 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   release:
+    if: github.ref == 'refs/heads/main'
     name: Release
     runs-on: ubuntu-latest
     permissions:
@@ -25,19 +26,16 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
         with:
-          node-version: 24
+          version: 1.3.0
+          node-version-file: .node-version
           registry-url: "https://registry.npmjs.org"
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+          run-install: false
 
       - name: Install dependencies
-        run: bun install
+        run: vp install --frozen-lockfile
 
       - name: Configure npm publishing
         id: npm-publish
@@ -45,13 +43,14 @@ jobs:
           NPM_PUBLISH_ENABLED: ${{ vars.NPM_PUBLISH_ENABLED }}
         run: |
           if [ "$NPM_PUBLISH_ENABLED" = "true" ]; then
-            echo "command=bun run release" >> "$GITHUB_OUTPUT"
+            echo "command=vp run release" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create Release Pull Request or Publish to npm
         id: changesets
         uses: changesets/action@v1
         with:
+          version: vp run version-packages
           publish: ${{ steps.npm-publish.outputs.command }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

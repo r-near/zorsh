@@ -1,6 +1,6 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { describe, expect, test } from "vitest"
+import { describe, expect, test } from "vite-plus/test"
 import { b, type Schema } from "../src/schema"
 
 interface TestType<T> {
@@ -55,7 +55,7 @@ describe("Zorsh Edge Cases", () => {
     })
 
     test("floating point special values", async () => {
-      const testDataDir = path.join(__dirname, "..", "rust", "borsh_test", "test_data")
+      const testDataDir = path.join(__dirname, "..", "..", "..", "rust", "borsh_test", "test_data")
 
       // Define our test cases and their expected values
       const testCases = [
