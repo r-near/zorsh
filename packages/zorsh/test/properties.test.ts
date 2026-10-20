@@ -11,7 +11,7 @@
  */
 
 import fc from "fast-check"
-import { describe, expect, test } from "vitest"
+import { describe, expect, test } from "vite-plus/test"
 import { b, type Schema } from "../src/schema"
 import { arbitraryFor } from "./arbitraries"
 

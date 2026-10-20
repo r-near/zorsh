@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test } from "vite-plus/test"
 import { BinaryReader, BinaryWriter } from "../src/binary-io"
 import { registry } from "../src/registry"
 import { b } from "../src/schema"

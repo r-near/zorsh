@@ -1,44 +1,25 @@
 {
-  "name": "@zorsh/zorsh",
-  "version": "0.5.2",
-  "description": "A TypeScript-first implementation of the Borsh binary serialization format, with a modern Zod-like API and full type inference.",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/r-near/zorsh.git"
-  },
-  "homepage": "https://github.com/r-near/zorsh#readme",
-  "bugs": {
-    "url": "https://github.com/r-near/zorsh/issues"
-  },
-  "main": "dist/src/index.js",
-  "types": "dist/src/index.d.ts",
-  "files": [
-    "dist/src"
-  ],
-  "packageManager": "bun@1.3.2",
+  "name": "zorsh-workspace",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
   "scripts": {
-    "build": "tsc",
-    "test": "vitest run",
-    "lint": "biome check --write .",
-    "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run build",
-    "lefthook": "lefthook install",
-    "check-exports": "attw --pack .",
-    "release": "bun run build && changeset publish"
+    "build": "vp -C packages/zorsh pack",
+    "check": "vp check",
+    "test": "vp test run",
+    "check-package": "vp exec node scripts/check-package.mjs",
+    "version-packages": "vp exec changeset version",
+    "release": "vp run build && vp exec changeset publish"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "devDependencies": {
-    "@arethetypeswrong/cli": "^0.18.2",
-    "@biomejs/biome": "^2.4.9",
-    "@changesets/cli": "^3.0.0",
-    "@types/bun": "^1.3.2",
-    "@types/node": "^26.0.0",
-    "@vitest/coverage-v8": "^5.0.0",
-    "fast-check": "^4.10.0",
-    "lefthook": "^2.0.13",
-    "typescript": "^7.0.2",
-    "vitest": "^5.0.0"
-  }
+    "@changesets/cli": "3.0.3",
+    "@types/node": "26.5.1",
+    "@vitest/coverage-v8": "5.0.5",
+    "fast-check": "4.10.0",
+    "typescript": "7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.3.0",
+    "vite-plus": "1.3.0",
+    "vitest": "5.0.5"
+  },
+  "packageManager": "pnpm@10.33.0"
 }

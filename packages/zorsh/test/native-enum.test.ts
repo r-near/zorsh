@@ -1,5 +1,5 @@
 // test/native-enum.test.ts
-import { describe, expect, test } from "vitest"
+import { describe, expect, test } from "vite-plus/test"
 import { b } from "../src/schema"
 import type { EnumLike } from "../src/types"
 
