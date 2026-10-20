@@ -22,6 +22,8 @@ jobs:
         run: vp install --frozen-lockfile
       - name: Check formatting, lint and types
         run: vp check
+      - name: Verify Effect lint diagnostics
+        run: vp run check-effect-lint
 
   tests:
     runs-on: ubuntu-latest

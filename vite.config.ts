@@ -1,8 +1,10 @@
+import { recommended } from "@effect/tsgo/oxlint-presets"
 import { defineConfig } from "vite-plus"
 
 export default defineConfig({
   fmt: { semi: false, printWidth: 100, ignorePatterns: ["rust/**", ".artifacts/**"] },
   lint: {
+    extends: [recommended],
     ignorePatterns: ["**/dist/**", "**/coverage/**", "rust/**", ".artifacts/**"],
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
     rules: {
