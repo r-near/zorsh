@@ -38,7 +38,7 @@ Regenerate all fixtures, including the generators marked `#[ignore]`, from the r
 
 ```sh
 cargo test --locked -j 1 --manifest-path rust/borsh_test/Cargo.toml -- --include-ignored
-git diff --exit-code -- rust/borsh_test/test_data
+test -z "$(git status --porcelain --untracked-files=all -- rust/borsh_test/test_data)"
 vp test run
 ```
 
@@ -47,6 +47,8 @@ On this development Mac, Cargo must resolve to the installed Mr Boxington shim. 
 ## Releases
 
 Use `vp exec changeset` to record a public package change. The release workflow can create Changesets version PRs while publishing is disabled. Its explicit version command is `vp run version-packages`.
+
+Changesets uses monorepo tags such as `@zorsh/zorsh@X.Y.Z` for future releases, and each future public package will use its own `<package-name>@<version>` tags. Existing `vX.Y.Z` tags remain as historical release tags; no alias tags are added.
 
 Npm publication is default-off: the release job runs only on `main` and supplies a publish command only when the repository variable `NPM_PUBLISH_ENABLED` is exactly the string `true`. The variable is currently `false`. Setting it alone triggers nothing; an intentional opt-in requires setting it to `true` and deliberately running the Release workflow manually **on `main`** after reviewing the package versions. Main-branch pushes matching the workflow paths can also trigger a release while enabled. Set the variable back to `false` when the release is complete. Never enable it as part of this workspace migration.
 

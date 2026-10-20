@@ -6,7 +6,7 @@ From the repository root, regenerate every fixture (including ignored generators
 
 ```sh
 cargo test --locked -j 1 --manifest-path rust/borsh_test/Cargo.toml -- --include-ignored
-git diff --exit-code -- rust/borsh_test/test_data
+test -z "$(git status --porcelain --untracked-files=all -- rust/borsh_test/test_data)"
 vp test run
 ```
 

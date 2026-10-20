@@ -11,8 +11,12 @@ export default defineConfig({
     platform: "node",
     fixedExtension: false,
     target: "es2022",
-    dts: true,
+    dts: { sourcemap: false },
     sourcemap: true,
+    // CJS declarations use a separate Rolldown build; only JavaScript needs maps.
+    outputOptions(options, _format, { cjsDts }) {
+      if (cjsDts) options.sourcemap = false
+    },
     clean: true,
     exports: false,
   },

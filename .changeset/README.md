@@ -20,3 +20,7 @@ When enabled, a run with no pending changesets can publish unpublished package
 versions. These controls apply to the updated workflow on `main`; older workflow
 revisions can behave differently. The gate does not revoke npm publishing
 authority or change npm-side credentials.
+
+Future releases use Changesets monorepo tags: `@zorsh/zorsh@X.Y.Z`, with separate
+`<package-name>@<version>` tags for any future public packages. Existing `vX.Y.Z`
+tags remain as historical releases; no alias tagging step is needed.

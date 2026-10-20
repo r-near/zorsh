@@ -10,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs"
-import { dirname, isAbsolute, join, resolve, sep } from "node:path"
+import { dirname, isAbsolute, join, posix, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -39,6 +39,14 @@ for (const module of ["index", "schema", "registry", "binary-io", "types"]) {
 }
 for (const file of ["package.json", "LICENSE", "README.md"]) {
   assert(entries.includes(`package/${file}`), `Missing ${file}`)
+}
+// Check references in the actual shipped files, including declaration output.
+for (const entry of entries.filter((file) => /\.(?:js|d\.ts)$/.test(file))) {
+  const content = execFileSync("tar", ["-xOzf", archive, entry], { encoding: "utf8" })
+  for (const [, sourceMap] of content.matchAll(/^\/\/# sourceMappingURL=(.+)$/gm)) {
+    const target = posix.join(posix.dirname(entry), sourceMap.trim())
+    assert(entries.includes(target), `Dangling source map in ${entry}: ${sourceMap}`)
+  }
 }
 const manifest = JSON.parse(execFileSync("tar", ["-xOzf", archive, "package/package.json"]))
 assert.equal(manifest.name, expected.name)

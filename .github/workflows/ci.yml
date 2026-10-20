@@ -39,7 +39,12 @@ jobs:
       - name: Regenerate Rust compatibility fixtures
         run: cargo test --locked -j 1 --manifest-path rust/borsh_test/Cargo.toml -- --include-ignored
       - name: Check fixture drift
-        run: git diff --exit-code -- rust/borsh_test/test_data
+        run: |
+          fixture_status=$(git status --porcelain --untracked-files=all -- rust/borsh_test/test_data)
+          if [ -n "$fixture_status" ]; then
+            printf '%s\n' "$fixture_status"
+            exit 1
+          fi
       - name: Run tests with coverage
         run: vp test run --coverage
       - name: Build library
