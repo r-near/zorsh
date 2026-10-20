@@ -15,12 +15,12 @@ export default defineConfig({
   },
   staged: { "*": "vp check --fix" },
   test: {
-    projects: ["packages/zorsh"],
+    projects: ["packages/zorsh", "packages/effect"],
     coverage: {
       enabled: true,
       provider: "v8",
       reporter: ["text", "html", "lcov"],
-      include: ["packages/zorsh/src/**/*.ts"],
+      include: ["packages/zorsh/src/**/*.ts", "packages/effect/src/**/*.ts"],
       exclude: ["packages/zorsh/src/index.ts", "packages/zorsh/src/types.ts"],
     },
   },

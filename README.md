@@ -2,10 +2,10 @@
 
 A TypeScript workspace for Borsh binary serialization.
 
-| Package                            | Status                                                                                          |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------- |
-| [`@zorsh/zorsh`](packages/zorsh)   | Existing Zod-like API, version 0.5.2. See its README for installation and API examples.         |
-| [`@zorsh/effect`](packages/effect) | Private 0.0.0 placeholder for a planned Effect-based API. No runtime implementation or exports. |
+| Package                            | Status                                                                                    |
+| ---------------------------------- | ----------------------------------------------------------------------------------------- |
+| [`@zorsh/zorsh`](packages/zorsh)   | Existing Zod-like API, version 0.5.2. See its README for installation and API examples.   |
+| [`@zorsh/effect`](packages/effect) | Private 0.0.0 native Effect 4 Borsh primitive codecs. Containers are not implemented yet. |
 
 The private root owns shared tooling. Packages have independent versions; adding an Effect implementation does not require changing the existing Zorsh API. Rust compatibility generators and their committed fixtures live in `rust/borsh_test`.
 

@@ -1,0 +1,22 @@
+coverage:
+  status:
+    project:
+      default: false
+      zorsh:
+        target: 100%
+        threshold: 0%
+        paths:
+          - packages/zorsh/src/
+      effect:
+        target: 95%
+        threshold: 0%
+        paths:
+          - packages/effect/src/
+    patch:
+      default:
+        target: 95%
+        threshold: 0%
+
+parsers:
+  lcov:
+    partials_as_hits: false
