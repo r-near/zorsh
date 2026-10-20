@@ -38,14 +38,16 @@ export const I128 = bigInteger(128, true)
 
 /** Exact IEEE-754 binary32 values; narrow explicitly with Math.fround. */
 export const F32 = withLayout(Schema.Number, { version: 1, kind: "float", bits: 32 }).check(
-  Schema.makeFilter((n) => !Number.isNaN(n) && Object.is(Math.fround(n), n)),
+  Schema.makeFilter((n) => !Number.isNaN(n) && Object.is(Math.fround(n), n), {
+    expected: "an exactly representable binary32 number",
+  }),
 )
 /** IEEE-754 binary64, including infinities and signed zero, excluding NaN. */
 export const F64 = withLayout(Schema.Number, {
   version: 1,
   kind: "float",
   bits: 64,
-}).check(Schema.makeFilter((n) => !Number.isNaN(n)))
+}).check(Schema.makeFilter((n) => !Number.isNaN(n), { expected: "a non-NaN number" }))
 
 /** A u32 byte length followed by the bytes, like Rust Vec<u8>. */
 export const Bytes = Schema.Uint8Array
@@ -60,7 +62,11 @@ export function fixedBytes(length: number): Schema.Uint8Array {
     version: 1,
     kind: "fixedBytes",
     length,
-  }).check(Schema.makeFilter((bytes) => bytes.byteLength === length))
+  }).check(
+    Schema.makeFilter((bytes) => bytes.byteLength === length, {
+      expected: `exactly ${length} bytes`,
+    }),
+  )
 }
 
 export interface Options {

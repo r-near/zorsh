@@ -38,6 +38,14 @@ Effect diagnostics use the official Go-based [Effect language service](https://g
 
 Zorsh remains CommonJS with `dist/src/index.js` and `dist/src/index.d.ts`, and retains the `dist/src/*` deep entry paths. Do not add an `exports` map that restricts those paths or change the emitted module format as part of tooling work.
 
+## Coverage policy
+
+[`codecov.yml`](codecov.yml) sets explicit, separate project targets: `packages/zorsh/src/` remains at **100%**, and `packages/effect/src/` requires **95%**. Changed-code patch coverage also requires **95%**. Each target has **zero tolerance** (`threshold: 0%`). The automatic aggregate project target is disabled so the existing package's 100% baseline does not implicitly set the new package's policy. The required `lint-and-typecheck` and `tests` CI jobs are unchanged.
+
+Codecov's [coverage calculation](https://docs.codecov.com/docs/about-code-coverage) treats branch-partial lines as non-hits; Vitest's line percentage can therefore be higher. LCOV partial-line accounting remains enabled, with no coverage ignores or exclusions added by this policy. Targets use the official [status configuration](https://docs.codecov.com/docs/commit-status) and [path prefixes](https://docs.codecov.com/docs/path-regexp).
+
+The Effect target accommodates defensive branches that meaningful public-boundary tests cannot ordinarily reach. Current examples are the internal annotation helper's prior-layout conflict guard/throw (two lines), byte/string/boolean writer type guards (three lines), the >u32 byte-length guard/throw (two lines), and the unit type/length guard/throw (two lines). Native parsers reject ordinary type mismatches before the writer, current constructors attach layouts to fresh schemas, and exercising the large-byte guard requires more than 4 GiB of input or spoofing its properties. These nine lines are a current coverage snapshot, not permanent exemptions: they remain reported, and future behavior should receive meaningful tests. Do not replace this with implementation-mirroring tests, forced unreachable guards, or suppressed coverage.
+
 ## Commit hooks
 
 Run `vp hooks enable` once in your clone. The tracked `.vite-hooks/pre-commit` runs `vp staged`, which applies `vp check --fix` to staged files. `vp hooks status` reports the local dispatcher. Generated dispatcher files are ignored.

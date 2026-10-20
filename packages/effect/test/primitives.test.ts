@@ -4,6 +4,25 @@ import { describe, expect, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 
 describe("Borsh primitives", () => {
+  it.each([
+    {
+      name: "F32",
+      schema: Borsh.F32,
+      value: 0.1,
+      expected: "Expected an exactly representable binary32 number",
+    },
+    { name: "F64", schema: Borsh.F64, value: NaN, expected: "Expected a non-NaN number" },
+    {
+      name: "fixedBytes(2)",
+      schema: Borsh.fixedBytes(2),
+      value: Uint8Array.of(1),
+      expected: "Expected exactly 2 bytes",
+    },
+  ])("describes primitive validation failures for $name", ({ schema, value, expected }) => {
+    expect(() => Schema.decodeSync(schema)(value)).toThrow(expected)
+    expect(() => Schema.encodeSync(Borsh.toCodec(schema))(value)).toThrow(expected)
+  })
+
   it("encodes Rust little-endian u128 carry boundaries", () => {
     const codec = Borsh.toCodec(Borsh.U128)
     expect(Schema.encodeSync(codec)(1n << 64n)).toEqual(
