@@ -49,12 +49,16 @@ jobs:
           fi
       - name: Run tests with coverage
         run: vp test run --coverage
-      - name: Build library
-        run: vp -C packages/zorsh pack
+      - name: Build libraries
+        run: vp run build
       - name: Create npm tarball
         run: vp -C packages/zorsh pm pack -- --pack-destination ../../.artifacts
       - name: Verify installed tarball consumers
         run: vp run check-package
+      - name: Create private Effect tarball
+        run: vp -C packages/effect pm pack -- --pack-destination ../../.artifacts
+      - name: Verify native Effect tarball consumers
+        run: vp run check-effect-package
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:

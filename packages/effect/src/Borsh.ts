@@ -1,0 +1,114 @@
+import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect"
+import { withLayout } from "./internal/annotations.js"
+import { compile, rejectSuspensions } from "./internal/compiler.js"
+import { BinaryError, Reader, Writer } from "./internal/io.js"
+
+function integer(bits: 8 | 16 | 32, signed: boolean) {
+  const minimum = signed ? -(2 ** (bits - 1)) : 0
+  const maximum = 2 ** (signed ? bits - 1 : bits) - 1
+  return withLayout(Schema.Int, {
+    version: 1,
+    kind: "integer",
+    bits,
+    signed,
+  }).check(Schema.isBetween({ minimum, maximum }))
+}
+
+function bigInteger(bits: 64 | 128, signed: boolean): Schema.BigInt {
+  const minimum = signed ? -(1n << BigInt(bits - 1)) : 0n
+  const maximum = (1n << BigInt(signed ? bits - 1 : bits)) - 1n
+  return withLayout(Schema.BigInt, {
+    version: 1,
+    kind: "integer",
+    bits,
+    signed,
+  }).check(Schema.isBetweenBigInt({ minimum, maximum }))
+}
+
+export const U8 = integer(8, false)
+export const U16 = integer(16, false)
+export const U32 = integer(32, false)
+export const I8 = integer(8, true)
+export const I16 = integer(16, true)
+export const I32 = integer(32, true)
+export const U64 = bigInteger(64, false)
+export const U128 = bigInteger(128, false)
+export const I64 = bigInteger(64, true)
+export const I128 = bigInteger(128, true)
+
+/** Exact IEEE-754 binary32 values; narrow explicitly with Math.fround. */
+export const F32 = withLayout(Schema.Number, { version: 1, kind: "float", bits: 32 }).check(
+  Schema.makeFilter((n) => !Number.isNaN(n) && Object.is(Math.fround(n), n)),
+)
+/** IEEE-754 binary64, including infinities and signed zero, excluding NaN. */
+export const F64 = withLayout(Schema.Number, {
+  version: 1,
+  kind: "float",
+  bits: 64,
+}).check(Schema.makeFilter((n) => !Number.isNaN(n)))
+
+/** A u32 byte length followed by the bytes, like Rust Vec<u8>. */
+export const Bytes = Schema.Uint8Array
+/** The empty tuple uses Rust unit's empty wire representation. */
+export const Unit = Schema.Tuple([])
+
+/** Exactly length bytes, with no length prefix, like Rust [u8; N]. */
+export function fixedBytes(length: number): Schema.Uint8Array {
+  if (!Number.isSafeInteger(length) || length < 0 || length > 0xffff_ffff)
+    throw new Error("$: fixedBytes length must be a safe integer between 0 and 2^32 - 1")
+  return withLayout(Bytes, {
+    version: 1,
+    kind: "fixedBytes",
+    length,
+  }).check(Schema.makeFilter((bytes) => bytes.byteLength === length))
+}
+
+export interface Options {
+  /** Maximum input/output byte length per operation. Default: 16 MiB. */
+  readonly maxBytes?: number | undefined
+}
+
+function binaryFailure(error: unknown): SchemaIssue.Issue {
+  if (error instanceof BinaryError) return new SchemaIssue.InvalidValue({ message: error.message })
+  throw error
+}
+
+/** Derive Borsh from the encoded side while retaining the original native parser. */
+export function toCodec<S extends Schema.Constraint>(
+  schema: S,
+  options?: Options,
+): Schema.Codec<S["Type"], Uint8Array, S["DecodingServices"], S["EncodingServices"]> {
+  const maxBytes = options?.maxBytes === undefined ? 16 * 1024 * 1024 : options.maxBytes
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)
+    throw new Error("$: maxBytes must be a positive safe integer")
+  rejectSuspensions(schema.ast)
+  const layout = compile(Schema.toEncoded(schema).ast)
+  const binary = Schema.Uint8Array.pipe(
+    Schema.decodeTo(
+      Schema.Unknown,
+      SchemaTransformation.transformEffect({
+        decode: (bytes) =>
+          Effect.try({
+            try: () => {
+              const reader = new Reader(bytes, maxBytes)
+              const value = layout.read(reader)
+              if (reader.offset !== bytes.byteLength)
+                throw new BinaryError(reader.offset, "Trailing bytes")
+              return value
+            },
+            catch: binaryFailure,
+          }),
+        encode: (value) =>
+          Effect.try({
+            try: () => {
+              const writer = new Writer(maxBytes)
+              layout.write(writer, value)
+              return writer.finish()
+            },
+            catch: binaryFailure,
+          }),
+      }),
+    ),
+  )
+  return binary.pipe(Schema.decodeTo(schema))
+}
