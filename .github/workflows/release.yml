@@ -39,11 +39,20 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Configure npm publishing
+        id: npm-publish
+        env:
+          NPM_PUBLISH_ENABLED: ${{ vars.NPM_PUBLISH_ENABLED }}
+        run: |
+          if [ "$NPM_PUBLISH_ENABLED" = "true" ]; then
+            echo "command=bun run release" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create Release Pull Request or Publish to npm
         id: changesets
         uses: changesets/action@v1
         with:
-          publish: bun run release
+          publish: ${{ steps.npm-publish.outputs.command }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Empty on purpose: npm authenticates through the workflow's OIDC token
