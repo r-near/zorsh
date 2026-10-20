@@ -96,12 +96,18 @@ export class BinaryWriter {
 
   // Floating point
   writeFloat32(value: number): void {
+    if (Number.isNaN(value)) {
+      throw new Error("For portability reasons we do not allow serializing NaN values.")
+    }
     this.ensureCapacity(4)
     this.view.setFloat32(this.offset, value, true)
     this.offset += 4
   }
 
   writeFloat64(value: number): void {
+    if (Number.isNaN(value)) {
+      throw new Error("For portability reasons we do not allow serializing NaN values.")
+    }
     this.ensureCapacity(8)
     this.view.setFloat64(this.offset, value, true)
     this.offset += 8
@@ -197,25 +203,45 @@ export class BinaryReader {
   // Floating point
   readFloat32(): number {
     const value = this.view.getFloat32(this.offset, true)
+    if (Number.isNaN(value)) {
+      throw new Error("For portability reasons we do not allow deserializing NaN values.")
+    }
     this.offset += 4
     return value
   }
 
   readFloat64(): number {
     const value = this.view.getFloat64(this.offset, true)
+    if (Number.isNaN(value)) {
+      throw new Error("For portability reasons we do not allow deserializing NaN values.")
+    }
     this.offset += 8
     return value
   }
 
   readBool(): boolean {
-    return Boolean(this.readUint8())
+    const value = this.readUint8()
+    if (value !== 0 && value !== 1) {
+      throw new Error(`Invalid bool representation: ${value}`)
+    }
+    return value === 1
+  }
+
+  readBytes(length: number): Uint8Array {
+    if (!Number.isSafeInteger(length) || length < 0 || length > this.buffer.length - this.offset) {
+      throw new RangeError("Unexpected length of input")
+    }
+    // Copy after checking the view bounds, including for Node.js Buffer inputs.
+    const bytes = new Uint8Array(this.buffer.subarray(this.offset, this.offset + length))
+    this.offset += length
+    return bytes
   }
 
   readString(): string {
     const length = this.readUint32()
-    const bytes = this.buffer.slice(this.offset, this.offset + length)
-    this.offset += length
-    return new TextDecoder().decode(bytes)
+    const bytes = this.readBytes(length)
+    // A leading U+FEFF is string content in Borsh, not an encoding marker to strip.
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)
   }
 
   getOffset(): number {

@@ -135,8 +135,7 @@ describe("Zorsh Edge Cases", () => {
       for (const str of cases) {
         const bytes = schema.serialize(str)
         const decoded = schema.deserialize(bytes)
-        // Compare string content directly, ignoring any byte order mark
-        expect(decoded.replace(/^\uFEFF/, "")).toBe(str.replace(/^\uFEFF/, ""))
+        expect(decoded).toBe(str)
       }
     })
 

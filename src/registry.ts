@@ -251,12 +251,7 @@ registry.register<number>("f32", {
 })
 
 registry.register<number>("f64", {
-  write: (writer, value) => {
-    if (Number.isNaN(value)) {
-      throw new Error("For portability reasons we do not allow serializing NaN values.")
-    }
-    writer.writeFloat64(value)
-  },
+  write: (writer, value) => writer.writeFloat64(value),
   read: (reader) => reader.readFloat64(),
   compare: compareNumeric,
 })
@@ -341,7 +336,12 @@ registry.register<unknown[], VecOptions<unknown>>("vec", {
     const length = reader.readUint32()
     const handler = registry.getHandler(elementType)
 
-    return Array.from({ length }, () => handler.read(reader, elementOptions))
+    // Grow only as values are decoded; the input length may be forged.
+    const items: unknown[] = []
+    for (let i = 0; i < length; i++) {
+      items.push(handler.read(reader, elementOptions))
+    }
+    return items
   },
   compare: (a, b, options) => {
     if (!options) return 0
@@ -382,8 +382,11 @@ registry.register<Set<unknown>, SetOptions<unknown>>("set", {
     const { elementType, elementOptions } = options
     const length = reader.readUint32()
     const handler = registry.getHandler<unknown>(elementType)
-    const items = Array.from({ length }, () => handler.read(reader, elementOptions))
-    return new Set(items)
+    const items = new Set<unknown>()
+    for (let i = 0; i < length; i++) {
+      items.add(handler.read(reader, elementOptions))
+    }
+    return items
   },
   compare: (a, b, options) => {
     if (!options) return 0
@@ -437,12 +440,13 @@ registry.register<Map<unknown, unknown>, MapOptions<unknown, unknown>>("map", {
     const length = reader.readUint32()
     const keyHandler = registry.getHandler<unknown>(keyType)
     const valueHandler = registry.getHandler<unknown>(valueType)
-    const entries = Array.from({ length }, () => {
+    const entries = new Map<unknown, unknown>()
+    for (let i = 0; i < length; i++) {
       const key = keyHandler.read(reader, keyOptions)
       const value = valueHandler.read(reader, valueOptions)
-      return [key, value] as const
-    })
-    return new Map(entries)
+      entries.set(key, value)
+    }
+    return entries
   },
   compare: (a, b, options) => {
     if (!options) return 0
@@ -484,12 +488,13 @@ registry.register<unknown | null, OptionOptions<unknown>>("option", {
   read: (reader, options) => {
     if (!options) return null
     const { valueType, valueOptions } = options
-    const isSome = reader.readUint8() === 1
-    if (isSome) {
+    const tag = reader.readUint8()
+    if (tag === 1) {
       const handler = registry.getHandler<unknown>(valueType)
       return handler.read(reader, valueOptions)
     }
-    return null
+    if (tag === 0) return null
+    throw new Error(`Invalid Option representation: ${tag}. The first byte must be 0 or 1`)
   },
   compare: (a, b, options) => {
     if (a === null || b === null) return Number(a !== null) - Number(b !== null)
@@ -682,11 +687,7 @@ registry.register<Uint8Array, BytesOptions>("bytes", {
   },
   read: (reader, options) => {
     const length = options?.length != null ? options.length : reader.readUint32()
-    const bytes = new Uint8Array(length)
-    for (let i = 0; i < length; i++) {
-      bytes[i] = reader.readUint8()
-    }
-    return bytes
+    return reader.readBytes(length)
   },
   compare: compareBytes,
 })
