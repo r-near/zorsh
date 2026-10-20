@@ -1,6 +1,9 @@
 use serde_json::{Value, json};
-use std::io::{BufReader, Cursor, Read, Write};
-use std::process::{Command, Stdio};
+use std::io::{BufReader, Cursor, Write};
+use std::process::Command;
+
+mod support;
+use support::{CLI_TIMEOUT, TestChild};
 use zorsh_borsh_oracle::{MAX_FRAME_BYTES, handle_line, serve};
 
 fn request(id: &str) -> Value {
@@ -157,15 +160,12 @@ fn io_errors_propagate_instead_of_becoming_codec_rejections() {
 
 #[test]
 fn actual_cli_is_persistent_and_stdout_has_only_responses() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_zorsh-borsh-oracle"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
-    use std::io::BufRead;
+    let mut child = TestChild::spawn(
+        &mut Command::new(env!("CARGO_BIN_EXE_zorsh-borsh-oracle")),
+        "persistent oracle",
+        CLI_TIMEOUT,
+    )
+    .unwrap();
     for (index, payload) in [
         serde_json::to_vec(&request("one")).unwrap(),
         b"bad".to_vec(),
@@ -174,11 +174,11 @@ fn actual_cli_is_persistent_and_stdout_has_only_responses() {
     .into_iter()
     .enumerate()
     {
+        let stdin = child.stdin.as_mut().unwrap();
         stdin.write_all(&payload).unwrap();
         stdin.write_all(b"\n").unwrap();
         stdin.flush().unwrap();
-        let mut line = String::new();
-        stdout.read_line(&mut line).unwrap();
+        let line = child.read_line().unwrap();
         let r: Value = serde_json::from_str(&line).unwrap();
         if index == 1 {
             assert_eq!(kind(&r), "protocol");
@@ -186,23 +186,20 @@ fn actual_cli_is_persistent_and_stdout_has_only_responses() {
             assert_eq!(r["ok"], true);
         }
     }
-    drop(stdin);
-    let mut remaining = String::new();
-    stdout.read_to_string(&mut remaining).unwrap();
-    assert!(remaining.is_empty());
-    let output = child.wait_with_output().unwrap();
+    let output = child.finish().unwrap();
+    assert!(output.stdout.is_empty());
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
 }
 
 #[test]
 fn actual_cli_broken_pipe_exits_nonzero_with_stderr() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_zorsh-borsh-oracle"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child = TestChild::spawn(
+        &mut Command::new(env!("CARGO_BIN_EXE_zorsh-borsh-oracle")),
+        "broken-pipe oracle",
+        CLI_TIMEOUT,
+    )
+    .unwrap();
     drop(child.stdout.take());
     let mut stdin = child.stdin.take().unwrap();
     stdin
@@ -210,7 +207,70 @@ fn actual_cli_broken_pipe_exits_nonzero_with_stderr() {
         .unwrap();
     stdin.write_all(b"\n").unwrap();
     drop(stdin);
-    let output = child.wait_with_output().unwrap();
+    let output = child.finish().unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("borsh oracle I/O failure:"));
+}
+
+// POSIX sh uses exec so each controlled fixture is one direct process, with no
+// descendants retaining the output pipes. These run on the macOS/Linux hosts.
+#[cfg(unix)]
+fn stalled_child(script: &str, label: &str, timeout: std::time::Duration) -> TestChild {
+    TestChild::spawn(Command::new("sh").arg("-c").arg(script), label, timeout).unwrap()
+}
+
+#[test]
+#[cfg(unix)]
+fn deadline_unblocks_no_response_and_reaps_child() {
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
+    let started = Instant::now();
+    let mut child = stalled_child("exec sleep 30", "no response", Duration::from_millis(200));
+    let reaped = child.reaped.clone();
+    let error = child.read_line().unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    assert!(error.to_string().contains("no response"));
+    assert!(error.to_string().contains("killed and reaped"));
+    assert!(reaped.load(Ordering::Acquire));
+    assert!(started.elapsed() < Duration::from_secs(3));
+}
+
+#[test]
+#[cfg(unix)]
+fn deadline_bounds_final_exit_and_reaps_child() {
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
+    let started = Instant::now();
+    let mut child = stalled_child(
+        "printf 'ready\\n'; exec sleep 30",
+        "never exits",
+        Duration::from_millis(500),
+    );
+    let reaped = child.reaped.clone();
+    assert_eq!(child.read_line().unwrap(), "ready\n");
+    let error = child.finish().unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    assert!(error.to_string().contains("never exits"));
+    assert!(reaped.load(Ordering::Acquire));
+    assert!(started.elapsed() < Duration::from_secs(3));
+}
+
+#[test]
+#[cfg(unix)]
+fn panic_cleanup_kills_and_reaps_before_returning() {
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
+    let started = Instant::now();
+    let child = stalled_child("exec sleep 30", "early assertion", CLI_TIMEOUT);
+    let reaped = child.reaped.clone();
+    // The owned child is dropped during unwind; only its atomic reap receipt is
+    // inspected afterwards, so no partially mutated supervisor state is reused.
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _child = child;
+        panic!("controlled early assertion failure");
+    }));
+    assert!(panic.is_err());
+    assert!(reaped.load(Ordering::Acquire));
+    // Drop cancels promptly rather than waiting for the five-second deadline.
+    assert!(started.elapsed() < Duration::from_secs(3));
 }

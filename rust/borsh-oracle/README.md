@@ -48,14 +48,21 @@ names. CI uses the runner's installed Rust tooling and caches both independent
 Rust crate directories; it still regenerates the legacy fixtures, checks drift,
 and runs both TypeScript packages' full tests and coverage.
 
-The 19 Rust tests consist of eight concrete-type conformance tests, four proptest
-properties (256 cases each, seed 20261020), and seven protocol/process tests.
+The 22 Rust tests consist of eight concrete-type conformance tests, four proptest
+properties (256 cases each, seed 20261020), and ten protocol/process tests.
 They cover exact bytes and rejection cases, bounded framing, process persistence,
-and nonzero exit on a broken output pipe. They establish behavior of the Rust
-oracle transport and registered types. **TypeScript differential checks and
+and nonzero exit on a broken output pipe. CLI test children have a five-second
+lifetime deadline covering pipe I/O and exit. A supervisor owns each child, kills
+and reaps it on timeout, and performs the same cleanup when a test unwinds or
+returns early. Unix fixtures that stop responding or never exit verify timeout
+errors within three seconds using shorter 200/500 ms deadlines; an early-panic
+fixture verifies prompt reaping. These are direct-child tests on macOS/Linux,
+without descendant processes retaining the pipes. They establish behavior of the
+Rust oracle transport and registered types. **TypeScript differential checks and
 coverage-guided fuzzing have not been implemented or run in this slice**; those
-are follow-up harness work. No Miri/concurrency/formal tools are added: the crate
-has no unsafe, FFI or concurrency and makes no theorem or performance claim.
+are follow-up harness work. No Miri/concurrency/formal tools are added: the
+production oracle has no unsafe, FFI or concurrency and makes no theorem or
+performance claim.
 
 ## Protocol version 1
 
