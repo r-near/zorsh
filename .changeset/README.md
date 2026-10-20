@@ -6,3 +6,14 @@ find the full documentation for it [in our repository](https://github.com/change
 
 We have a quick list of common questions to get you started engaging with this project in
 [our documentation](https://github.com/changesets/changesets/blob/main/docs/common-questions.md)
+
+## npm publishing
+
+The Release workflow keeps creating version PRs from changesets, but npm publishing is
+disabled by default for both pushes and manual runs. To enable publishing, set the
+repository Actions variable `NPM_PUBLISH_ENABLED` to exactly `true`. Delete the variable
+or set it to `false` to disable publishing again.
+
+Once enabled, a Release workflow run with no pending changesets can publish any
+unpublished package versions. Check the versions before enabling it; a manual run
+does not bypass the gate.
