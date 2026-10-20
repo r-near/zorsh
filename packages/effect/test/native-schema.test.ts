@@ -27,6 +27,60 @@ describe("native Effect schema composition", () => {
     expect(() => Schema.encodeUnknownSync(codec)(100)).toThrow(Schema.SchemaError)
   })
 
+  it("keeps nested native refinement groups and their encoded metadata", () => {
+    const key = "@zorsh/effect/borsh/layout"
+    const check = Schema.isGreaterThan(0)
+      .annotate({ [key]: { version: 1, kind: "integer", bits: 16, signed: false } })
+      .and(Schema.isLessThan(10))
+      .and(Schema.makeFilter((n: number) => n % 2 === 0))
+    const codec = Borsh.toCodec(Borsh.U16.check(check).annotate({ title: "Small even amount" }))
+    expect(Schema.decodeSync(codec)(Uint8Array.of(8, 0))).toBe(8)
+    expect(Schema.encodeSync(codec)(8)).toEqual(Uint8Array.of(8, 0))
+    for (const invalid of [0, 3, 10]) {
+      expect(() => Schema.encodeSync(codec)(invalid)).toThrow(Schema.SchemaError)
+      expect(() => Schema.decodeSync(codec)(Uint8Array.of(invalid, 0))).toThrow(Schema.SchemaError)
+    }
+    const conflicting = Schema.isGreaterThan(0)
+      .annotate({ [key]: { version: 1, kind: "integer", bits: 32, signed: false } })
+      .and(Schema.isLessThan(10))
+      .and(Schema.isInt())
+    expect(() => Borsh.toCodec(Borsh.U16.check(conflicting))).toThrow(/Conflicting Borsh/)
+  })
+
+  it("supports a finite template-literal application type on an integer wire schema", () => {
+    const schema = Borsh.U16.pipe(
+      Schema.decodeTo(
+        Schema.TemplateLiteral(["item-", Schema.Int]),
+        SchemaTransformation.transform({
+          decode: (n): `item-${number}` => `item-${n}`,
+          encode: (text) => Number(text.slice(5)),
+        }),
+      ),
+    )
+    const codec = Borsh.toCodec(schema)
+    expectTypeOf(codec.Type).toEqualTypeOf<`item-${number}`>()
+    expect(Schema.decodeSync(codec)(Uint8Array.of(7, 0))).toBe("item-7")
+    expect(Schema.encodeSync(codec)("item-7")).toEqual(Uint8Array.of(7, 0))
+    expect(() => Schema.encodeUnknownSync(codec)("other-7")).toThrow(Schema.SchemaError)
+  })
+
+  it("allows optional fields on the application side of a finite primitive transformation", () => {
+    const schema = Borsh.U8.pipe(
+      Schema.decodeTo(
+        Schema.Struct({ count: Schema.optionalKey(Borsh.U8) }),
+        SchemaTransformation.transform({
+          decode: (count) => (count === 0 ? {} : { count }),
+          encode: (value) => value.count ?? 0,
+        }),
+      ),
+    )
+    const codec = Borsh.toCodec(schema)
+    expect(Schema.decodeSync(codec)(Uint8Array.of(0))).toEqual({})
+    expect(Schema.decodeSync(codec)(Uint8Array.of(7))).toEqual({ count: 7 })
+    expect(Schema.encodeSync(codec)({})).toEqual(Uint8Array.of(0))
+    expect(Schema.encodeSync(codec)({ count: 7 })).toEqual(Uint8Array.of(7))
+  })
+
   it("derives bytes from Encoded while preserving both-direction changes to the Type shape", () => {
     const Amount = Borsh.U64.pipe(
       Schema.decodeTo(
@@ -219,6 +273,34 @@ describe("native Effect schema composition", () => {
     expect(() => Schema.encodeSync(Borsh.toCodec(schema, { maxBytes: 1 }))("1")).toThrow(/maxBytes/)
     expect(encodes).toBe(1)
   })
+
+  it("enforces wire constraints on middleware output when native checks are disabled", () => {
+    function replaceEncoded<S extends Schema.Constraint>(schema: S, value: S["Encoded"]) {
+      return Schema.middlewareEncoding<S, never>(() => Effect.succeedSome(value))(schema)
+    }
+    const cases = [
+      { schema: replaceEncoded(Borsh.U8, 256), value: 256, error: /outside u8 range/ },
+      { schema: replaceEncoded(Borsh.I8, -129), value: -129, error: /outside i8 range/ },
+      {
+        schema: replaceEncoded(Borsh.U64, 1n << 64n),
+        value: 1n << 64n,
+        error: /outside u64 range/,
+      },
+      { schema: replaceEncoded(Borsh.F32, 0.1), value: 0.1, error: /exact non-NaN f32/ },
+      { schema: replaceEncoded(Borsh.F64, NaN), value: NaN, error: /exact non-NaN f64/ },
+      {
+        schema: replaceEncoded(Schema.String, "\uD800"),
+        value: "\uD800",
+        error: /Lone UTF-16 surrogate/,
+      },
+    ]
+    for (const { schema, value, error } of cases) {
+      expect(Schema.encodeUnknownSync(schema, { disableChecks: true })(0)).toEqual(value)
+      expect(() =>
+        Schema.encodeUnknownSync(Borsh.toCodec(schema), { disableChecks: true })(0),
+      ).toThrow(error)
+    }
+  })
 })
 
 describe("unsupported encoded layouts and metadata", () => {
@@ -247,6 +329,9 @@ describe("unsupported encoded layouts and metadata", () => {
       Schema.Record(Schema.String, Borsh.U8),
     ])
       expect(() => Borsh.toCodec(schema)).toThrow(/\$: Unsupported encoded/)
+    for (const schema of [Schema.optionalKey(Borsh.U8), Schema.optional(Borsh.U8)]) {
+      expect(() => Borsh.toCodec(schema)).toThrow(/\$: Optional schemas need an explicit Borsh/)
+    }
   })
 
   it("rejects Suspend without evaluating the thunk, including a hidden recursive Type", () => {
@@ -283,6 +368,26 @@ describe("unsupported encoded layouts and metadata", () => {
     expect(calls).toBe(0)
   })
 
+  it("finds suspended nodes nested in tuple, vector, union and record schemas without forcing them", () => {
+    let calls = 0
+    const suspended = Schema.suspend(() => {
+      calls++
+      return Schema.String
+    })
+    const cases = [
+      { schema: Schema.Tuple([suspended]), path: "$[0]" },
+      { schema: Schema.Array(suspended), path: "$.rest[0]" },
+      { schema: Schema.Union([Schema.String, suspended]), path: "$.union[1]" },
+      { schema: Schema.Record(Schema.String, suspended), path: "$.values[0]" },
+    ]
+    for (const { schema, path } of cases) {
+      expect(() => Borsh.toCodec(schema)).toThrow(
+        `${path}: Suspend/recursive schemas are unsupported`,
+      )
+    }
+    expect(calls).toBe(0)
+  })
+
   it("validates malformed, mismatched and conflicting private metadata", () => {
     const key = "@zorsh/effect/borsh/layout"
     const untypedKey: string = key
@@ -314,6 +419,30 @@ describe("unsupported encoded layouts and metadata", () => {
       Schema.annotateEncoded({ [key]: { version: 1, kind: "float", bits: 32 } }),
     )
     expect(() => Borsh.toCodec(mismatched)).toThrow(/does not match encoded/)
+    const integerOnString = Schema.String.pipe(
+      Schema.annotateEncoded({
+        [key]: { version: 1, kind: "integer", bits: 8, signed: false },
+      }),
+    )
+    const bigintWidthOnNumber = Schema.Int.pipe(
+      Schema.annotateEncoded({
+        [key]: { version: 1, kind: "integer", bits: 64, signed: false },
+      }),
+    )
+    const numberWidthOnBigint = Schema.BigInt.pipe(
+      Schema.annotateEncoded({
+        [key]: { version: 1, kind: "integer", bits: 32, signed: true },
+      }),
+    )
+    for (const schema of [integerOnString, bigintWidthOnNumber, numberWidthOnBigint]) {
+      expect(() => Borsh.toCodec(schema)).toThrow(/Integer layout does not match encoded/)
+    }
+    const fixedOnString = Schema.String.pipe(
+      Schema.annotateEncoded({
+        [key]: { version: 1, kind: "fixedBytes", length: 2 },
+      }),
+    )
+    expect(() => Borsh.toCodec(fixedOnString)).toThrow(/Borsh layout does not match encoded String/)
     const conflict = Borsh.U8.check(Schema.isGreaterThan(0)).pipe(
       Schema.annotateEncoded({ [key]: { version: 1, kind: "integer", bits: 16, signed: false } }),
     )

@@ -118,8 +118,6 @@ export function compile(ast: SchemaAST.AST): Layout {
     "id" in representation &&
     representation.id === "effect/schema/Uint8Array"
   ) {
-    if (layout !== undefined && layout.kind !== "fixedBytes")
-      throw new Error("$: Invalid byte layout")
     const length = layout?.length
     return {
       read: (r) => r.take(length ?? r.u32()).slice(),

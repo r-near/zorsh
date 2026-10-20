@@ -73,9 +73,7 @@ function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
 export function descriptor(ast: SchemaAST.AST): LayoutDescriptor | undefined {
   let found = parseDescriptor(ast.annotations?.[key])
   const checks = [...(ast.checks ?? [])]
-  while (checks.length > 0) {
-    const check = checks.pop()
-    if (check === undefined) continue
+  for (let check = checks.pop(); check !== undefined; check = checks.pop()) {
     const next = parseDescriptor(check.annotations?.[key])
     if (next !== undefined) {
       if (found !== undefined && JSON.stringify(found) !== JSON.stringify(next)) {
