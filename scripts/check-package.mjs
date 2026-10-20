@@ -1,8 +1,16 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
-import { dirname, isAbsolute, join, resolve } from "node:path"
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
+import { dirname, isAbsolute, join, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -47,7 +55,9 @@ if (!baseline) {
 }
 
 // A nested, independent workspace prevents pnpm from linking the repository package.
-const temp = mkdtempSync(join(root, ".artifacts", "consumer-"))
+const artifacts = join(root, ".artifacts")
+mkdirSync(artifacts, { recursive: true })
+const temp = mkdtempSync(join(artifacts, "consumer-"))
 try {
   writeFileSync(
     join(temp, "package.json"),
@@ -62,7 +72,8 @@ try {
   writeFileSync(join(temp, ".node-version"), "24.22.0\n")
   run(["install", "--ignore-scripts"], temp)
   const installed = realpathSync(join(temp, "node_modules/@zorsh/zorsh"))
-  assert(installed.startsWith(`${temp}/node_modules/`), "Consumer resolved a workspace package")
+  const modules = realpathSync(join(temp, "node_modules"))
+  assert(installed.startsWith(`${modules}${sep}`), "Consumer resolved a workspace package")
   assert(statSync(join(installed, "dist/src/index.js")).isFile())
   const runtime = `
 import assert from "node:assert/strict";
@@ -88,6 +99,7 @@ const golden = new Uint8Array([52, 18, 2, 0, 0, 0, 1, 0, 7, 8]);
 assert.deepEqual(schema.serialize(value), golden);
 assert.deepEqual(schema.deserialize(golden), value);
 assert.equal(new BinaryReader(new Uint8Array([52, 18])).readUint16(), 0x1234);
+console.log("Installed runtime: " + process.version + " (" + process.execPath + ")");
 console.log("Installed tarball: CommonJS, ESM named/deep imports and golden bytes passed");
 `
   writeFileSync(join(temp, "runtime.mjs"), runtime)
@@ -144,6 +156,7 @@ void [vector, enumLike, variant, reader, wrong, wrongBytes];
     )
     run(["exec", "tsc", "-p", "tsconfig.json"], temp)
   }
+  console.log(`Checker runtime: ${process.version} (${process.execPath})`)
   console.log(`Tarball consumer checks passed: ${archive}`)
   console.log(`SHA256 ${createHash("sha256").update(readFileSync(archive)).digest("hex")}`)
 } finally {
