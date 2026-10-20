@@ -48,6 +48,8 @@ On this development Mac, Cargo must resolve to the installed Mr Boxington shim. 
 
 Use `vp exec changeset` to record a public package change. The release workflow can create Changesets version PRs while publishing is disabled. Its explicit version command is `vp run version-packages`.
 
-Npm publication is default-off: the workflow supplies a publish command only when the repository variable `NPM_PUBLISH_ENABLED` is exactly the string `true`. This guard applies to both main-branch pushes and manual workflow dispatch. The variable is currently `false`; changing it is a separate release decision. Never enable it as part of this workspace migration. Publishing uses the existing npm trusted publisher (OIDC).
+Npm publication is default-off: the release job runs only on `main` and supplies a publish command only when the repository variable `NPM_PUBLISH_ENABLED` is exactly the string `true`. The variable is currently `false`. Setting it alone triggers nothing; an intentional opt-in requires setting it to `true` and deliberately running the Release workflow manually **on `main`** after reviewing the package versions. Main-branch pushes matching the workflow paths can also trigger a release while enabled. Set the variable back to `false` when the release is complete. Never enable it as part of this workspace migration.
+
+These controls apply to the updated workflow on `main`; they do not revoke npm publishing authority or change npm-side credentials. Older workflow revisions can have different behavior. Publishing uses the existing npm trusted publisher (OIDC).
 
 Branch names use `feat/`, `fix/`, `docs/` or `chore/`. Every PR must receive an adversarial Sonnet 5.5 review before merge, in addition to its ordinary checks and review.

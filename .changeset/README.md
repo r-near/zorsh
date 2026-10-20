@@ -9,11 +9,14 @@ We have a quick list of common questions to get you started engaging with this p
 
 ## npm publishing
 
-The Release workflow keeps creating version PRs from changesets, but npm publishing is
-disabled by default for both pushes and manual runs. To enable publishing, set the
-repository Actions variable `NPM_PUBLISH_ENABLED` to exactly `true`. Delete the variable
-or set it to `false` to disable publishing again.
+The updated Release workflow runs its release job only on `main` and keeps creating
+version PRs while npm publishing is disabled. Publishing is default-off. To opt in,
+set the repository Actions variable `NPM_PUBLISH_ENABLED` to exactly `true`, review
+the package versions, then deliberately run Release manually **on `main`**. Setting
+the variable alone triggers nothing; matching main-branch pushes can also trigger
+a release while it is enabled. Set the variable back to `false` after the release.
 
-Once enabled, a Release workflow run with no pending changesets can publish any
-unpublished package versions. Check the versions before enabling it; a manual run
-does not bypass the gate.
+When enabled, a run with no pending changesets can publish unpublished package
+versions. These controls apply to the updated workflow on `main`; older workflow
+revisions can behave differently. The gate does not revoke npm publishing
+authority or change npm-side credentials.
