@@ -209,9 +209,11 @@ contains a zero-sized vector somewhere.
 - Raw Borsh data: at most **65,536 bytes** on encode and decode. Hex length is
   checked before decoding/allocating raw bytes. Encode uses Borsh's counting
   serializer to check size before `to_vec` allocation.
-- Transport strings: at most **65,536 UTF-8 bytes** each. Transport arrays: at most
-  **16,384 items each on encode**; fixed arrays also require exact length. These
-  checks follow bounded JSON parsing, not a streaming allocation-free parser.
+- Concrete Rust `String` values: at most **65,536 UTF-8 bytes** each. Hex strings
+  use two ASCII characters per raw byte, up to **131,072 characters**.
+- Transport arrays: at most **16,384 items each on encode**; fixed arrays also
+  require exact length. These checks follow bounded JSON parsing, not a streaming
+  allocation-free parser.
   Decode uses real Borsh types and can produce more than 16,384 values within the
   raw cap (e.g. `Vec<Option<()>>`); the output-frame cap still applies.
 - ID/schema byte limits are 128/64, respectively. Transport floats are fixed width;
