@@ -5,7 +5,7 @@ Install the global [Vite+ CLI](https://viteplus.dev/guide/), then run all JavaSc
 ## Workspace
 
 - `packages/zorsh`: the existing public package and its tests, snapshots, API documentation and changelog.
-- `packages/effect`: a private placeholder with no implementation. Read the current [official Effect documentation](https://effect.website/docs/) before designing or reviewing its future runtime.
+- `packages/effect`: a private placeholder with no implementation. Read the current [official Effect v4 documentation](https://effect.website/docs/v4/) before designing or reviewing its future runtime.
 - `rust/borsh_test`: independent Rust fixture generators, Cargo lockfile and committed Borsh vectors.
 - `scripts/check-package.mjs`: checks the actual npm tarball after installing it into an isolated consumer workspace under ignored `.artifacts`.
 
@@ -15,6 +15,7 @@ The root and Effect package are private. Changesets uses independent package ver
 
 ```sh
 vp check
+vp run check-effect-lint
 vp test run
 vp -C packages/zorsh pack
 vp -C packages/zorsh pm pack -- --pack-destination ../../.artifacts
@@ -23,6 +24,10 @@ vp exec changeset status
 ```
 
 `vp check` checks formatting, lint and types without writing files. Use `vp check --fix` to apply fixes. The shared configuration enables both type-aware linting and TypeScript checks. `vp test run` includes V8 coverage and produces `coverage/lcov.info` for CI.
+
+Effect diagnostics use the official Go-based [Effect language service](https://github.com/Effect-TS/tsgo) (`@effect/tsgo` 0.55.0) and its recommended Oxlint preset. The install lifecycle patches Vite+'s bundled Oxlint 1.88.0 and oxlint-tsgolint 7.0.2004; an unsupported version or failed patch fails installation. TypeScript 7.0.2 remains unpatched, and `vp check` remains the single formatting, lint and type check. Keep these tooling versions compatible when updating them; do not skip install scripts. See the [official Vite+ integration guide](https://effect.website/docs/v4/getting-started/devtools/#vite-plus).
+
+`vp run check-effect-lint` runs isolated fixtures under ignored `.artifacts` using the shared configuration. It verifies that valid Effect code passes, a floating Effect fails with its specific diagnostic, and an ordinary TypeScript type error still fails. CI runs this smoke check after a frozen install. The root's development-only `effect` 4.0.5 dependency supplies these fixtures; the private Effect package still has no runtime implementation.
 
 `vp pack` builds the library with declarations; `vp pm pack` creates the real npm tarball. The consumer check requires that tarball, verifies its allowlisted contents and legacy entry paths, then exercises CommonJS, ESM named imports, deep imports, NodeNext and bundler type inference, and known Borsh bytes. Pass another tarball path to the script with `vp exec node scripts/check-package.mjs <path>`.
 
