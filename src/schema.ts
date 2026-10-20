@@ -162,6 +162,11 @@ export const b = {
     return new Schema("tuple", types, registry)
   },
 
+  // Lazy schema for recursive/self-referential types
+  lazy: <T>(factory: () => Schema<T>): Schema<T> => {
+    return new Schema("lazy", { factory }, registry)
+  },
+
   // Native TypeScript enum
   nativeEnum: <T extends EnumLike>(enumObj: T): Schema<T[keyof T], "nativeEnum"> => {
     // First, filter out numeric keys that TypeScript adds to enums
