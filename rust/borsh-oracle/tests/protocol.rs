@@ -216,14 +216,25 @@ fn actual_cli_is_persistent_and_stdout_has_only_responses() {
 }
 
 #[test]
+#[cfg(unix)]
 fn actual_cli_broken_pipe_exits_nonzero_with_stderr() {
-    let mut child = TestChild::spawn(
+    use std::net::Shutdown;
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    let (reader, mut writer) = UnixStream::pair().unwrap();
+    // Write shutdown survives inherited handles; closing a pipe reader can race with fork.
+    writer.shutdown(Shutdown::Write).unwrap();
+    assert_eq!(
+        writer.write(b"probe").unwrap_err().kind(),
+        std::io::ErrorKind::BrokenPipe
+    );
+    let mut child = TestChild::spawn_with_stdout(
         &mut Command::new(env!("CARGO_BIN_EXE_zorsh-borsh-oracle")),
         "broken-pipe oracle",
         CLI_TIMEOUT,
+        OwnedFd::from(writer).into(),
     )
     .unwrap();
-    drop(child.stdout.take());
     let mut stdin = child.stdin.take().unwrap();
     stdin
         .write_all(&serde_json::to_vec(&request("broken-pipe")).unwrap())
@@ -231,8 +242,11 @@ fn actual_cli_broken_pipe_exits_nonzero_with_stderr() {
     stdin.write_all(b"\n").unwrap();
     drop(stdin);
     let output = child.finish().unwrap();
+    drop(reader);
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("borsh oracle I/O failure:"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("borsh oracle I/O failure:"));
+    assert!(stderr.contains("Broken pipe"));
 }
 
 // POSIX sh uses exec so each controlled fixture is one direct process, with no
