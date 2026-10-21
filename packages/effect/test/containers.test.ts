@@ -170,9 +170,9 @@ it("rejects visited vectors of Rust zero-sized values", () => {
 
 it("requires fixed encoded keys and positions and rejects mixed rests", () => {
   const optional =
-    "Optional properties and elements have no Borsh layout; use Schema.Option for a Rust Option"
+    "Optional properties and elements have no Borsh layout on the encoded side; use Schema.Option for a Rust Option"
   const mixed =
-    "Mixed tuple rests have no Borsh layout; nest the rest as a Schema.Array element, or use Schema.Array with Schema.isMinLength"
+    "Mixed tuple rests have no Borsh layout; move the rest into its own Schema.Array element, or use Schema.Array with Schema.isMinLength"
   for (const [schema, message] of [
     [Schema.Struct({ value: Schema.optionalKey(Borsh.U8) }), `$["value"]: ${optional}`],
     [Schema.Tuple([Schema.optionalKey(Borsh.U8)]), `$[0]: ${optional}`],

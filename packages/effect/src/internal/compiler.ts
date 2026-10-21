@@ -1,9 +1,9 @@
 import type { SchemaAST } from "effect"
 import { descriptor, type LayoutDescriptor } from "./annotations.js"
-import { hashMap, hashSet, readonlyMap, readonlySet } from "./collections.js"
-import { compileArrays, compileObject, fixedArray, option, result } from "./containers.js"
+import { compileArrays, compileObject, fixedArray } from "./containers.js"
 import { compileEnum } from "./enums.js"
 import type { Reader, Writer } from "./io.js"
+import { compileDeclaration, representationId, uint8ArrayId } from "./natives.js"
 import { boolean, bytes, float, integer, string } from "./primitives.js"
 
 export interface Layout {
@@ -75,7 +75,7 @@ export function compile(ast: SchemaAST.AST): Layout {
 function compileNode(ast: SchemaAST.AST, path: string, compile: Compile): Layout {
   if (ast.context?.isOptional)
     throw new Error(
-      `${path}: Optional properties and elements have no Borsh layout; use Schema.Option for a Rust Option`,
+      `${path}: Optional properties and elements have no Borsh layout on the encoded side; use Schema.Option for a Rust Option`,
     )
   const layout = descriptor(ast, path)
   if (layout !== undefined) return compileDescriptor(ast, layout, path, compile)
@@ -115,52 +115,19 @@ function compileDescriptor(
   switch (layout.kind) {
     case "integer":
       if (ast._tag !== (layout.bits > 32 ? "BigInt" : "Number"))
-        throw new Error(`${path}: Integer layout does not match encoded schema`)
+        throw new Error(`${path}: Integer layout does not match encoded ${ast._tag}`)
       return integer(layout.bits, layout.signed)
     case "float":
       if (ast._tag !== "Number")
-        throw new Error(`${path}: Float layout does not match encoded schema`)
+        throw new Error(`${path}: Float layout does not match encoded ${ast._tag}`)
       return float(layout.bits)
     case "fixedBytes":
-      if (ast._tag !== "Declaration" || representationId(ast) !== "effect/schema/Uint8Array")
-        throw new Error(`${path}: Borsh layout does not match encoded ${ast._tag}`)
+      if (ast._tag !== "Declaration" || representationId(ast) !== uint8ArrayId)
+        throw new Error(`${path}: Fixed bytes layout does not match encoded ${ast._tag}`)
       return bytes(layout.length)
     case "fixedArray":
       return fixedArray(ast, layout.length, path, compile)
     case "enum":
       return compileEnum(ast, layout, path, compile)
   }
-}
-
-type Native = (ast: SchemaAST.Declaration, path: string, compile: Compile) => Layout
-
-/** Effect declarations with a Borsh layout, keyed by their representation id. */
-const natives: Readonly<Record<string, Native>> = {
-  "effect/schema/Uint8Array": () => bytes(),
-  "effect/schema/Option": option,
-  "effect/schema/Result": result,
-  "effect/schema/ReadonlyMap": readonlyMap,
-  "effect/schema/ReadonlySet": readonlySet,
-  "effect/schema/HashMap": hashMap,
-  "effect/schema/HashSet": hashSet,
-}
-
-function compileDeclaration(ast: SchemaAST.Declaration, path: string, compile: Compile): Layout {
-  const id = representationId(ast)
-  const native = id !== undefined && Object.hasOwn(natives, id) ? natives[id] : undefined
-  if (native === undefined)
-    throw new Error(
-      `${path}: ${id === undefined ? "Declaration" : `Declaration ${id}`} has no Borsh layout; decode it from a Borsh-encodable schema with Schema.decodeTo`,
-    )
-  return native(ast, path, compile)
-}
-
-function representationId(ast: SchemaAST.Declaration): string | undefined {
-  const representation = ast.annotations?.representation
-  return typeof representation === "object" &&
-    representation !== null &&
-    "id" in representation &&
-    typeof representation.id === "string"
-    ? representation.id
-    : undefined
 }

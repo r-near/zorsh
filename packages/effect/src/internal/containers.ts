@@ -1,4 +1,4 @@
-import { Option, Result, type SchemaAST } from "effect"
+import type { SchemaAST } from "effect"
 import type { Compile, Layout } from "./compiler.js"
 import { BinaryError, prepend, type Reader, type Writer } from "./io.js"
 
@@ -84,7 +84,7 @@ export function compileArrays(ast: SchemaAST.Arrays, path: string, compile: Comp
   const rest = homogeneousItem(ast)
   if (rest === undefined)
     throw new Error(
-      `${path}: Mixed tuple rests have no Borsh layout; nest the rest as a Schema.Array element, or use Schema.Array with Schema.isMinLength`,
+      `${path}: Mixed tuple rests have no Borsh layout; move the rest into its own Schema.Array element, or use Schema.Array with Schema.isMinLength`,
     )
   return vector(compile(rest, `${path}[]`))
 }
@@ -177,81 +177,6 @@ export function fixedArray(
         for (; i < length; i++) item.write(w, value[i])
       } catch (error) {
         throw prepend(error, i)
-      }
-    },
-  }
-}
-
-/** Effect's constructors fix these arities; only hand-built declarations can differ. */
-export function parameters<const N extends 1 | 2>(
-  ast: SchemaAST.Declaration,
-  count: N,
-  name: string,
-  path: string,
-): N extends 1 ? readonly [SchemaAST.AST] : readonly [SchemaAST.AST, SchemaAST.AST] {
-  if (ast.typeParameters.length !== count)
-    throw new Error(
-      `${path}: ${name} requires exactly ${count} encoded type parameter${count === 1 ? "" : "s"}`,
-    )
-  return ast.typeParameters as never
-}
-
-export function option(ast: SchemaAST.Declaration, path: string, compile: Compile): Layout {
-  const [inner] = parameters(ast, 1, "Option", path)
-  const item = compile(inner, `${path}["value"]`)
-  return {
-    minBytes: 1,
-    isZeroSized: false,
-    read: (r) => {
-      const offset = r.offset
-      const tag = r.u8()
-      if (tag > 1) throw new BinaryError(offset, `Invalid Option tag ${tag}`)
-      if (tag === 0) return Option.none()
-      try {
-        return Option.some(item.read(r))
-      } catch (error) {
-        throw prepend(error, "value")
-      }
-    },
-    write: (w, value) => {
-      if (!Option.isOption(value)) throw new BinaryError(w.offset, "Expected Option")
-      w.u8(Option.isSome(value) ? 1 : 0)
-      if (Option.isNone(value)) return
-      try {
-        item.write(w, value.value)
-      } catch (error) {
-        throw prepend(error, "value")
-      }
-    },
-  }
-}
-
-export function result(ast: SchemaAST.Declaration, path: string, compile: Compile): Layout {
-  const [success, failure] = parameters(ast, 2, "Result", path)
-  const ok = compile(success, `${path}["success"]`)
-  const err = compile(failure, `${path}["failure"]`)
-  return {
-    minBytes: 1 + Math.min(ok.minBytes, err.minBytes),
-    isZeroSized: false,
-    read: (r) => {
-      const offset = r.offset
-      const tag = r.u8()
-      if (tag > 1) throw new BinaryError(offset, `Invalid Result tag ${tag}`)
-      try {
-        return tag === 1 ? Result.succeed(ok.read(r)) : Result.fail(err.read(r))
-      } catch (error) {
-        throw prepend(error, tag === 1 ? "success" : "failure")
-      }
-    },
-    write: (w, value) => {
-      if (!Result.isResult(value)) throw new BinaryError(w.offset, "Expected Result")
-      const success = Result.isSuccess(value)
-      w.u8(success ? 1 : 0)
-      try {
-        if (success) ok.write(w, value.success)
-        else err.write(w, value.failure)
-      } catch (error) {
-        throw prepend(error, success ? "success" : "failure")
       }
     },
   }

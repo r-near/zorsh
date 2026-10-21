@@ -417,7 +417,7 @@ describe("unsupported encoded layouts and metadata", () => {
       expect(() => Borsh.toCodec(schema)).toThrow(/\$: Unsupported encoded/)
     for (const schema of [Schema.optionalKey(Borsh.U8), Schema.optional(Borsh.U8)]) {
       expect(() => Borsh.toCodec(schema)).toThrow(
-        /^\$: Optional properties and elements have no Borsh layout; use Schema.Option for a Rust Option$/,
+        /^\$: Optional properties and elements have no Borsh layout on the encoded side; use Schema.Option for a Rust Option$/,
       )
     }
   })
@@ -506,7 +506,9 @@ describe("unsupported encoded layouts and metadata", () => {
     const mismatched = Schema.String.pipe(
       Schema.annotateEncoded({ [key]: { version: 1, kind: "float", bits: 32 } }),
     )
-    expect(() => Borsh.toCodec(mismatched)).toThrow(/does not match encoded/)
+    expect(() => Borsh.toCodec(mismatched)).toThrow(
+      new Error("$: Float layout does not match encoded String"),
+    )
     const integerOnString = Schema.String.pipe(
       Schema.annotateEncoded({
         [key]: { version: 1, kind: "integer", bits: 8, signed: false },
@@ -522,15 +524,23 @@ describe("unsupported encoded layouts and metadata", () => {
         [key]: { version: 1, kind: "integer", bits: 32, signed: true },
       }),
     )
-    for (const schema of [integerOnString, bigintWidthOnNumber, numberWidthOnBigint]) {
-      expect(() => Borsh.toCodec(schema)).toThrow(/Integer layout does not match encoded/)
+    for (const [schema, tag] of [
+      [integerOnString, "String"],
+      [bigintWidthOnNumber, "Number"],
+      [numberWidthOnBigint, "BigInt"],
+    ] as const) {
+      expect(() => Borsh.toCodec(schema)).toThrow(
+        new Error(`$: Integer layout does not match encoded ${tag}`),
+      )
     }
     const fixedOnString = Schema.String.pipe(
       Schema.annotateEncoded({
         [key]: { version: 1, kind: "fixedBytes", length: 2 },
       }),
     )
-    expect(() => Borsh.toCodec(fixedOnString)).toThrow(/Borsh layout does not match encoded String/)
+    expect(() => Borsh.toCodec(fixedOnString)).toThrow(
+      new Error("$: Fixed bytes layout does not match encoded String"),
+    )
     const conflict = Borsh.U8.check(Schema.isGreaterThan(0)).pipe(
       Schema.annotateEncoded({ [key]: { version: 1, kind: "integer", bits: 16, signed: false } }),
     )
@@ -603,17 +613,21 @@ describe("native declarations", () => {
     const enumLayout = { version: 1, kind: "enum", tag: "_tag", discriminants: {} }
     const fixedArray = { version: 1, kind: "fixedArray", length: 2 }
     for (const [schema, layout, message] of [
-      [Schema.Option(Borsh.U8), fixedBytes, "$: Borsh layout does not match encoded Declaration"],
+      [
+        Schema.Option(Borsh.U8),
+        fixedBytes,
+        "$: Fixed bytes layout does not match encoded Declaration",
+      ],
       [
         Schema.ReadonlySet(Borsh.U8),
         fixedBytes,
-        "$: Borsh layout does not match encoded Declaration",
+        "$: Fixed bytes layout does not match encoded Declaration",
       ],
-      [Borsh.Bytes, integer, "$: Integer layout does not match encoded schema"],
+      [Borsh.Bytes, integer, "$: Integer layout does not match encoded Declaration"],
       [
         Schema.HashMap(Borsh.U8, Borsh.U8),
         integer,
-        "$: Integer layout does not match encoded schema",
+        "$: Integer layout does not match encoded Declaration",
       ],
       [
         Schema.Result(Borsh.U8, Borsh.U8),
@@ -621,7 +635,7 @@ describe("native declarations", () => {
         "$: Enum layout requires a tagged union, literal union or Schema.Enum",
       ],
       [Borsh.Bytes, fixedArray, "$: Fixed array layout requires a homogeneous encoded array"],
-      [Schema.Date, fixedBytes, "$: Borsh layout does not match encoded Declaration"],
+      [Schema.Date, fixedBytes, "$: Fixed bytes layout does not match encoded Declaration"],
     ] as const)
       expect(() => Borsh.toCodec(annotate(schema, layout))).toThrow(new Error(message))
   })

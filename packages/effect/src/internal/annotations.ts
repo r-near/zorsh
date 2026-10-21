@@ -114,7 +114,7 @@ export function parseDescriptor(value: unknown, path = "$"): LayoutDescriptor | 
   throw new Error(`${path}: Invalid Borsh layout annotation`)
 }
 
-export function descriptor(ast: SchemaAST.AST, path = "$"): LayoutDescriptor | undefined {
+export function descriptor(ast: SchemaAST.AST, path: string): LayoutDescriptor | undefined {
   let found = parseDescriptor(ast.annotations?.[key], path)
   const checks = [...(ast.checks ?? [])]
   for (let check = checks.pop(); check !== undefined; check = checks.pop()) {
@@ -140,6 +140,6 @@ export function withLayout<S extends Schema.Top>(
   layout: LayoutDescriptor,
 ): S["Rebuild"] {
   layout = parseDescriptor(layout)
-  merge(descriptor(Schema.toEncoded(schema).ast), layout, "$")
+  merge(descriptor(Schema.toEncoded(schema).ast, "$"), layout, "$")
   return schema.pipe(Schema.annotateEncoded({ [key]: Object.freeze(layout) }))
 }

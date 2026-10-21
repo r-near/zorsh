@@ -445,7 +445,9 @@ it("rejects an inappropriate layout on a native Option declaration", () => {
   const invalid = Schema.Option(Borsh.U8).annotate({
     [key]: { version: 1, kind: "fixedBytes", length: 0 },
   })
-  expect(() => Borsh.toCodec(invalid)).toThrow(/Borsh layout does not match encoded Declaration/)
+  expect(() => Borsh.toCodec(invalid)).toThrow(
+    new Error("$: Fixed bytes layout does not match encoded Declaration"),
+  )
 })
 
 it("requires an own enum tag at the binary writer boundary", () => {
@@ -647,7 +649,9 @@ it("does not share struct layouts that omit an enum tag", () => {
 
 it("checks malformed Option declarations and binary encoder inputs", () => {
   const ast = Schema.Option(Borsh.U8).ast
-  for (const parameters of [[], [Borsh.U8.ast, Borsh.U8.ast]]) {
+  const hole: SchemaAST.AST[] = []
+  hole.length = 1
+  for (const parameters of [[], [Borsh.U8.ast, Borsh.U8.ast], hole]) {
     const invalid = new SchemaAST.Declaration(parameters, ast.run, ast.annotations)
     expect(() => compile(invalid)).toThrow(/^\$: Option requires exactly 1 encoded type parameter$/)
   }
