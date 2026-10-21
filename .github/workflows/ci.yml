@@ -69,8 +69,19 @@ jobs:
           fi
       - name: Test Rust oracle conformance, properties and persistent CLI
         run: cargo +1.98.0 test --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml
+      - name: Build Rust differential oracle
+        run: cargo +1.98.0 build --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml
+      - name: Build native Effect exports for differential tests
+        run: vp -C packages/effect pack
       - name: Run tests with coverage
         run: vp test run --coverage
+      - name: Upload differential failure and replay records
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: primitive-differential-failure
+          path: .artifacts/primitive-differential/
+          if-no-files-found: ignore
       - name: Build libraries
         run: vp run build
       - name: Create npm tarball

@@ -9,6 +9,7 @@
     "check": "vp check",
     "check-effect-lint": "vp exec node scripts/check-effect-lint.mjs",
     "test": "vp test run",
+    "test-effect-differential": "vp test run packages/effect/test/differential --coverage.enabled=false",
     "check-package": "vp exec node scripts/check-package.mjs",
     "check-effect-package": "vp exec node scripts/check-effect-package.mjs",
     "version-packages": "vp exec changeset version",

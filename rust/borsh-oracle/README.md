@@ -1,7 +1,8 @@
 # Fixed-type borsh-rs differential oracle
 
-This independent test executable is the Rust side of future Effect 4 Borsh
-differential checks. It registers **39 concrete Rust types**. Each accepted encode reaches
+This independent test executable is the Rust side of the [Effect 4 primitive
+differential checks](../../packages/effect/test/differential/README.md). It registers
+**39 concrete Rust types**. Each accepted encode reaches
 `borsh::to_vec::<T>`; each decode reaches `borsh::from_slice::<T>`, including its
 trailing-byte rejection. Structs/enums use the actual Borsh derives and collections
 use standard Rust types. There is no schema input, schema extraction, contract
@@ -72,9 +73,10 @@ returns early. Unix fixtures that stop responding or never exit verify timeout
 errors within three seconds using shorter 200/500 ms deadlines; an early-panic
 fixture verifies prompt reaping. These are direct-child tests on macOS/Linux,
 without descendant processes retaining the pipes. They establish behavior of the
-Rust oracle transport and registered types. **TypeScript differential checks and
-coverage-guided fuzzing have not been implemented or run in this slice**; those
-are follow-up harness work. No Miri/concurrency/formal tools are added: the
+Rust oracle transport and registered types. The separate TypeScript harness
+compares 18 primitive registry IDs through the built public Effect exports.
+Coverage-guided fuzzing remains follow-up work. No Miri/concurrency/formal tools
+are added: the
 production oracle has no unsafe, FFI or concurrency and makes no theorem or
 performance claim.
 
