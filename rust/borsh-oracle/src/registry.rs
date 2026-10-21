@@ -189,4 +189,7 @@ registry! {
     "vec_vec_unit" => Vec<Vec<()>>,
     "array_vec_unit_0" => [Vec<()>; 0], "array_vec_unit_1" => [Vec<()>; 1],
     "option_unit" => Option<()>, "vec_option_unit" => Vec<Option<()>>,
+    "result_u16_string" => core::result::Result<u16, String>,
+    "result_option_u8_unit" => core::result::Result<Option<u8>, ()>,
+    "result_unit_vec_unit" => core::result::Result<(), Vec<()>>,
 }

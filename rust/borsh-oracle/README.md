@@ -1,6 +1,6 @@
 # borsh-rs oracle
 
-Independent test executable using pinned borsh 1.8.1 with `derive` and `de_strict_order`. The registry contains 40 concrete Rust types; Borsh derives and standard implementations own wire encoding. Each encode checks `borsh::object_length` before `borsh::to_vec`; decode uses `borsh::from_slice`, including trailing-byte rejection. Keep Cargo.lock. The older `rust/borsh_test` fixture source remains independent.
+Independent test executable using pinned borsh 1.8.1 with `derive` and `de_strict_order`. The registry contains 43 concrete Rust types; Borsh derives and standard implementations own wire encoding. Each encode checks `borsh::object_length` before `borsh::to_vec`; decode uses `borsh::from_slice`, including trailing-byte rejection. Keep Cargo.lock. The older `rust/borsh_test` fixture source remains independent.
 
 Build and test from the repository root:
 
@@ -31,8 +31,9 @@ Frames are limited to 1 MiB excluding LF; CR in CRLF counts. Raw Borsh data and 
 - Floats are `{ "bits": "80000000" }` (f32) or 16 hex digits (f64), in numeric bit order. Signed zero, infinities and NaN payloads survive transport; Borsh rejects NaN. Hex input accepts uppercase; output is lowercase.
 - Booleans/strings use JSON booleans/Unicode strings; unit uses null. Byte vectors/arrays use even unprefixed hex strings with exact fixed lengths.
 - Options use `{ "tag": "None" }` or `{ "tag": "Some", "value": ... }`. Sequences/tuples use arrays; structs use exact named fields in declaration wire order.
+- Results use `{ "tag": "Ok", "value": ... }` or `{ "tag": "Err", "value": ... }`.
 - Enum transport is `{ "variant": "Count", "value": "513" }`; Idle carries null, Named carries `{ "label": "x", "enabled": true }`.
-- Maps use key/value pair arrays and sets use value arrays. Duplicate keys/items are transport errors. Results sort by Rust value order. `de_strict_order` rejects unsorted/duplicate wire entries; this differs from permissive Borsh builds.
+- Maps use key/value pair arrays and sets use value arrays. Duplicate keys/items are transport errors. Map and set entries sort by Rust value order. `de_strict_order` rejects unsorted/duplicate wire entries; this differs from permissive Borsh builds.
 
 ## Registry
 
@@ -69,6 +70,9 @@ Frames are limited to 1 MiB excluding LF; CR in CRLF counts. Raw Borsh data and 
 | `array_vec_unit_1` | `[Vec<()>; 1]` |
 | `option_unit` | `Option<()>` |
 | `vec_option_unit` | `Vec<Option<()>>` |
+| `result_u16_string` | `Result<u16, String>` |
+| `result_option_u8_unit` | `Result<Option<u8>, ()>` |
+| `result_unit_vec_unit` | `Result<(), Vec<()>>` |
 
 Zero-sized visitation is observable: unit, Empty, `((),)`, `[();0]`, `[();1]` and
 `[u8;0]` accept empty bytes. `Vec<()>`, `Vec<Empty>` and `Vec<[u8;0]>` reject even

@@ -1,4 +1,4 @@
-import { Option, SchemaAST } from "effect"
+import { Option, Result, SchemaAST } from "effect"
 import { descriptor } from "./annotations.js"
 import { BinaryError, Reader, utf8Length, Writer } from "./io.js"
 
@@ -245,6 +245,60 @@ function compileNode(
         if (!Option.isOption(value)) throw new BinaryError(w.offset, "Expected Option")
         w.view(1).setUint8(0, Option.isSome(value) ? 1 : 0)
         if (Option.isSome(value)) at('["value"]', () => item.write(w, value.value))
+      },
+    }
+  }
+  if (
+    ast._tag === "Declaration" &&
+    representationId === "effect/schema/Result" &&
+    layout === undefined
+  ) {
+    const [success, failure] = ast.typeParameters
+    if (ast.typeParameters.length !== 2 || success === undefined || failure === undefined)
+      throw new Error(`${path}: Result requires exactly two encoded type parameters`)
+    const ok = compile(success, `${path}["success"]`)
+    const err = compile(failure, `${path}["failure"]`)
+    return {
+      minBytes: 1 + Math.min(ok.minBytes, err.minBytes),
+      isZeroSized: false,
+      read: (r) => {
+        const offset = r.offset
+        const tag = r.view(1).getUint8(0)
+        if (tag > 1) throw new BinaryError(offset, `Invalid Result tag ${tag}`)
+        return tag === 1
+          ? Result.succeed(at('["success"]', () => ok.read(r)))
+          : Result.fail(at('["failure"]', () => err.read(r)))
+      },
+      write: (w, value) => {
+        if (!Result.isResult(value)) throw new BinaryError(w.offset, "Expected Result")
+        w.view(1).setUint8(0, Result.isSuccess(value) ? 1 : 0)
+        if (Result.isSuccess(value)) at('["success"]', () => ok.write(w, value.success))
+        else at('["failure"]', () => err.write(w, value.failure))
+      },
+    }
+  }
+  if (layout?.kind === "fixedArray") {
+    const rest = ast._tag === "Arrays" ? ast.rest[0] : undefined
+    if (ast._tag !== "Arrays" || ast.elements.length || ast.rest.length !== 1 || !rest)
+      throw new Error(`${path}: Fixed array layout requires a homogeneous encoded array`)
+    const item = compile(rest, `${path}[]`)
+    const length = layout.length
+    const minBytes = length === 0 ? 0 : Math.min(Number.MAX_SAFE_INTEGER, length * item.minBytes)
+    return {
+      minBytes,
+      isZeroSized: length === 0 || item.isZeroSized,
+      read: (r) => {
+        if (minBytes > r.input.byteLength - r.offset)
+          throw new BinaryError(r.offset, "Truncated fixed array payload")
+        const value: unknown[] = []
+        for (let i = 0; i < length; i++) value.push(at(`[${i}]`, () => item.read(r)))
+        return value
+      },
+      write: (w, value) => {
+        if (!Array.isArray(value) || value.length !== length)
+          throw new BinaryError(w.offset, `Expected fixed array of length ${length}`)
+        w.ensure(minBytes)
+        for (let i = 0; i < length; i++) at(`[${i}]`, () => item.write(w, value[i]))
       },
     }
   }

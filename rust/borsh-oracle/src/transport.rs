@@ -189,6 +189,22 @@ impl<T: Transport> Transport for Option<T> {
         }
     }
 }
+impl<T: Transport, E: Transport> Transport for core::result::Result<T, E> {
+    fn parse(v: &Value) -> Result<Self> {
+        let m = object(v, &["tag", "value"])?;
+        match text(&m["tag"])? {
+            "Ok" => Ok(Ok(T::parse(&m["value"])?)),
+            "Err" => Ok(Err(E::parse(&m["value"])?)),
+            _ => Err(Error::transport("expected result tag Ok or Err")),
+        }
+    }
+    fn normalized(&self) -> Value {
+        match self {
+            Ok(v) => json!({"tag":"Ok","value":v.normalized()}),
+            Err(e) => json!({"tag":"Err","value":e.normalized()}),
+        }
+    }
+}
 impl<A: Transport, B: Transport> Transport for (A, B) {
     fn parse(v: &Value) -> Result<Self> {
         let a = array(v)?;
