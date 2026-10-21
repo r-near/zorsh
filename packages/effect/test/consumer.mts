@@ -70,13 +70,59 @@ expectTypeOf(result).toEqualTypeOf<
   Schema.Codec<Result.Result<readonly string[], string>, Uint8Array, Decode, Encode>
 >()
 
-const maps = Borsh.toCodec(Schema.ReadonlyMap(schema, Schema.Option(schema)))
+class ValueDecode extends Context.Service<ValueDecode, { readonly suffix: string }>()(
+  "ValueDecode",
+) {}
+class ValueEncode extends Context.Service<ValueEncode, { readonly suffix: string }>()(
+  "ValueEncode",
+) {}
+const valueSchema = U16.pipe(
+  Schema.decodeTo(
+    Schema.String,
+    SchemaTransformation.transformEffect({
+      decode: (n) => Effect.map(ValueDecode, ({ suffix }) => n + suffix),
+      encode: (value) =>
+        Effect.map(ValueEncode, ({ suffix }) => Number(value.slice(0, -suffix.length))),
+    }),
+  ),
+)
+const maps = Borsh.toCodec(Schema.ReadonlyMap(schema, Schema.Option(valueSchema)))
 expectTypeOf(maps).toEqualTypeOf<
-  Schema.Codec<ReadonlyMap<string, Option.Option<string>>, Uint8Array, Decode, Encode>
+  Schema.Codec<
+    ReadonlyMap<string, Option.Option<string>>,
+    Uint8Array,
+    Decode | ValueDecode,
+    Encode | ValueEncode
+  >
 >()
-const hashMaps = Borsh.toCodec(Schema.HashMap(schema, Schema.Result(schema, schema)))
+expectTypeOf(Schema.decodeEffect(maps)(new Uint8Array(4))).toEqualTypeOf<
+  Effect.Effect<
+    ReadonlyMap<string, Option.Option<string>>,
+    Schema.SchemaError,
+    Decode | ValueDecode
+  >
+>()
+expectTypeOf(Schema.encodeEffect(maps)(new Map())).toEqualTypeOf<
+  Effect.Effect<Uint8Array, Schema.SchemaError, Encode | ValueEncode>
+>()
+const hashMaps = Borsh.toCodec(Schema.HashMap(schema, Schema.Result(valueSchema, valueSchema)))
 expectTypeOf(hashMaps).toEqualTypeOf<
-  Schema.Codec<HashMap.HashMap<string, Result.Result<string, string>>, Uint8Array, Decode, Encode>
+  Schema.Codec<
+    HashMap.HashMap<string, Result.Result<string, string>>,
+    Uint8Array,
+    Decode | ValueDecode,
+    Encode | ValueEncode
+  >
+>()
+expectTypeOf(Schema.decodeEffect(hashMaps)(new Uint8Array(4))).toEqualTypeOf<
+  Effect.Effect<
+    HashMap.HashMap<string, Result.Result<string, string>>,
+    Schema.SchemaError,
+    Decode | ValueDecode
+  >
+>()
+expectTypeOf(Schema.encodeEffect(hashMaps)(HashMap.empty())).toEqualTypeOf<
+  Effect.Effect<Uint8Array, Schema.SchemaError, Encode | ValueEncode>
 >()
 expectTypeOf(Borsh.toCodec(Schema.ReadonlySet(schema))).toEqualTypeOf<
   Schema.Codec<ReadonlySet<string>, Uint8Array, Decode, Encode>

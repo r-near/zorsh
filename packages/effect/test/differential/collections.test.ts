@@ -14,6 +14,32 @@ afterAll(async () => {
   await oracle.close()
 })
 
+function mutations(raw: Uint8Array, entries: readonly Uint8Array[], keyOffset = 4) {
+  const first = entries[0]
+  const second = entries[1]
+  assert.ok(first !== undefined && second !== undefined)
+  const frame = (parts: readonly Uint8Array[], count = parts.length) => {
+    const output = new Uint8Array(4 + parts.reduce((sum, part) => sum + part.length, 0))
+    new DataView(output.buffer).setUint32(0, count, true)
+    let offset = 4
+    for (const part of parts) {
+      output.set(part, offset)
+      offset += part.length
+    }
+    return output
+  }
+  const changed = raw.slice()
+  changed[keyOffset] = (changed[keyOffset] ?? 0) ^ 0x80
+  return [
+    raw,
+    frame([second, first, ...entries.slice(2)]),
+    frame([first, first, ...entries.slice(2)]),
+    frame(entries, entries.length + 1),
+    frame(entries, entries.length - 1),
+    changed,
+  ]
+}
+
 function spec<A>(
   id: string,
   schema: Schema.Codec<A>,
@@ -53,6 +79,31 @@ for (const entry of [
     ])
       await check(value)
     await assertProperty(entry.arbitrary, check, { numRuns: 200, seed: 20261020 })
+    const pairs = Borsh.toCodec(Schema.Array(Schema.Tuple([Borsh.U16, Schema.String])))
+    const pair = Borsh.toCodec(Schema.Tuple([Borsh.U16, Schema.String]))
+    await assertProperty(
+      mapEntries.filter((entries) => entries.length >= 2),
+      async (value) => {
+        const raw = entry.encode(value)
+        const parts = Schema.decodeSync(pairs)(raw).map((value) => Schema.encodeSync(pair)(value))
+        for (const [index, mutated] of mutations(raw, parts).entries()) {
+          const ts = attempt(() => entry.decode(mutated))
+          const rust = await oracle.request(entry.id, "decode", { hex: hex(mutated) })
+          assert.equal(ts.ok, rust.ok)
+          if (index < 5) assert.equal(rust.ok, index === 0)
+          if (ts.ok && rust.ok) {
+            assert.deepEqual(
+              Array.from(ts.value)
+                .sort(([a], [b]) => a - b)
+                .map(([key, value]) => [String(key), value]),
+              rust.value,
+            )
+            assert.equal(hex(entry.encode(Array.from(ts.value))), hex(mutated))
+          }
+        }
+      },
+      { numRuns: 200, seed: 20261020 },
+    )
     async function check(value: [number, string][]) {
       const transport = value.map(([key, value]) => [String(key), value])
       const rust = await oracle.request(entry.id, "encode", { value: transport })
@@ -103,13 +154,30 @@ function sets<A>(
         numRuns: 200,
         seed: 20261020,
       })
+      const vector = Borsh.toCodec(Schema.Array(item))
+      const itemCodec = Borsh.toCodec(item)
       await assertProperty(
-        fc.uint8Array({ maxLength: 96 }),
-        async (raw) => {
-          const ts = attempt(() => decode(raw))
-          const rust = await oracle.request(id, "decode", { hex: hex(raw) })
-          assert.equal(ts.ok, rust.ok)
-          if (ts.ok && rust.ok) assert.equal(hex(encode(ts.value)), hex(raw))
+        fc.uniqueArray(arbitrary, { minLength: 2, maxLength: id === "set_bool" ? 2 : 12 }),
+        async (values) => {
+          const raw = encode(make(values))
+          const parts = Schema.decodeSync(vector)(raw).map((value) =>
+            Schema.encodeSync(itemCodec)(value),
+          )
+          for (const [index, mutated] of mutations(
+            raw,
+            parts,
+            id === "set_string" ? 8 + (parts[0]?.length ?? 0) : 4,
+          ).entries()) {
+            const ts = attempt(() => decode(mutated))
+            const rust = await oracle.request(id, "decode", { hex: hex(mutated) })
+            assert.equal(ts.ok, rust.ok)
+            if (index < 5) assert.equal(rust.ok, index === 0)
+            if (ts.ok && rust.ok) {
+              assert.ok(Array.isArray(rust.value))
+              assert.deepEqual(new Set(Array.from(ts.value, transport)), new Set(rust.value))
+              assert.equal(hex(encode(ts.value)), hex(mutated))
+            }
+          }
         },
         { numRuns: 200, seed: 20261020 },
       )

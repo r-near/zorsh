@@ -138,7 +138,7 @@ const balances = Schema.encodeSync(Borsh.toCodec(Balances))(new Map([["alice.nea
 const Members = Schema.HashSet(Schema.String)
 ```
 
-Collections write a u32 count followed by entries sorted by encoded key. Keys and set elements support `Schema.Boolean`, explicit Borsh integers and `Schema.String`; floats and composite keys are rejected at codec construction. Integer order is numeric; strings follow Rust's UTF-8 ordering. Duplicate or descending wire keys fail before collection construction. Encoding preserves the input collection. Map values can use any supported layout, including unit. Inner transformations retain native Effect behavior; non-injective key transformations can collapse entries.
+Collections write a u32 count followed by entries sorted by encoded key. Keys and set elements support `Schema.Boolean`, explicit Borsh integers and `Schema.String`; other key schemas are rejected at codec construction. Integer order is numeric; strings follow Rust's UTF-8 ordering. Duplicate or descending wire keys fail before collection construction. Encoding preserves the input collection. Map values can use any supported layout, including unit. Inner transformations retain native Effect behavior; non-injective key transformations can collapse entries.
 
 ## Complex example
 

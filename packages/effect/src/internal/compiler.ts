@@ -1,4 +1,4 @@
-import { HashMap, HashSet, Option, Result, SchemaAST } from "effect"
+import { HashMap, HashSet, Option, Order, Result, SchemaAST } from "effect"
 import { descriptor } from "./annotations.js"
 import { BinaryError, Reader, utf8Length, Writer } from "./io.js"
 
@@ -213,7 +213,7 @@ function compileNode(
           const collection = adapter.get(value)
           if (collection === undefined || collection.size > 0xffff_ffff)
             throw new BinaryError(w.offset, "Expected native collection with u32 length")
-          w.ensure(4 + collection.size * minimum)
+          w.ensure(4 + (collection.size === 0 ? 0 : collection.size * minimum))
           const entries = Array.from(collection.entries).sort(([a], [b]) => compare(a, b))
           w.u32(entries.length)
           for (const [i, [key, value]] of entries.entries())
@@ -556,12 +556,9 @@ const hashSet: CollectionAdapter = {
   make: (entries) => HashSet.fromIterable(entries.map(([key]) => key)),
 }
 function comparePrimitive(a: unknown, b: unknown): number {
-  if (
-    (typeof a === "number" && typeof b === "number") ||
-    (typeof a === "bigint" && typeof b === "bigint") ||
-    (typeof a === "boolean" && typeof b === "boolean")
-  )
-    return a < b ? -1 : a > b ? 1 : 0
+  if (typeof a === "number" && typeof b === "number") return Order.Number(a, b)
+  if (typeof a === "bigint" && typeof b === "bigint") return Order.BigInt(a, b)
+  if (typeof a === "boolean" && typeof b === "boolean") return Order.Boolean(a, b)
   throw new BinaryError(0, "Expected ordered primitive")
 }
 function compareString(a: unknown, b: unknown): number {
@@ -569,14 +566,14 @@ function compareString(a: unknown, b: unknown): number {
     throw new BinaryError(0, "Expected string key")
   let i = 0
   let j = 0
-  while (i < a.length && j < b.length) {
-    const x = a.charCodeAt(i++)
-    const y = b.charCodeAt(j++)
-    const left =
-      x >= 0xd800 && x <= 0xdbff ? 0x10000 + ((x - 0xd800) << 10) + a.charCodeAt(i++) - 0xdc00 : x
-    const right =
-      y >= 0xd800 && y <= 0xdbff ? 0x10000 + ((y - 0xd800) << 10) + b.charCodeAt(j++) - 0xdc00 : y
+  for (
+    let left = a.codePointAt(i), right = b.codePointAt(j);
+    left !== undefined && right !== undefined;
+    left = a.codePointAt(i), right = b.codePointAt(j)
+  ) {
     if (left !== right) return left < right ? -1 : 1
+    i += left > 0xffff ? 2 : 1
+    j += right > 0xffff ? 2 : 1
   }
   return a.length - b.length
 }

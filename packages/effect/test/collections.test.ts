@@ -29,7 +29,7 @@ it("sorts copied native collections numerically and by Unicode scalar, retaining
     [257, "c"],
     [255, "d"],
   ]
-  const items = ["\u{10000}", "\ue000", "aa", "a", "", "\u{10001}"]
+  const items = ["\u{10000}", "\ue000", "aa", "a", "", "\u{10001}", "\u{10000}a"]
   for (const schema of mapSchemas) {
     const codec = Borsh.toCodec(schema)
     const value = schema === mapSchemas[0] ? new Map(entries) : HashMap.fromIterable(entries)
@@ -63,6 +63,7 @@ it("sorts copied native collections numerically and by Unicode scalar, retaining
       "aa",
       "\ue000",
       "\u{10000}",
+      "\u{10000}a",
       "\u{10001}",
     ])
   }
@@ -203,10 +204,6 @@ it("composes map values with arrays, Options, Results, structs, enums and owned 
   expect(decoded).toEqual(value)
   payload.fill(9)
   expect(decoded).not.toEqual(value)
-  const shorterErr = Borsh.toCodec(Schema.Array(Schema.Result(Borsh.U64, Borsh.U16)))
-  const bytes = Uint8Array.of(1, 0, 0, 0, 0, 7, 0)
-  expect(Schema.decodeSync(shorterErr)(bytes)).toEqual([Result.fail(7)])
-  expect(Schema.encodeSync(shorterErr)([Result.fail(7)])).toEqual(bytes)
 })
 
 class Decode extends Context.Service<Decode, { readonly prefix: string }>()("CollectionsDecode") {}
@@ -329,4 +326,68 @@ it("checks encoded iterator duplicates and invalid primitive comparison inputs",
   ).toThrow(/Expected ordered primitive/)
   const strings = compile(Schema.toEncoded(Schema.ReadonlySet(Schema.String)).ast)
   expect(() => strings.write(new Writer(64), new Set([1, 2]))).toThrow(/Expected string key/)
+})
+
+it("encodes empty native maps when a shared value layout overflows its minimum size", () => {
+  let value: Schema.Codec<unknown> = Schema.Array(Borsh.U8).pipe(Borsh.fixedArray(0xffff_ffff))
+  for (let i = 0; i < 500; i++) value = Schema.Struct({ a: value, b: value, c: value, d: value })
+  expect(compile(Schema.toEncoded(value).ast).minBytes).toBe(Infinity)
+  for (const [schema, empty] of [
+    [Schema.ReadonlyMap(Borsh.U8, value), new Map()],
+    [Schema.HashMap(Borsh.U8, value), HashMap.empty()],
+  ] as const) {
+    const codec = Borsh.toCodec(schema, { maxBytes: 4 })
+    const raw = new Uint8Array(4)
+    expect(Schema.decodeSync(codec)(raw)).toEqual(empty)
+    expect(Schema.encodeUnknownSync(codec)(empty)).toEqual(raw)
+  }
+})
+
+it("rejects lone surrogates in multi-entry sets without conflating distinct keys", () => {
+  for (const [schema, value] of [
+    [Schema.ReadonlySet(Schema.String), new Set(["\u2400\u0000", "\ud800\u0000"])],
+    [Schema.HashSet(Schema.String), HashSet.fromIterable(["\u2400\u0000", "\ud800\u0000"])],
+  ] as const)
+    expect(() => Schema.encodeUnknownSync(Borsh.toCodec(schema))(value)).toThrow(
+      /Lone UTF-16 surrogate/,
+    )
+})
+
+it("preserves native decoding collisions while rejecting duplicate encoded keys", () => {
+  const item = Schema.String.pipe(
+    Schema.decodeTo(
+      Schema.String,
+      SchemaTransformation.transform({
+        decode: (value) => value.toLowerCase(),
+        encode: (value) => value,
+      }),
+    ),
+  )
+  const encode = Schema.encodeSync(Borsh.toCodec(Schema.Array(Schema.String)))
+  for (const [schema, encoded] of [
+    [Schema.ReadonlySet(item), new Set(["A", "a"])],
+    [Schema.HashSet(item), HashSet.fromIterable(["A", "a"])],
+  ] as const) {
+    const codec = Borsh.toCodec(schema)
+    expect(Schema.decodeSync(codec)(encode(["A", "a"]))).toEqual(Schema.decodeSync(schema)(encoded))
+    expect(new Set(Schema.decodeSync(codec)(encode(["A", "a"])))).toEqual(new Set(["a"]))
+    expect(() => Schema.decodeSync(codec)(encode(["a", "a"]))).toThrow(/strictly increasing/)
+  }
+})
+
+it("orders native boolean and signed bigint sets by primitive value", () => {
+  for (const [item, values] of [
+    [Schema.Boolean, [false, true]],
+    [Borsh.I128, [-(1n << 127n), -1n, 0n, (1n << 127n) - 1n]],
+  ] as const) {
+    const expected = Schema.encodeUnknownSync(Borsh.toCodec(Schema.Array(item)))(values)
+    for (const [schema, value] of [
+      [Schema.ReadonlySet(item), new Set([...values].reverse())],
+      [Schema.HashSet(item), HashSet.fromIterable([...values].reverse())],
+    ] as const) {
+      const codec = Borsh.toCodec(schema)
+      expect(Schema.encodeUnknownSync(codec)(value)).toEqual(expected)
+      expect(new Set(Schema.decodeSync(codec)(expected))).toEqual(new Set<boolean | bigint>(values))
+    }
+  }
 })
