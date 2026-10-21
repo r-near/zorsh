@@ -81,6 +81,7 @@ for (const [id, bits, signed, schema] of [
       ? (v) => {
           assert.equal(typeof v, "number")
           assert.ok(Number.isSafeInteger(v))
+          assert.ok(!Object.is(v, -0), "integer decoder returned negative zero")
           return String(v)
         }
       : (v) => {
@@ -254,25 +255,42 @@ export function attempt(operation) {
   }
 }
 
+// Independent Node UTF-8 encoding supplies valid payloads; appending a lone
+// continuation byte mutates a valid encoding while keeping its u32 length true.
+export function utf8Frame(value, invalid) {
+  const payload = Buffer.from(value, "utf8")
+  const output = new Uint8Array(4 + payload.length + (invalid ? 1 : 0))
+  new DataView(output.buffer).setUint32(0, output.length - 4, true)
+  output.set(payload, 4)
+  if (invalid) output[output.length - 1] = 0x80
+  return output
+}
+
 export function rawArbitrary(entry) {
   const generic = fc.uint8Array({ maxLength: 96 })
   if (entry.width !== undefined)
     return fc.oneof(generic, fc.uint8Array({ minLength: entry.width, maxLength: entry.width }))
   // Independent headers intentionally include truthful, off-by-one and huge
   // declared lengths; payload sizes stay bounded regardless of the header.
-  return fc.oneof(
-    generic,
-    fc
-      .tuple(fc.uint8Array({ maxLength: 128 }), fc.integer({ min: 0, max: 3 }))
-      .map(([payload, mode]) => {
-        const output = new Uint8Array(payload.length + 4)
-        new DataView(output.buffer).setUint32(
-          0,
-          [payload.length, payload.length + 1, 0, 0xffffffff][mode],
-          true,
-        )
-        output.set(payload, 4)
-        return output
-      }),
-  )
+  const headers = fc
+    .tuple(fc.uint8Array({ maxLength: 128 }), fc.integer({ min: 0, max: 3 }))
+    .map(([payload, mode]) => {
+      const output = new Uint8Array(payload.length + 4)
+      new DataView(output.buffer).setUint32(
+        0,
+        [payload.length, payload.length + 1, 0, 0xffffffff][mode],
+        true,
+      )
+      output.set(payload, 4)
+      return output
+    })
+  return entry.id === "string"
+    ? fc.oneof(
+        generic,
+        headers,
+        fc
+          .tuple(stringArbitrary, fc.boolean())
+          .map(([value, invalid]) => utf8Frame(value, invalid)),
+      )
+    : fc.oneof(generic, headers)
 }

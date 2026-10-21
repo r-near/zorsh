@@ -182,11 +182,17 @@ export class OracleClient {
     }
   }
   #onData(chunk) {
-    if (this.#failure || this.#closed) return
+    if (this.#failure) return
     // Append only one bounded frame at a time, including for a chunk containing
     // several lines. Never concatenate an arbitrarily large child output chunk.
     let start = 0
     while (start < chunk.length) {
+      // Even an unterminated suffix is unsolicited once the response resolved.
+      // Keep checking during close: queued or shutdown output is still output.
+      if (!this.#pending) {
+        this.#fail(new HarnessError("protocol", "unsolicited/duplicate response bytes"))
+        return
+      }
       const lf = chunk.indexOf(10, start)
       const end = lf < 0 ? chunk.length : lf
       if (this.#buffer.length + end - start > this.#options.maxFrameBytes) {
@@ -197,10 +203,6 @@ export class OracleClient {
       if (lf < 0) return
       const frame = this.#buffer
       this.#buffer = Buffer.alloc(0)
-      if (!this.#pending) {
-        this.#fail(new HarnessError("protocol", "unsolicited/duplicate response"))
-        return
-      }
       const pending = this.#pending
       try {
         const response = checkResponse(

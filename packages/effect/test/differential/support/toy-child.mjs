@@ -6,6 +6,13 @@ if (mode === "ignore-term") {
   setInterval(() => {}, 1000)
 }
 if (mode === "exit-immediately") process.exit(19)
+if (mode === "shutdown-partial") {
+  setInterval(() => {}, 1000)
+  process.on("SIGTERM", () => {
+    process.stdout.write("{", () => process.exit(0))
+  })
+}
+let received = 0
 const input = readline.createInterface({ input: process.stdin })
 input.on("line", (line) => {
   const request = JSON.parse(line)
@@ -20,8 +27,13 @@ input.on("line", (line) => {
   }
   switch (mode) {
     case "timeout":
-    case "ignore-term":
       return
+    case "ignore-term":
+      if (received++ > 0) return
+      break
+    case "crash-on-777":
+      if (request.value === "777") process.exit(23)
+      break
     case "crash":
       process.exit(23)
     case "partial-eof":
@@ -87,5 +99,7 @@ input.on("line", (line) => {
       return
   }
   const frame = JSON.stringify(reply) + "\n"
-  process.stdout.write(mode === "duplicate-frame" ? frame + frame : frame)
+  process.stdout.write(
+    mode === "duplicate-frame" ? frame + frame : mode === "partial-suffix" ? frame + "{" : frame,
+  )
 })

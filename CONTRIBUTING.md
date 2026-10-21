@@ -17,6 +17,8 @@ The root and Effect package are private. Changesets uses independent package ver
 ```sh
 vp check
 vp run check-effect-lint
+command -v cargo
+vp run test-effect-differential
 vp test run
 vp -C packages/zorsh pack
 vp -C packages/effect pack
@@ -27,7 +29,7 @@ vp run check-effect-package
 vp exec changeset status
 ```
 
-`vp check` checks formatting, lint and types without writing files. Use `vp check --fix` to apply fixes. The shared configuration enables both type-aware linting and TypeScript checks. `vp test run` includes V8 coverage and produces `coverage/lcov.info` for CI.
+`vp check` checks formatting, lint and types without writing files. Use `vp check --fix` to apply fixes. The shared configuration enables both type-aware linting and TypeScript checks. `vp run test-effect-differential` rebuilds the pinned Rust oracle and Effect exports before testing the built public package. Check the Cargo shim as described below first. Bare `vp test run` compares the existing built artifacts, includes V8 source coverage, and produces `coverage/lcov.info` for CI. Missing artifacts fail with build instructions; recorded hashes identify exactly what ran, and do not assert freshness against source.
 
 Effect diagnostics use the official Go-based [Effect language service](https://github.com/Effect-TS/tsgo) (`@effect/tsgo` 0.55.0) and its recommended Oxlint preset. The install lifecycle patches Vite+'s bundled Oxlint 1.88.0 and oxlint-tsgolint 7.0.2004; an unsupported version or failed patch fails installation. TypeScript 7.0.2 remains unpatched, and `vp check` remains the single formatting, lint and type check. Keep these tooling versions compatible when updating them; do not skip install scripts. See the [official Vite+ integration guide](https://effect.website/docs/v4/getting-started/devtools/#vite-plus).
 
@@ -58,6 +60,7 @@ Regenerate all fixtures, including the generators marked `#[ignore]`, from the r
 ```sh
 cargo test --locked -j 1 --manifest-path rust/borsh_test/Cargo.toml -- --include-ignored
 test -z "$(git status --porcelain --untracked-files=all -- rust/borsh_test/test_data)"
+vp run test-effect-differential
 vp test run
 ```
 
@@ -75,7 +78,7 @@ cargo +1.98.0 test --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml
 
 The oracle pins Rust 1.98.0, rustfmt and Clippy in its own `rust-toolchain.toml`, and declares the tested `rust-version = "1.98.0"`. Root commands select `+1.98.0` explicitly because Rustup discovers pins from the current directory, not `--manifest-path`. CI installs that toolchain without changing the runner's default for `rust/borsh_test`. Cargo's default target stays inside `rust/borsh-oracle/target`; keep custom targets local to the worktree. Commit the oracle's Cargo.lock. CI caches each independent Rust crate. The existing `lint-and-typecheck` job runs oracle formatting/Clippy, and `tests` runs all 24 oracle tests, including proptests and the real persistent CLI. The legacy fixture generation/drift guard and both packages' TypeScript coverage remain included.
 
-This crate tests Rust transport and concrete registered Borsh types only. Cross-language checks against the Effect compiler and coverage-guided fuzzing come in a later slice and are not completed by adding the oracle. Keep Borsh errors distinct from malformed protocol/transport, resource limits and process failures. Extend the registry with concrete Rust types and derives/standard implementations; do not add a dynamic wire interpreter, schema export or contract introspection. Preserve `rust/borsh_test` as the independent older-version fixture source.
+The Rust crate tests transport and concrete registered Borsh types. The [primitive differential harness](packages/effect/test/differential/README.md) compares built Effect exports with 18 oracle IDs, including generated properties, explicit edge cases, shrinking and exact replay. Coverage-guided fuzzing remains separate work. Keep Borsh errors distinct from malformed protocol/transport, resource limits and process failures. Extend the registry with concrete Rust types and derives/standard implementations; do not add a dynamic wire interpreter, schema export or contract introspection. Preserve `rust/borsh_test` as the independent older-version fixture source.
 
 Any change to observable semantics names the verification boundary it affects.
 

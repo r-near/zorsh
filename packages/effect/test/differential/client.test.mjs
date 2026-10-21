@@ -88,10 +88,24 @@ describe("bounded persistent oracle client", () => {
     }
     dead(client.pid)
   })
+  for (const mode of ["partial-suffix", "shutdown-partial"]) {
+    it(`${mode} rejects unsolicited bytes even without a final newline`, async () => {
+      const client = toy(mode)
+      try {
+        assert.equal((await client.request("u8", "encode", { value: "1" })).ok, true)
+      } finally {
+        await client.close()
+      }
+      assert.equal(client.failure?.kind, "protocol")
+      dead(client.pid)
+    })
+  }
   it("times out, escalates to SIGKILL, and reaps a child ignoring SIGTERM", async () => {
-    const client = toy("ignore-term")
+    const client = toy("ignore-term", { timeoutMs: 2000 })
     let exit
     try {
+      // The valid roundtrip proves the SIGTERM handler is installed before hanging.
+      assert.equal((await client.request("u8", "encode", { value: "1" })).ok, true)
       await assert.rejects(
         client.request("u8", "encode", { value: "1" }),
         (error) => error.kind === "timeout",
