@@ -1,10 +1,7 @@
 /** Expected binary failures only. User schema defects never cross this catch boundary. */
 export class BinaryError extends Error {
   readonly path: PropertyKey[] = []
-  constructor(
-    readonly offset: number,
-    readonly detail: string,
-  ) {
+  constructor(offset: number, detail: string) {
     super(`${detail} at byte ${offset}`)
   }
 }
