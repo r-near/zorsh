@@ -1,4 +1,4 @@
-import { Context, Effect, Schema, SchemaTransformation } from "effect"
+import { Context, Effect, Option, Schema, SchemaTransformation } from "effect"
 import { expectTypeOf } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { U16 } from "../src/Borsh.js"
@@ -31,4 +31,22 @@ expectTypeOf(Schema.decodeSync(transfer)(bytes)).toEqualTypeOf<typeof Transfer.T
 const batch = Borsh.toCodec(Schema.Struct({ values: Schema.Array(schema) }))
 expectTypeOf(batch).toEqualTypeOf<
   Schema.Codec<{ readonly values: readonly string[] }, Uint8Array, Decode, Encode>
+>()
+
+const Action = Borsh.enumLayout(
+  Schema.TaggedUnion({ Idle: {}, Set: { value: Schema.Option(schema) } }),
+  { tag: "_tag", discriminants: { Idle: 3, Set: 17 } },
+)
+const action = Borsh.toCodec(Action)
+expectTypeOf(action).toEqualTypeOf<Schema.Codec<typeof Action.Type, Uint8Array, Decode, Encode>>()
+expectTypeOf(Action.cases.Set.make({ value: Option.some("v1") })._tag).toEqualTypeOf<"Set">()
+const label = Action.match(
+  { _tag: "Idle" },
+  { Idle: () => "idle", Set: (value) => Option.getOrElse(value.value, () => "empty") },
+)
+expectTypeOf(label).toEqualTypeOf<string>()
+const decoded = Schema.decodeEffect(action)(Uint8Array.of(3))
+expectTypeOf(decoded).toEqualTypeOf<Effect.Effect<typeof Action.Type, Schema.SchemaError, Decode>>()
+expectTypeOf(Schema.encodeEffect(action)({ _tag: "Idle" })).toEqualTypeOf<
+  Effect.Effect<Uint8Array, Schema.SchemaError, Encode>
 >()

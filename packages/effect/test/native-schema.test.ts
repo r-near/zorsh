@@ -353,7 +353,6 @@ describe("unsupported encoded layouts and metadata", () => {
   it("rejects ambiguous and future container layouts at construction", () => {
     for (const schema of [
       Schema.Union([Borsh.U8, Borsh.U16]),
-      Schema.Option(Borsh.U8),
       Schema.Literal(1),
       Schema.Unknown,
       Schema.Null,

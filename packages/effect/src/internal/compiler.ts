@@ -1,4 +1,4 @@
-import { SchemaAST } from "effect"
+import { Option, SchemaAST } from "effect"
 import { descriptor } from "./annotations.js"
 import { BinaryError, Reader, utf8Length, Writer } from "./io.js"
 
@@ -134,12 +134,14 @@ function compileNode(
     }
   }
   const representation = ast.annotations?.representation
+  const representationId =
+    typeof representation === "object" && representation !== null && "id" in representation
+      ? representation.id
+      : undefined
   if (
     ast._tag === "Declaration" &&
-    typeof representation === "object" &&
-    representation !== null &&
-    "id" in representation &&
-    representation.id === "effect/schema/Uint8Array"
+    representationId === "effect/schema/Uint8Array" &&
+    (layout === undefined || layout.kind === "fixedBytes")
   ) {
     const length = layout?.length
     return {
@@ -155,6 +157,94 @@ function compileNode(
         w.ensure(value.byteLength + (length === undefined ? 4 : 0))
         if (length === undefined) w.u32(value.byteLength)
         w.bytes(value)
+      },
+    }
+  }
+  if (layout?.kind === "enum") {
+    if (ast._tag !== "Union" || ast.types.length < 2 || ast.types.length > 256)
+      throw new Error(`${path}: Enum layout requires a union of 2..256 object variants`)
+    const discriminants = new Map(Object.entries(layout.discriminants))
+    const labels = new Map<string, { discriminant: number; payload: Layout }>()
+    const variants = new Map<number, { label: string; payload: Layout }>()
+    for (const member of ast.types) {
+      if (
+        member._tag !== "Objects" ||
+        member.context?.isOptional ||
+        descriptor(member) !== undefined
+      )
+        throw new Error(
+          `${path}: Enum variants must be required objects without layout annotations`,
+        )
+      const tag = member.propertySignatures.find((field) => field.name === layout.tag)?.type
+      if (tag?._tag !== "Literal" || typeof tag.literal !== "string" || tag.context?.isOptional)
+        throw new Error(`${path}: Enum tag must be a required string literal`)
+      const label = tag.literal
+      if (labels.has(label)) throw new Error(`${path}: Duplicate enum label ${label}`)
+      const discriminant = discriminants.get(label)
+      if (discriminant === undefined)
+        throw new Error(`${path}: Missing enum discriminant for ${label}`)
+      const payload = compileObject(member, path, compile, layout.tag)
+      labels.set(label, { discriminant, payload })
+      variants.set(discriminant, { label, payload })
+    }
+    if (labels.size !== Object.keys(layout.discriminants).length)
+      throw new Error(`${path}: Extra enum discriminants`)
+    const segment = `[${JSON.stringify(layout.tag)}]`
+    return {
+      minBytes: 1 + Math.min(...Array.from(labels.values(), (variant) => variant.payload.minBytes)),
+      isZeroSized: false,
+      read: (r) => {
+        const offset = r.offset
+        const tag = r.view(1).getUint8(0)
+        const variant = variants.get(tag)
+        if (variant === undefined) throw new BinaryError(offset, `Invalid enum tag ${tag}`)
+        const value = variant.payload.read(r)
+        Object.defineProperty(value, layout.tag, {
+          value: variant.label,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        })
+        return value
+      },
+      write: (w, value) => {
+        if (typeof value !== "object" || value === null)
+          throw new BinaryError(w.offset, "Expected enum object")
+        const variant = at(segment, () => {
+          const label = Object.hasOwn(value, layout.tag)
+            ? Reflect.get(value, layout.tag)
+            : undefined
+          const variant = typeof label === "string" ? labels.get(label) : undefined
+          if (variant === undefined) throw new BinaryError(w.offset, "Invalid enum label")
+          return variant
+        })
+        w.view(1).setUint8(0, variant.discriminant)
+        variant.payload.write(w, value)
+      },
+    }
+  }
+  if (
+    ast._tag === "Declaration" &&
+    representationId === "effect/schema/Option" &&
+    layout === undefined
+  ) {
+    const inner = ast.typeParameters[0]
+    if (ast.typeParameters.length !== 1 || inner === undefined)
+      throw new Error(`${path}: Option requires exactly one encoded type parameter`)
+    const item = compile(inner, `${path}["value"]`)
+    return {
+      minBytes: 1,
+      isZeroSized: false,
+      read: (r) => {
+        const offset = r.offset
+        const tag = r.view(1).getUint8(0)
+        if (tag > 1) throw new BinaryError(offset, `Invalid Option tag ${tag}`)
+        return tag === 0 ? Option.none() : Option.some(at('["value"]', () => item.read(r)))
+      },
+      write: (w, value) => {
+        if (!Option.isOption(value)) throw new BinaryError(w.offset, "Expected Option")
+        w.view(1).setUint8(0, Option.isSome(value) ? 1 : 0)
+        if (Option.isSome(value)) at('["value"]', () => item.write(w, value.value))
       },
     }
   }
@@ -198,41 +288,7 @@ function compileNode(
         },
       }
     case "Objects": {
-      if (ast.indexSignatures.length)
-        throw new Error(`${path}: Index signatures have no Borsh struct layout`)
-      const fields = ast.propertySignatures.map((field) => {
-        if (typeof field.name === "symbol")
-          throw new Error(`${path}: Symbol keys have no Borsh struct layout`)
-        const name = field.name
-        const segment = `[${JSON.stringify(name)}]`
-        return { name, segment, layout: compile(field.type, path + segment) }
-      })
-      return {
-        minBytes: fields.reduce((sum, field) => sum + field.layout.minBytes, 0),
-        isZeroSized: fields.every((field) => field.layout.isZeroSized),
-        read: (r) => {
-          const value: Record<PropertyKey, unknown> = {}
-          for (const field of fields)
-            Object.defineProperty(value, field.name, {
-              value: at(field.segment, () => field.layout.read(r)),
-              enumerable: true,
-              writable: true,
-              configurable: true,
-            })
-          return value
-        },
-        write: (w, value) => {
-          if (fields.length === 0) return
-          if (typeof value !== "object" || value === null)
-            throw new BinaryError(w.offset, "Expected object")
-          for (const field of fields)
-            at(field.segment, () => {
-              if (!Object.hasOwn(value, field.name))
-                throw new BinaryError(w.offset, "Missing required field")
-              field.layout.write(w, Reflect.get(value, field.name))
-            })
-        },
-      }
+      return compileObject(ast, path, compile)
     }
     case "Arrays": {
       if (ast.rest.length === 0) {
@@ -284,6 +340,51 @@ function compileNode(
       )
   }
   throw new Error(`${path}: Unsupported encoded schema ${ast._tag}`)
+}
+
+function compileObject(
+  ast: SchemaAST.Objects,
+  path: string,
+  compile: (ast: SchemaAST.AST, path: string) => Layout,
+  omit?: string,
+): Layout {
+  if (ast.indexSignatures.length)
+    throw new Error(`${path}: Index signatures have no Borsh struct layout`)
+  const fields = ast.propertySignatures
+    .filter((field) => field.name !== omit)
+    .map((field) => {
+      if (typeof field.name === "symbol")
+        throw new Error(`${path}: Symbol keys have no Borsh struct layout`)
+      const name = field.name
+      const segment = `[${JSON.stringify(name)}]`
+      return { name, segment, layout: compile(field.type, path + segment) }
+    })
+  return {
+    minBytes: fields.reduce((sum, field) => sum + field.layout.minBytes, 0),
+    isZeroSized: fields.every((field) => field.layout.isZeroSized),
+    read: (r) => {
+      const value: Record<PropertyKey, unknown> = {}
+      for (const field of fields)
+        Object.defineProperty(value, field.name, {
+          value: at(field.segment, () => field.layout.read(r)),
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        })
+      return value
+    },
+    write: (w, value) => {
+      if (fields.length === 0) return
+      if (typeof value !== "object" || value === null)
+        throw new BinaryError(w.offset, "Expected object")
+      for (const field of fields)
+        at(field.segment, () => {
+          if (!Object.hasOwn(value, field.name))
+            throw new BinaryError(w.offset, "Missing required field")
+          field.layout.write(w, Reflect.get(value, field.name))
+        })
+    },
+  }
 }
 
 function at<A>(segment: string, run: () => A): A {
