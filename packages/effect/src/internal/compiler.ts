@@ -514,12 +514,17 @@ function compileEnum(
       ? []
       : [{ ...variant, payload: compileObject(member, path, compile, tag) }],
   )
+  // A default-discriminant enum with one dataless variant is a Rust ZST; explicit maps imply repr(u8).
+  const isZeroSized =
+    layout === undefined &&
+    variants.length === 1 &&
+    objects.every((variant) => variant.payload.isZeroSized)
   if (objects.length === 0) {
     const read = select(variants)
     const byValue = new Map(variants.map((variant) => [variant.value, variant.discriminant]))
     return {
       minBytes: 1,
-      isZeroSized: false,
+      isZeroSized,
       read: (r) => read(r).value,
       write: (w, value) => {
         const discriminant = byValue.get(value)
@@ -533,7 +538,7 @@ function compileEnum(
   const segment = `[${JSON.stringify(tag)}]`
   return {
     minBytes: 1 + Math.min(...objects.map((variant) => variant.payload.minBytes)),
-    isZeroSized: false,
+    isZeroSized,
     read: (r) => {
       const variant = read(r)
       const value = variant.payload.read(r)

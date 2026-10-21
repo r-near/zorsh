@@ -120,6 +120,17 @@ Schema.toEncoded(Schema.Enum(Direction)).pipe(Borsh.discriminants({ Up: 1, Down:
 // @ts-expect-error Encoded TS enums still use member names.
 Schema.toEncoded(Schema.Enum(Direction)).pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
 Schema.flip(Schema.Enum(Direction)).pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
+const TypedDirection = Schema.toType(
+  Schema.String.pipe(
+    Schema.decodeTo(Schema.Enum(Direction), {
+      decode: SchemaGetter.transform(() => Direction.Up),
+      encode: SchemaGetter.transform(String),
+    }),
+  ),
+)
+TypedDirection.pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
+// @ts-expect-error The type side of a transformation still uses member names.
+TypedDirection.pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
 Schema.Enum({ 0: "zero", 1: "one" } as const).pipe(Borsh.discriminants({ 0: 1, 1: 5 }))
 // @ts-expect-error Plain object enums use their keys, including integer keys.
 Schema.Enum({ 0: "zero", 1: "one" } as const).pipe(Borsh.discriminants({ zero: 1, one: 5 }))

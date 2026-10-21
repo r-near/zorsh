@@ -1,6 +1,6 @@
 # borsh-rs oracle
 
-Independent test executable using pinned borsh 1.8.1 with `derive` and `de_strict_order`. The registry contains 50 concrete Rust types; Borsh derives and standard implementations own wire encoding. Each encode checks `borsh::object_length` before `borsh::to_vec`; decode uses `borsh::from_slice`, including trailing-byte rejection. Keep Cargo.lock. The older `rust/borsh_test` fixture source remains independent.
+Independent test executable using pinned borsh 1.8.1 with `derive` and `de_strict_order`. The registry contains 52 concrete Rust types; Borsh derives and standard implementations own wire encoding. Each encode checks `borsh::object_length` before `borsh::to_vec`; decode uses `borsh::from_slice`, including trailing-byte rejection. Keep Cargo.lock. The older `rust/borsh_test` fixture source remains independent.
 
 Build and test from the repository root:
 
@@ -58,6 +58,7 @@ Frames are limited to 1 MiB excluding LF; CR in CRLF counts. Raw Borsh data and 
 | `explicit_enum` | Derived `#[repr(u8)] #[borsh(use_discriminant = true)] enum ExplicitEnum { Idle = 3, Count(u16) = 17, Named { label: String, enabled: bool } = 250 }` |
 | `status` | Derived C-like `enum Status { Pending, Active, Done }` with default discriminants |
 | `sparse_status` | Derived `#[repr(u8)] #[borsh(use_discriminant = true)] enum SparseStatus { Pending = 1, Done = 5 }` |
+| `only`, `vec_only` | Derived single-variant `enum Only { Only }` (zero-sized) and `Vec<Only>` |
 | `shape` | Derived `enum Shape { Empty, Square(u32), Rect { width: u16, height: u16 } }` with default discriminants |
 | `map_u16_string` | `std::collections::BTreeMap<u16, String>` |
 | `set_string` | `std::collections::BTreeSet<String>` |
@@ -79,8 +80,8 @@ Frames are limited to 1 MiB excluding LF; CR in CRLF counts. Raw Borsh data and 
 | `result_unit_vec_unit` | `Result<(), Vec<()>>` |
 
 Zero-sized visitation is observable: unit, Empty, `((),)`, `[();0]`, `[();1]` and
-`[u8;0]` accept empty bytes. `Vec<()>`, `Vec<Empty>` and `Vec<[u8;0]>` reject even
-empty vectors. An empty `Vec<Vec<()>>` accepts, but a nonempty outer vector visits
+`[u8;0]` accept empty bytes. `Vec<()>`, `Vec<Empty>`, `Vec<[u8;0]>` and `Vec<Only>`
+reject even empty vectors; `Only` still writes its one-byte discriminant. An empty `Vec<Vec<()>>` accepts, but a nonempty outer vector visits
 and rejects its inner vector. `[Vec<()>;0]` accepts without visiting an item;
 `[Vec<()>;1]` rejects. `Option<()>` and `Vec<Option<()>>` accept. Therefore a TS
 compiler must model visit-time failures rather than reject every schema that

@@ -82,15 +82,21 @@ export function fixedArray(length: number): <S extends Schema.Top>(schema: S) =>
   }
 }
 
-/** TS enum member names, found through wrappers that keep the encoded side. */
-type EnumNames<S> = S extends { readonly enums: infer E }
+/** TS enum member names, found through wrappers that keep the encoded (or flipped type) side. */
+type EnumNames<S, Side extends "Encoded" | "Type" = "Encoded"> = S extends {
+  readonly enums: infer E
+}
   ? `${Extract<keyof E, string | number>}`
-  : S extends { readonly from: infer F; readonly to: unknown }
-    ? EnumNames<F>
-    : S extends { readonly schema: infer I extends Schema.Top; readonly Encoded: infer E }
-      ? [E, I["Encoded"]] extends [I["Encoded"], E]
-        ? EnumNames<I>
-        : never
+  : S extends { readonly from: infer F; readonly to: infer T }
+    ? EnumNames<Side extends "Encoded" ? F : T, Side>
+    : S extends Schema.Top & { readonly schema: infer I extends Schema.Top }
+      ? [S[Side], I[Side]] extends [I[Side], S[Side]]
+        ? EnumNames<I, Side>
+        : Side extends "Encoded"
+          ? [S[Side], I["Type"]] extends [I["Type"], S[Side]]
+            ? EnumNames<I, "Type">
+            : never
+          : never
       : never
 type EnumLabels<S extends Schema.Top, Tag extends string> = [EnumNames<S>] extends [never]
   ? S["Encoded"] extends infer E

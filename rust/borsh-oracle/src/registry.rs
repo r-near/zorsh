@@ -136,6 +136,24 @@ impl Transport for SparseStatus {
 }
 
 #[derive(BorshSerialize, BorshDeserialize)]
+enum Only {
+    Only,
+}
+impl Transport for Only {
+    fn parse(v: &Value) -> Result<Self> {
+        let m = object(v, &["variant", "value"])?;
+        <()>::parse(&m["value"])?;
+        match transport::text(&m["variant"])? {
+            "Only" => Ok(Self::Only),
+            _ => Err(Error::transport("unknown Only variant")),
+        }
+    }
+    fn normalized(&self) -> Value {
+        json!({"variant":"Only","value":null})
+    }
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
 enum Shape {
     Empty,
     Square(u32),
@@ -271,6 +289,7 @@ registry! {
     "array_u16_3" => [u16; 3], "storage_deposit" => StorageDeposit, "transfer" => Transfer,
     "explicit_enum" => ExplicitEnum, "status" => Status,
     "sparse_status" => SparseStatus, "shape" => Shape,
+    "only" => Only, "vec_only" => Vec<Only>,
     "map_u16_string" => BTreeMap<u16, String>, "set_string" => BTreeSet<String>,
     "set_i16" => BTreeSet<i16>, "set_i128" => BTreeSet<i128>,
     "set_u128" => BTreeSet<u128>, "set_bool" => BTreeSet<bool>,

@@ -315,6 +315,18 @@ it("matches Rust zero-sized visitation and malicious vector counts", async () =>
     ["empty", Schema.Struct({}), [{}], [new Uint8Array(), Uint8Array.of(0)]],
     ["tuple_unit", Schema.Tuple([Borsh.Unit]), [[[]]], [new Uint8Array(), Uint8Array.of(0)]],
     ["vec_unit", Schema.Array(Borsh.Unit), [[], [[]]], [Uint8Array.of(0, 0, 0, 0)]],
+    [
+      "only",
+      Schema.Literals(["Only"]),
+      ["Only"],
+      [Uint8Array.of(0), Uint8Array.of(1), new Uint8Array()],
+    ],
+    [
+      "vec_only",
+      Schema.Array(Schema.TaggedUnion({ Only: {} })),
+      [[], [{ _tag: "Only" }]],
+      [Uint8Array.of(0, 0, 0, 0), Uint8Array.of(1, 0, 0, 0, 0)],
+    ],
     ["vec_empty", Schema.Array(Schema.Struct({})), [[], [{}]], [Uint8Array.of(0, 0, 0, 0)]],
     [
       "vec_bytes0",
@@ -339,6 +351,9 @@ it("matches Rust zero-sized visitation and malicious vector counts", async () =>
     for (const value of values) {
       let transport: unknown = value
       if (id === "tuple_unit" || id === "array_unit_1") transport = [null]
+      if (id === "only") transport = { variant: "Only", value: null }
+      if (id === "vec_only" && Array.isArray(value))
+        transport = value.map(() => ({ variant: "Only", value: null }))
       if (id === "vec_unit" || id === "vec_bytes0") {
         assert.ok(Array.isArray(value))
         transport = value.map(() => (id === "vec_unit" ? null : ""))

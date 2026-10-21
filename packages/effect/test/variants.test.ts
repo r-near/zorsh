@@ -163,8 +163,32 @@ it("supports single-variant enums of every native form", () => {
       /Invalid enum tag 1/,
     )
   }
-  const units = Borsh.toCodec(Schema.Array(Schema.Literals(["Only"])))
-  expect(Schema.encodeSync(units)(["Only"])).toEqual(Uint8Array.of(1, 0, 0, 0, 0))
+})
+
+it("treats single dataless default enums as Rust zero-sized types", () => {
+  for (const single of [
+    Schema.Literals(["Only"]),
+    Schema.Enum({ Only: 0 }),
+    Schema.TaggedUnion({ Only: {} }),
+    Schema.TaggedUnion({ Only: { value: Borsh.Unit } }),
+    Schema.Struct({ only: Schema.Literals(["Only"]) }),
+  ]) {
+    const vector = Borsh.toCodec(Schema.Array(single as Schema.Codec<unknown>))
+    expect(() => Schema.encodeSync(vector)([])).toThrow(/zero-sized/)
+    expect(() => Schema.decodeSync(vector)(Uint8Array.of(0, 0, 0, 0))).toThrow(/zero-sized/)
+  }
+  for (const sized of [
+    Schema.Literals(["Only"]).pipe(Borsh.discriminants({ Only: 3 })),
+    Schema.TaggedUnion({ Only: { value: Borsh.U8 } }),
+    Schema.Literals(["A", "B"]),
+  ]) {
+    const vector = Borsh.toCodec(Schema.Array(sized as Schema.Codec<unknown>))
+    expect(Schema.decodeSync(vector)(Uint8Array.of(0, 0, 0, 0))).toEqual([])
+  }
+  const repr = Borsh.toCodec(
+    Schema.Array(Schema.Literals(["Only"]).pipe(Borsh.discriminants({ Only: 3 }))),
+  )
+  expect(Schema.encodeSync(repr)(["Only"])).toEqual(Uint8Array.of(1, 0, 0, 0, 3))
 })
 
 it("requires explicit discriminants for numeric and non-string enums", () => {
@@ -210,6 +234,18 @@ it("requires explicit discriminants for numeric and non-string enums", () => {
     Schema.toEncoded(Schema.Enum(Sparse)),
     Schema.flip(Schema.Enum(Sparse)),
   ])
+    expect(
+      Schema.encodeSync(Borsh.toCodec(wrapped.pipe(Borsh.discriminants({ A: 1, B: 5 }))))(Sparse.B),
+    ).toEqual(Uint8Array.of(5))
+  const typed = Schema.toType(
+    Schema.String.pipe(
+      Schema.decodeTo(
+        Schema.Enum(Sparse),
+        SchemaTransformation.transform({ decode: () => Sparse.B, encode: String }),
+      ),
+    ),
+  )
+  for (const wrapped of [typed, Schema.flip(typed)])
     expect(
       Schema.encodeSync(Borsh.toCodec(wrapped.pipe(Borsh.discriminants({ A: 1, B: 5 }))))(Sparse.B),
     ).toEqual(Uint8Array.of(5))
