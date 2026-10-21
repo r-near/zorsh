@@ -141,10 +141,10 @@ it("uses native Result values and Rust Err=0, Ok=1 tags", () => {
     /Expected Result/,
   )
   expect(() => boundary.write(new Writer(16), Result.succeed(256))).toThrow(
-    /\$\["success"\] at byte 1: Integer outside u8 range/,
+    expect.objectContaining({ message: "Integer outside u8 range at byte 1", path: ["success"] }),
   )
   expect(() => boundary.write(new Writer(16), Result.fail(7))).toThrow(
-    /\$\["failure"\] at byte 1: Expected tuple of length 0/,
+    expect.objectContaining({ message: "Expected tuple of length 0 at byte 1", path: ["failure"] }),
   )
 })
 
@@ -162,7 +162,7 @@ it("retains nested Result paths, payload transformations and inactive branch non
   expect(Schema.encodeSync(codec)(Result.succeed(text.make("7")))).toEqual(Uint8Array.of(1, 7))
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(1, 0))).toThrow(Schema.SchemaError)
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(0, 0, 0, 0, 0))).toThrow(
-    /\$\["failure"\] at byte 1: Borsh forbids vectors of zero-sized/,
+    /Borsh forbids vectors of zero-sized values at byte 1\n {2}at \["failure"\]$/,
   )
   const Nested = Schema.TaggedUnion({
     Empty: {},
@@ -174,7 +174,7 @@ it("retains nested Result paths, payload transformations and inactive branch non
   }).pipe(Borsh.discriminants({ Empty: 0, Values: 3 }))
   const nested = Borsh.toCodec(Nested)
   expect(() => Schema.decodeSync(nested)(Uint8Array.of(3, 1, 1, 2))).toThrow(
-    /\$\["rows"\]\[0\]\["value"\]\["success"\] at byte 3: Invalid bool tag 2/,
+    /Invalid bool tag 2 at byte 3\n {2}at \["rows"\]\[0\]\["value"\]\["success"\]$/,
   )
   const raw = Uint8Array.of(3, 1, 0, 1, 0, 0, 0, 7)
   const value = Schema.decodeSync(nested)(raw)
@@ -200,7 +200,7 @@ it("retains nested Result paths, payload transformations and inactive branch non
   const shared = Schema.Result(Schema.Boolean, Borsh.Unit)
   expect(() =>
     Schema.decodeSync(Borsh.toCodec(Schema.Tuple([shared, shared])))(Uint8Array.of(0, 1, 2)),
-  ).toThrow(/\$\[1\]\["success"\] at byte 2: Invalid bool tag 2/)
+  ).toThrow(/Invalid bool tag 2 at byte 2\n {2}at \[1\]\["success"\]$/)
 })
 
 it("validates Result arity and explicitly annotated fixed-array shapes", () => {
@@ -230,10 +230,12 @@ it("keeps native array checks and fixed-item error paths", () => {
   const shared = Schema.Array(Schema.Boolean).pipe(Borsh.fixedArray(1))
   const nested = Borsh.toCodec(Schema.Struct({ a: shared, b: shared }))
   expect(() => Schema.decodeSync(nested)(Uint8Array.of(1, 2))).toThrow(
-    /\$\["b"\]\[0\] at byte 1: Invalid bool tag 2/,
+    /Invalid bool tag 2 at byte 1\n {2}at \["b"\]\[0\]$/,
   )
   const layout = compile(Schema.toEncoded(shared).ast)
-  expect(() => layout.write(new Writer(8), [2])).toThrow(/\$\[0\] at byte 0: Expected boolean/)
+  expect(() => layout.write(new Writer(8), [2])).toThrow(
+    expect.objectContaining({ message: "Expected boolean at byte 0", path: [0] }),
+  )
 })
 
 it("accepts vectors and fixed arrays of Results with zero-byte payloads", () => {
@@ -257,7 +259,7 @@ it("accepts vectors and fixed arrays of Results with zero-byte payloads", () => 
 it("rejects truncated Result vectors before visiting their payloads", () => {
   const codec = Borsh.toCodec(Schema.Array(Schema.Result(Borsh.U16, Borsh.U64)))
   for (const raw of [Uint8Array.of(1, 0, 0, 0, 255, 0), Uint8Array.of(2, 0, 0, 0, 255, 0, 0, 0, 0)])
-    expect(() => Schema.decodeSync(codec)(raw)).toThrow(/\$ at byte 4: Truncated vector payload/)
+    expect(() => Schema.decodeSync(codec)(raw)).toThrow(/^Truncated vector payload at byte 4$/)
 })
 
 it("rejects fixed-array Suspend at helper construction without evaluating its thunk", () => {

@@ -207,9 +207,53 @@ describe("native Effect schema composition", () => {
     const error = Exit.findError(result)
     if (Result.isSuccess(error)) {
       expect(error.success).toBeInstanceOf(Schema.SchemaError)
-      expect(error.success.message).toMatch(/\$ at byte 0.*Truncated/)
+      expect(error.success.message).toMatch(/^Truncated input: need 4 bytes at byte 0$/)
       expect(error.success.issue).toBeDefined()
     } else throw new Error("Expected native schema failure")
+  })
+
+  it("renders binary failures as native pointer issues, like schema validation", () => {
+    const Owner = Schema.Struct({ owner: Schema.String, items: Schema.Array(Borsh.U8) })
+    const codec = Borsh.toCodec(Owner)
+    const failure = (run: () => unknown) => {
+      try {
+        run()
+      } catch (error) {
+        if (Schema.isSchemaError(error)) return error
+      }
+      throw new Error("Expected SchemaError")
+    }
+    const validation = failure(() => Schema.decodeUnknownSync(Owner)({ owner: 1, items: [] }))
+    expect(validation.message).toBe('Expected string\n  at ["owner"]')
+    const binary = failure(() => Schema.decodeSync(codec)(Uint8Array.of(0, 0, 0, 0, 2, 0, 0, 0, 1)))
+    expect(binary.message).toBe('Truncated vector payload at byte 8\n  at ["items"]')
+    const leaf = (issue: SchemaIssue.Issue): SchemaIssue.Issue =>
+      issue._tag === "Encoding" ? leaf(issue.issue) : issue
+    const pointer = leaf(binary.issue)
+    if (!(pointer instanceof SchemaIssue.Pointer)) throw new Error("Expected Pointer")
+    expect(pointer.path).toEqual(["items"])
+    expect(pointer.issue).toBeInstanceOf(SchemaIssue.InvalidValue)
+    const nested = failure(() => Schema.encodeSync(codec)({ owner: "\ud800", items: [] }))
+    expect(nested.message).toBe('Lone UTF-16 surrogate at byte 0\n  at ["owner"]')
+    const root = failure(() => Schema.decodeSync(codec)(new Uint8Array(9)))
+    expect(root.message).toBe("Trailing bytes at byte 8")
+    expect(leaf(root.issue)).toBeInstanceOf(SchemaIssue.InvalidValue)
+  })
+
+  it("memoizes codecs by schema identity and maxBytes", () => {
+    const schema = Schema.Struct({ value: Borsh.U8 })
+    const codec = Borsh.toCodec(schema)
+    expect(Borsh.toCodec(schema)).toBe(codec)
+    expect(Borsh.toCodec(schema, {})).toBe(codec)
+    expect(Borsh.toCodec(schema, { maxBytes: 16 * 1024 * 1024 })).toBe(codec)
+    const bounded = Borsh.toCodec(schema, { maxBytes: 1 })
+    expect(bounded).not.toBe(codec)
+    expect(Borsh.toCodec(schema, { maxBytes: 1 })).toBe(bounded)
+    expect(Borsh.toCodec(Schema.Struct({ value: Borsh.U8 }))).not.toBe(codec)
+    expect(() => Borsh.toCodec(schema, { maxBytes: 0 })).toThrow(/maxBytes must be/)
+    expect(() => Schema.decodeSync(bounded)(Uint8Array.of(7, 0))).toThrow(/maxBytes \(1\)/)
+    expect(Schema.decodeSync(codec)(Uint8Array.of(7))).toEqual({ value: 7 })
+    expect(Borsh.toCodec(schema.annotate({}))).not.toBe(codec)
   })
 
   it("preserves native defects from user refinements, transformations and getters", () => {

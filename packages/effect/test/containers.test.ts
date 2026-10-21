@@ -130,10 +130,10 @@ it("checks vector lengths before visiting items and keeps binary paths", () => {
     Schema.Struct({ rows: Schema.Array(Schema.Tuple([Borsh.U8, Schema.String])) }),
   )
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(255, 255, 255, 255))).toThrow(
-    /\$\["rows"\].*Truncated vector/,
+    /Truncated vector payload at byte 4\n {2}at \["rows"\]$/,
   )
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(1, 0, 0, 0, 7, 1, 0, 0, 0, 255))).toThrow(
-    /\$\["rows"\]\[0\]\[1\] at byte 9.*Invalid UTF-8/,
+    /Invalid UTF-8 at byte 9\n {2}at \["rows"\]\[0\]\[1\]$/,
   )
   const bounded = Borsh.toCodec(Schema.Array(Borsh.U16), { maxBytes: 7 })
   expect(Schema.encodeSync(bounded)([513])).toEqual(Uint8Array.of(1, 0, 0, 0, 1, 2))
@@ -159,9 +159,11 @@ it("rejects visited vectors of Rust zero-sized values", () => {
   const nested = Borsh.toCodec(Schema.Array(Schema.Array(Borsh.Unit)))
   expect(Schema.encodeSync(nested)([])).toEqual(Uint8Array.of(0, 0, 0, 0))
   expect(Schema.decodeSync(nested)(Uint8Array.of(0, 0, 0, 0))).toEqual([])
-  expect(() => Schema.encodeSync(nested)([[]])).toThrow(/\$\[0\].*zero-sized/)
+  expect(() => Schema.encodeSync(nested)([[]])).toThrow(
+    /Borsh forbids vectors of zero-sized values at byte 4\n {2}at \[0\]$/,
+  )
   expect(() => Schema.decodeSync(nested)(Uint8Array.of(1, 0, 0, 0, 0, 0, 0, 0))).toThrow(
-    /\$\[0\].*zero-sized/,
+    /Borsh forbids vectors of zero-sized values at byte 4\n {2}at \[0\]$/,
   )
   expect(Schema.encodeSync(Borsh.toCodec(Schema.Struct({})))({})).toEqual(new Uint8Array())
 })
@@ -297,10 +299,12 @@ it("bounds compilation work for shared schema DAGs", () => {
         return fields
       },
     })
-    Borsh.toCodec(shared)
+    const codec = Borsh.toCodec(shared)
     const first = visits
     expect(first).toBeLessThanOrEqual(depth + 1)
-    Borsh.toCodec(shared)
+    expect(Borsh.toCodec(shared)).toBe(codec)
+    expect(visits).toBe(first)
+    expect(Borsh.toCodec(shared, { maxBytes: 1024 })).not.toBe(codec)
     expect(visits).toBeGreaterThan(first)
     expect(visits).toBeLessThanOrEqual(2 * (depth + 1))
   }
@@ -310,7 +314,7 @@ it("keeps contextual binary paths when layouts are shared", () => {
   const Item = Schema.Struct({ active: Schema.Boolean })
   const codec = Borsh.toCodec(Schema.Struct({ first: Item, second: Item }))
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(1, 2))).toThrow(
-    /\$\["second"\]\["active"\] at byte 1: Invalid bool tag 2/,
+    /Invalid bool tag 2 at byte 1\n {2}at \["second"\]\["active"\]$/,
   )
 })
 

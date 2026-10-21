@@ -169,11 +169,17 @@ export interface Options {
 }
 
 function binaryFailure(error: unknown): SchemaIssue.Issue {
-  if (error instanceof BinaryError) return new SchemaIssue.InvalidValue({ message: error.message })
-  throw error
+  if (!(error instanceof BinaryError)) throw error
+  const issue = new SchemaIssue.InvalidValue({ message: error.message })
+  return error.path.length === 0 ? issue : new SchemaIssue.Pointer(error.path, issue)
 }
 
-/** Derive Borsh from the encoded side while retaining the original native parser. */
+const codecCache = new WeakMap<Schema.Constraint, Map<number, unknown>>()
+
+/**
+ * Derive Borsh from the encoded side while retaining the original native parser.
+ * Codecs are memoized by schema identity and maxBytes.
+ */
 export function toCodec<S extends Schema.Constraint>(
   schema: S,
   options?: Options,
@@ -181,6 +187,15 @@ export function toCodec<S extends Schema.Constraint>(
   const maxBytes = options?.maxBytes === undefined ? 16 * 1024 * 1024 : options.maxBytes
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)
     throw new Error("$: maxBytes must be a positive safe integer")
+  let codecs = codecCache.get(schema)
+  const cached = codecs?.get(maxBytes)
+  if (cached !== undefined)
+    return cached as Schema.Codec<
+      S["Type"],
+      Uint8Array,
+      S["DecodingServices"],
+      S["EncodingServices"]
+    >
   rejectSuspensions(schema.ast)
   const layout = compile(Schema.toEncoded(schema).ast)
   const binary = Schema.Uint8Array.pipe(
@@ -210,5 +225,8 @@ export function toCodec<S extends Schema.Constraint>(
       }),
     ),
   )
-  return binary.pipe(Schema.decodeTo(schema))
+  const codec = binary.pipe(Schema.decodeTo(schema))
+  if (codecs === undefined) codecCache.set(schema, (codecs = new Map()))
+  codecs.set(maxBytes, codec)
+  return codec
 }

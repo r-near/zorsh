@@ -517,7 +517,7 @@ it("composes nested enums, options and arrays with relative paths and byte limit
   expect(Schema.decodeSync(nested)(raw)).toEqual(value)
   expect(() =>
     Schema.decodeSync(nested)(Uint8Array.of(2, 0, 0, 0, 0, 1, 250, 0, 0, 0, 0, 2)),
-  ).toThrow(/\$\["actions"\]\[1\]\["value"\]\["enabled"\] at byte 11/)
+  ).toThrow(/ at byte 11\n {2}at \["actions"\]\[1\]\["value"\]\["enabled"\]$/)
   expect(() => Schema.decodeSync(nested)(Uint8Array.of(255, 255, 255, 255))).toThrow(
     /Truncated vector/,
   )
@@ -533,8 +533,12 @@ it("visits only present Option payloads and treats Option<Unit> as nonzero sized
   const c = Borsh.toCodec(Schema.Option(Schema.Array(Borsh.Unit)))
   expect(Schema.encodeSync(c)(Option.none())).toEqual(Uint8Array.of(0))
   expect(Schema.decodeSync(c)(Uint8Array.of(0))).toEqual(Option.none())
-  expect(() => Schema.encodeSync(c)(Option.some([]))).toThrow(/value.*zero-sized/)
-  expect(() => Schema.decodeSync(c)(Uint8Array.of(1, 0, 0, 0, 0))).toThrow(/value.*zero-sized/)
+  expect(() => Schema.encodeSync(c)(Option.some([]))).toThrow(
+    /zero-sized values at byte 1\n {2}at \["value"\]$/,
+  )
+  expect(() => Schema.decodeSync(c)(Uint8Array.of(1, 0, 0, 0, 0))).toThrow(
+    /zero-sized values at byte 1\n {2}at \["value"\]$/,
+  )
   const units = Borsh.toCodec(Schema.Array(Schema.Option(Borsh.Unit)))
   const value = [Option.none(), Option.some([] as const)] as const
   expect(Schema.encodeSync(units)(value)).toEqual(Uint8Array.of(2, 0, 0, 0, 0, 1))
@@ -585,7 +589,7 @@ it("does not share struct layouts that omit an enum tag", () => {
     )
   const shared = Borsh.toCodec(Schema.Struct({ first: schema, second: schema }))
   expect(() => Schema.decodeSync(shared)(Uint8Array.of(3, 250, 0, 0, 0, 0, 2))).toThrow(
-    /\$\["second"\]\["enabled"\]/,
+    /\n {2}at \["second"\]\["enabled"\]$/,
   )
 })
 
@@ -600,7 +604,10 @@ it("checks malformed Option declarations and binary encoder inputs", () => {
   for (const value of [null, 1, {}, { _tag: "toString" }, { _tag: 3 }])
     expect(() => layout.write(new Writer(20), value)).toThrow(/enum/i)
   expect(() => compile(Schema.Option(Borsh.U8).ast).read(new Reader(Uint8Array.of(1), 20))).toThrow(
-    /value.*Truncated/,
+    expect.objectContaining({
+      message: "Truncated input: need 1 bytes at byte 1",
+      path: ["value"],
+    }),
   )
 })
 

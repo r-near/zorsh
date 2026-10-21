@@ -1,52 +1,110 @@
 /** Expected binary failures only. User schema defects never cross this catch boundary. */
 export class BinaryError extends Error {
+  readonly path: PropertyKey[] = []
   constructor(
     readonly offset: number,
     readonly detail: string,
-    readonly path = "$",
   ) {
-    super(`${path} at byte ${offset}: ${detail}`)
-  }
-
-  prepend(segment: string): BinaryError {
-    return new BinaryError(this.offset, this.detail, `$${segment}${this.path.slice(1)}`)
+    super(`${detail} at byte ${offset}`)
   }
 }
 
+/** Prefix a binary failure's path while it unwinds; other errors pass through unchanged. */
+export function prepend(error: unknown, segment: PropertyKey): unknown {
+  if (error instanceof BinaryError) error.path.unshift(segment)
+  return error
+}
+
+const encoder = new TextEncoder()
+const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+/** Below this many bytes, plain loops beat the fixed cost of TextEncoder and TextDecoder. */
+const shortString = 32
+
 export class Reader {
   offset = 0
-  constructor(
-    readonly input: Uint8Array,
-    maxBytes: number,
-  ) {
+  /** A plain view, so slices copy even when the input is a Buffer. */
+  readonly input: Uint8Array
+  readonly view: DataView
+  constructor(input: Uint8Array, maxBytes: number) {
     if (input.byteLength > maxBytes)
       throw new BinaryError(0, `Input exceeds maxBytes (${maxBytes})`)
+    this.input = new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
+    this.view = new DataView(input.buffer, input.byteOffset, input.byteLength)
+  }
+
+  /** Reserve length bytes and return their start offset. */
+  advance(length: number): number {
+    const offset = this.offset
+    if (length > this.input.byteLength - offset)
+      throw new BinaryError(offset, `Truncated input: need ${length} bytes`)
+    this.offset = offset + length
+    return offset
   }
 
   take(length: number): Uint8Array {
-    if (length > this.input.byteLength - this.offset)
-      throw new BinaryError(this.offset, `Truncated input: need ${length} bytes`)
-    const bytes = new Uint8Array(this.input.buffer, this.input.byteOffset + this.offset, length)
-    this.offset += length
-    return bytes
+    const offset = this.advance(length)
+    return this.input.subarray(offset, offset + length)
   }
 
-  view(length: number): DataView {
-    const bytes = this.take(length)
-    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  u8(): number {
+    return this.view.getUint8(this.advance(1))
   }
 
   u32(): number {
-    return this.view(4).getUint32(0, true)
+    return this.view.getUint32(this.advance(4), true)
+  }
+
+  string(length: number): string {
+    const offset = this.advance(length)
+    if (length <= shortString) {
+      const ascii = this.ascii(offset, offset + length)
+      if (ascii !== undefined) return ascii
+    }
+    try {
+      return decoder.decode(this.input.subarray(offset, offset + length))
+    } catch {
+      throw new BinaryError(offset, "Invalid UTF-8")
+    }
+  }
+
+  /** Decode eight bytes per high-bit check, giving up on the first non-ASCII byte. */
+  private ascii(start: number, end: number): string | undefined {
+    const view = this.view
+    let value = ""
+    let i = start
+    for (; i + 8 <= end; i += 8) {
+      const low = view.getUint32(i, true)
+      const high = view.getUint32(i + 4, true)
+      if ((low | high) & 0x80808080) return undefined
+      value += String.fromCharCode(
+        low & 255,
+        (low >>> 8) & 255,
+        (low >>> 16) & 255,
+        low >>> 24,
+        high & 255,
+        (high >>> 8) & 255,
+        (high >>> 16) & 255,
+        high >>> 24,
+      )
+    }
+    for (; i < end; i++) {
+      const code = view.getUint8(i)
+      if (code > 0x7f) return undefined
+      value += String.fromCharCode(code)
+    }
+    return value
   }
 }
 
 export class Writer {
   private buffer: Uint8Array
+  /** Recreated whenever the buffer grows; read it only after advance. */
+  view: DataView
   offset = 0
 
   constructor(readonly maxBytes: number) {
     this.buffer = new Uint8Array(Math.min(64, maxBytes))
+    this.view = new DataView(this.buffer.buffer)
   }
 
   ensure(length: number): void {
@@ -59,23 +117,39 @@ export class Writer {
     )
     buffer.set(this.buffer)
     this.buffer = buffer
+    this.view = new DataView(buffer.buffer)
   }
 
-  view(length: number): DataView {
+  /** Reserve length bytes and return their start offset. */
+  advance(length: number): number {
     this.ensure(length)
-    const view = new DataView(this.buffer.buffer, this.offset, length)
-    this.offset += length
-    return view
+    const offset = this.offset
+    this.offset = offset + length
+    return offset
   }
 
   bytes(bytes: Uint8Array): void {
-    this.ensure(bytes.byteLength)
-    this.buffer.set(bytes, this.offset)
-    this.offset += bytes.byteLength
+    const offset = this.advance(bytes.byteLength)
+    this.buffer.set(bytes, offset)
+  }
+
+  u8(value: number): void {
+    const offset = this.advance(1)
+    this.view.setUint8(offset, value)
   }
 
   u32(value: number): void {
-    this.view(4).setUint32(0, value, true)
+    const offset = this.advance(4)
+    this.view.setUint32(offset, value, true)
+  }
+
+  /** Write a string whose UTF-8 length utf8Length has already validated. */
+  string(value: string, length: number): void {
+    const offset = this.advance(length)
+    if (length === value.length && length <= shortString) {
+      const buffer = this.buffer
+      for (let i = 0; i < length; i++) buffer[offset + i] = value.charCodeAt(i)
+    } else encoder.encodeInto(value, this.buffer.subarray(offset, offset + length))
   }
 
   finish(): Uint8Array {
@@ -83,7 +157,7 @@ export class Writer {
   }
 }
 
-/** Count and validate before TextEncoder allocates; stop as soon as the budget is exceeded. */
+/** Count and validate before encoding; stop as soon as the budget is exceeded. */
 export function utf8Length(value: string, budget: number, offset: number): number {
   let length = 0
   for (let i = 0; i < value.length; i++) {

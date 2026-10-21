@@ -82,7 +82,7 @@ it("rejects duplicate and descending wire keys before native construction", () =
       Uint8Array.of(2, 0, 0, 0, 0, 1, 1, 0),
     ])
       expect(() => Schema.decodeSync(codec)(raw)).toThrow(
-        /\$\["entries"\]\[1\]\["key"\] at byte 6: Collection keys must be strictly increasing/,
+        /Collection keys must be strictly increasing at byte 6\n {2}at \["entries"\]\[1\]\["key"\]$/,
       )
     expect(() => Schema.decodeSync(codec)(Uint8Array.of(255, 255, 255, 255))).toThrow(
       /Truncated collection payload/,
@@ -155,7 +155,7 @@ it("preflights collection bytes before copying entries and preserves precise pay
   expect(() => layout.write(new Writer(8), huge)).toThrow(/maxBytes/)
   const codec = Borsh.toCodec(schema)
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(1, 0, 0, 0, 1, 0, 2))).toThrow(
-    /\$\[0\]\["value"\] at byte 6: Invalid bool tag 2/,
+    /Invalid bool tag 2 at byte 6\n {2}at \[0\]\["value"\]$/,
   )
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(1, 0, 0, 0, 1, 0))).toThrow(
     /Truncated collection payload/,
@@ -163,7 +163,7 @@ it("preflights collection bytes before copying entries and preserves precise pay
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(0, 0, 0, 0, 0))).toThrow(/Trailing/)
   const strings = Borsh.toCodec(Schema.ReadonlySet(Schema.String))
   expect(() => Schema.decodeSync(strings)(Uint8Array.of(1, 0, 0, 0, 2, 0, 0, 0, 97))).toThrow(
-    /\$\[0\]\["key"\].*Truncated input/,
+    /Truncated input: need 2 bytes at byte 8\n {2}at \[0\]\["key"\]$/,
   )
   expect(() => Schema.decodeSync(strings)(Uint8Array.of(1, 0, 0, 0, 1, 0, 0, 0, 255))).toThrow(
     /Invalid UTF-8/,
@@ -312,7 +312,10 @@ it("checks encoded iterator duplicates and invalid primitive comparison inputs",
     },
   })
   expect(() => layout.write(new Writer(64), duplicate)).toThrow(
-    /\$\[1\]\["key"\].*strictly increasing/,
+    expect.objectContaining({
+      message: "Collection keys must be strictly increasing at byte 6",
+      path: [1, "key"],
+    }),
   )
   expect(() =>
     layout.write(

@@ -1,6 +1,6 @@
 import { HashMap, HashSet, Option, Order, Result, SchemaAST } from "effect"
 import { descriptor, type EnumDescriptor } from "./annotations.js"
-import { BinaryError, Reader, utf8Length, Writer } from "./io.js"
+import { BinaryError, prepend, Reader, utf8Length, Writer } from "./io.js"
 
 export interface Layout {
   readonly minBytes: number
@@ -78,33 +78,11 @@ function compileNode(
     const bigint = bits > 32
     if (ast._tag !== (bigint ? "BigInt" : "Number"))
       throw new Error(`${path}: Integer layout does not match encoded schema`)
-    const width = bits / 8
-    const minimum = signed ? -(1n << BigInt(bits - 1)) : 0n
-    const maximum = (1n << BigInt(signed ? bits - 1 : bits)) - 1n
     return {
       compare: comparePrimitive,
-      minBytes: width,
+      minBytes: bits / 8,
       isZeroSized: false,
-      read: (r) => {
-        const view = r.view(width)
-        let value = 0n
-        for (let i = width - 1; i >= 0; i--) value = (value << 8n) | BigInt(view.getUint8(i))
-        if (signed && value > maximum) value -= 1n << BigInt(bits)
-        return bigint ? value : Number(value)
-      },
-      write: (w, value) => {
-        let n: bigint
-        if (typeof value === "bigint" && bigint) n = value
-        else if (typeof value === "number" && !bigint && Number.isInteger(value)) n = BigInt(value)
-        else throw new BinaryError(w.offset, `Expected ${signed ? "i" : "u"}${bits}`)
-        if (n < minimum || n > maximum)
-          throw new BinaryError(w.offset, `Integer outside ${signed ? "i" : "u"}${bits} range`)
-        const view = w.view(width)
-        for (let i = 0; i < width; i++) {
-          view.setUint8(i, Number(n & 255n))
-          n >>= 8n
-        }
-      },
+      ...integer(bits, signed),
     }
   }
   if (layout?.kind === "float") {
@@ -115,9 +93,9 @@ function compileNode(
       minBytes: bits / 8,
       isZeroSized: false,
       read: (r) => {
-        const offset = r.offset
-        const view = r.view(bits / 8)
-        const value = bits === 32 ? view.getFloat32(0, true) : view.getFloat64(0, true)
+        const offset = r.advance(bits / 8)
+        const value =
+          bits === 32 ? r.view.getFloat32(offset, true) : r.view.getFloat64(offset, true)
         if (Number.isNaN(value)) throw new BinaryError(offset, "Borsh forbids NaN")
         return value
       },
@@ -129,9 +107,9 @@ function compileNode(
         ) {
           throw new BinaryError(w.offset, `Expected exact non-NaN f${bits}`)
         }
-        const view = w.view(bits / 8)
-        if (bits === 32) view.setFloat32(0, value, true)
-        else view.setFloat64(0, value, true)
+        const offset = w.advance(bits / 8)
+        if (bits === 32) w.view.setFloat32(offset, value, true)
+        else w.view.setFloat64(offset, value, true)
       },
     }
   }
@@ -197,16 +175,20 @@ function compileNode(
           if (count > Math.floor((r.input.byteLength - r.offset) / minimum))
             throw new BinaryError(r.offset, "Truncated collection payload")
           const entries: [unknown, unknown][] = []
-          for (let i = 0; i < count; i++)
-            at(`[${i}]`, () => {
+          let i = 0
+          let part = "key"
+          try {
+            for (; i < count; i++) {
               const offset = r.offset
-              const key = at('["key"]', () => keyLayout.read(r))
-              if (i > 0) at('["key"]', () => ordered(entries[i - 1]?.[0], key, offset))
-              entries.push([
-                key,
-                valueLayout === undefined ? undefined : at('["value"]', () => valueLayout.read(r)),
-              ])
-            })
+              part = "key"
+              const key = keyLayout.read(r)
+              if (i > 0) ordered(entries[i - 1]?.[0], key, offset)
+              part = "value"
+              entries.push([key, valueLayout === undefined ? undefined : valueLayout.read(r)])
+            }
+          } catch (error) {
+            throw prepend(prepend(error, part), i)
+          }
           return adapter.make(entries)
         },
         write: (w, value) => {
@@ -216,12 +198,20 @@ function compileNode(
           w.ensure(4 + (collection.size === 0 ? 0 : collection.size * minimum))
           const entries = Array.from(collection.entries).sort(([a], [b]) => compare(a, b))
           w.u32(entries.length)
-          for (const [i, [key, value]] of entries.entries())
-            at(`[${i}]`, () => {
-              if (i > 0) at('["key"]', () => ordered(entries[i - 1]?.[0], key, w.offset))
-              at('["key"]', () => keyLayout.write(w, key))
-              if (valueLayout !== undefined) at('["value"]', () => valueLayout.write(w, value))
-            })
+          let i = 0
+          let part = "key"
+          try {
+            for (const [key, value] of entries) {
+              part = "key"
+              if (i > 0) ordered(entries[i - 1]?.[0], key, w.offset)
+              keyLayout.write(w, key)
+              part = "value"
+              if (valueLayout !== undefined) valueLayout.write(w, value)
+              i++
+            }
+          } catch (error) {
+            throw prepend(prepend(error, part), i)
+          }
         },
       }
     }
@@ -245,14 +235,24 @@ function compileNode(
       isZeroSized: false,
       read: (r) => {
         const offset = r.offset
-        const tag = r.view(1).getUint8(0)
+        const tag = r.u8()
         if (tag > 1) throw new BinaryError(offset, `Invalid Option tag ${tag}`)
-        return tag === 0 ? Option.none() : Option.some(at('["value"]', () => item.read(r)))
+        if (tag === 0) return Option.none()
+        try {
+          return Option.some(item.read(r))
+        } catch (error) {
+          throw prepend(error, "value")
+        }
       },
       write: (w, value) => {
         if (!Option.isOption(value)) throw new BinaryError(w.offset, "Expected Option")
-        w.view(1).setUint8(0, Option.isSome(value) ? 1 : 0)
-        if (Option.isSome(value)) at('["value"]', () => item.write(w, value.value))
+        w.u8(Option.isSome(value) ? 1 : 0)
+        if (Option.isNone(value)) return
+        try {
+          item.write(w, value.value)
+        } catch (error) {
+          throw prepend(error, "value")
+        }
       },
     }
   }
@@ -271,17 +271,24 @@ function compileNode(
       isZeroSized: false,
       read: (r) => {
         const offset = r.offset
-        const tag = r.view(1).getUint8(0)
+        const tag = r.u8()
         if (tag > 1) throw new BinaryError(offset, `Invalid Result tag ${tag}`)
-        return tag === 1
-          ? Result.succeed(at('["success"]', () => ok.read(r)))
-          : Result.fail(at('["failure"]', () => err.read(r)))
+        try {
+          return tag === 1 ? Result.succeed(ok.read(r)) : Result.fail(err.read(r))
+        } catch (error) {
+          throw prepend(error, tag === 1 ? "success" : "failure")
+        }
       },
       write: (w, value) => {
         if (!Result.isResult(value)) throw new BinaryError(w.offset, "Expected Result")
-        w.view(1).setUint8(0, Result.isSuccess(value) ? 1 : 0)
-        if (Result.isSuccess(value)) at('["success"]', () => ok.write(w, value.success))
-        else at('["failure"]', () => err.write(w, value.failure))
+        const success = Result.isSuccess(value)
+        w.u8(success ? 1 : 0)
+        try {
+          if (success) ok.write(w, value.success)
+          else err.write(w, value.failure)
+        } catch (error) {
+          throw prepend(error, success ? "success" : "failure")
+        }
       },
     }
   }
@@ -298,15 +305,13 @@ function compileNode(
       read: (r) => {
         if (minBytes > r.input.byteLength - r.offset)
           throw new BinaryError(r.offset, "Truncated fixed array payload")
-        const value: unknown[] = []
-        for (let i = 0; i < length; i++) value.push(at(`[${i}]`, () => item.read(r)))
-        return value
+        return readItems(r, item, length)
       },
       write: (w, value) => {
         if (!Array.isArray(value) || value.length !== length)
           throw new BinaryError(w.offset, `Expected fixed array of length ${length}`)
         w.ensure(minBytes)
-        for (let i = 0; i < length; i++) at(`[${i}]`, () => item.write(w, value[i]))
+        writeItems(w, item, value)
       },
     }
   }
@@ -318,21 +323,14 @@ function compileNode(
         compare: compareString,
         minBytes: 4,
         isZeroSized: false,
-        read: (r) => {
-          const bytes = r.take(r.u32())
-          try {
-            return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)
-          } catch {
-            throw new BinaryError(r.offset - bytes.byteLength, "Invalid UTF-8")
-          }
-        },
+        read: (r) => r.string(r.u32()),
         write: (w, value) => {
           if (typeof value !== "string") throw new BinaryError(w.offset, "Expected string")
           w.ensure(4)
           const length = utf8Length(value, w.maxBytes - w.offset - 4, w.offset)
           w.ensure(4 + length)
           w.u32(length)
-          w.bytes(new TextEncoder().encode(value))
+          w.string(value, length)
         },
       }
     case "Boolean":
@@ -342,13 +340,13 @@ function compileNode(
         isZeroSized: false,
         read: (r) => {
           const offset = r.offset
-          const value = r.view(1).getUint8(0)
+          const value = r.u8()
           if (value > 1) throw new BinaryError(offset, `Invalid bool tag ${value}`)
           return value === 1
         },
         write: (w, value) => {
           if (typeof value !== "boolean") throw new BinaryError(w.offset, "Expected boolean")
-          w.view(1).setUint8(0, value ? 1 : 0)
+          w.u8(value ? 1 : 0)
         },
       }
     case "Objects": {
@@ -360,11 +358,31 @@ function compileNode(
         return {
           minBytes: items.reduce((sum, item) => sum + item.minBytes, 0),
           isZeroSized: items.every((item) => item.isZeroSized),
-          read: (r) => items.map((item, i) => at(`[${i}]`, () => item.read(r))),
+          read: (r) => {
+            const value: unknown[] = []
+            let i = 0
+            try {
+              for (const item of items) {
+                value.push(item.read(r))
+                i++
+              }
+            } catch (error) {
+              throw prepend(error, i)
+            }
+            return value
+          },
           write: (w, value) => {
             if (!Array.isArray(value) || value.length !== items.length)
               throw new BinaryError(w.offset, `Expected tuple of length ${items.length}`)
-            items.forEach((item, i) => at(`[${i}]`, () => item.write(w, value[i])))
+            let i = 0
+            try {
+              for (const item of items) {
+                item.write(w, value[i])
+                i++
+              }
+            } catch (error) {
+              throw prepend(error, i)
+            }
           },
         }
       }
@@ -384,16 +402,14 @@ function compileNode(
           const count = r.u32()
           if (count > Math.floor((r.input.byteLength - r.offset) / item.minBytes))
             throw new BinaryError(r.offset, "Truncated vector payload")
-          const value: unknown[] = []
-          for (let i = 0; i < count; i++) value.push(at(`[${i}]`, () => item.read(r)))
-          return value
+          return readItems(r, item, count)
         },
         write: (w, value) => {
           checkItem(w.offset)
           if (!Array.isArray(value) || value.length > 0xffff_ffff)
             throw new BinaryError(w.offset, "Expected array with u32 length")
           w.u32(value.length)
-          for (let i = 0; i < value.length; i++) at(`[${i}]`, () => item.write(w, value[i]))
+          writeItems(w, item, value)
         },
       }
     }
@@ -508,7 +524,7 @@ function compileEnum(
     const byDiscriminant = new Map(variants.map((variant) => [variant.discriminant, variant]))
     return (r: Reader) => {
       const offset = r.offset
-      const discriminant = r.view(1).getUint8(0)
+      const discriminant = r.u8()
       const variant = byDiscriminant.get(discriminant)
       if (variant === undefined) throw new BinaryError(offset, `Invalid enum tag ${discriminant}`)
       return variant
@@ -534,13 +550,12 @@ function compileEnum(
       write: (w, value) => {
         const discriminant = byValue.get(value)
         if (discriminant === undefined) throw new BinaryError(w.offset, "Invalid enum value")
-        w.view(1).setUint8(0, discriminant)
+        w.u8(discriminant)
       },
     }
   }
   const read = select(objects)
   const byLabel = new Map(objects.map((variant) => [variant.label, variant]))
-  const segment = `[${JSON.stringify(tag)}]`
   return {
     minBytes: 1 + Math.min(...objects.map((variant) => variant.payload.minBytes)),
     isZeroSized,
@@ -558,13 +573,10 @@ function compileEnum(
     write: (w, value) => {
       if (typeof value !== "object" || value === null)
         throw new BinaryError(w.offset, "Expected enum object")
-      const variant = at(segment, () => {
-        const label = Object.hasOwn(value, tag) ? Reflect.get(value, tag) : undefined
-        const variant = typeof label === "string" ? byLabel.get(label) : undefined
-        if (variant === undefined) throw new BinaryError(w.offset, "Invalid enum label")
-        return variant
-      })
-      w.view(1).setUint8(0, variant.discriminant)
+      const label = Object.hasOwn(value, tag) ? Reflect.get(value, tag) : undefined
+      const variant = typeof label === "string" ? byLabel.get(label) : undefined
+      if (variant === undefined) throw prepend(new BinaryError(w.offset, "Invalid enum label"), tag)
+      w.u8(variant.discriminant)
       variant.payload.write(w, value)
     },
   }
@@ -584,43 +596,120 @@ function compileObject(
       if (typeof field.name === "symbol")
         throw new Error(`${path}: Symbol keys have no Borsh struct layout`)
       const name = field.name
-      const segment = `[${JSON.stringify(name)}]`
-      return { name, segment, layout: compile(field.type, path + segment) }
+      // Assignment would hit an inherited setter or a frozen inherited property.
+      const define = name in Object.prototype
+      return { name, define, layout: compile(field.type, `${path}[${JSON.stringify(name)}]`) }
     })
   return {
     minBytes: fields.reduce((sum, field) => sum + field.layout.minBytes, 0),
     isZeroSized: fields.every((field) => field.layout.isZeroSized),
     read: (r) => {
       const value: Record<PropertyKey, unknown> = {}
-      for (const field of fields)
-        Object.defineProperty(value, field.name, {
-          value: at(field.segment, () => field.layout.read(r)),
-          enumerable: true,
-          writable: true,
-          configurable: true,
-        })
+      let name: string | number = ""
+      try {
+        for (const field of fields) {
+          name = field.name
+          const item = field.layout.read(r)
+          if (field.define)
+            Object.defineProperty(value, name, {
+              value: item,
+              enumerable: true,
+              writable: true,
+              configurable: true,
+            })
+          else value[name] = item
+        }
+      } catch (error) {
+        throw prepend(error, name)
+      }
       return value
     },
     write: (w, value) => {
       if (fields.length === 0) return
       if (typeof value !== "object" || value === null)
         throw new BinaryError(w.offset, "Expected object")
-      for (const field of fields)
-        at(field.segment, () => {
-          if (!Object.hasOwn(value, field.name))
-            throw new BinaryError(w.offset, "Missing required field")
-          field.layout.write(w, Reflect.get(value, field.name))
-        })
+      let name: string | number = ""
+      try {
+        for (const field of fields) {
+          name = field.name
+          if (!Object.hasOwn(value, name)) throw new BinaryError(w.offset, "Missing required field")
+          field.layout.write(w, Reflect.get(value, name))
+        }
+      } catch (error) {
+        throw prepend(error, name)
+      }
     },
   }
 }
 
-function at<A>(segment: string, run: () => A): A {
+function readItems(r: Reader, item: Layout, count: number): unknown[] {
+  const value: unknown[] = []
+  let i = 0
   try {
-    return run()
+    for (; i < count; i++) value.push(item.read(r))
   } catch (error) {
-    if (error instanceof BinaryError) throw error.prepend(segment)
-    throw error
+    throw prepend(error, i)
+  }
+  return value
+}
+
+function writeItems(w: Writer, item: Layout, value: readonly unknown[]): void {
+  let i = 0
+  try {
+    for (; i < value.length; i++) item.write(w, value[i])
+  } catch (error) {
+    throw prepend(error, i)
+  }
+}
+
+/** Native DataView access; 128-bit values are two little-endian 64-bit halves. */
+function integer(bits: 8 | 16 | 32 | 64 | 128, signed: boolean): Pick<Layout, "read" | "write"> {
+  const width = bits / 8
+  const name = `${signed ? "i" : "u"}${bits}`
+  if (bits <= 32) {
+    const minimum = signed ? -(2 ** (bits - 1)) : 0
+    const maximum = 2 ** (signed ? bits - 1 : bits) - 1
+    return {
+      read: (r) => {
+        const offset = r.advance(width)
+        const view = r.view
+        if (bits === 8) return signed ? view.getInt8(offset) : view.getUint8(offset)
+        if (bits === 16) return signed ? view.getInt16(offset, true) : view.getUint16(offset, true)
+        return signed ? view.getInt32(offset, true) : view.getUint32(offset, true)
+      },
+      write: (w, value) => {
+        if (typeof value !== "number" || !Number.isInteger(value))
+          throw new BinaryError(w.offset, `Expected ${name}`)
+        if (value < minimum || value > maximum)
+          throw new BinaryError(w.offset, `Integer outside ${name} range`)
+        // Unsigned setters wrap negative values to the same two's complement bytes.
+        const offset = w.advance(width)
+        if (bits === 8) w.view.setUint8(offset, value)
+        else if (bits === 16) w.view.setUint16(offset, value, true)
+        else w.view.setUint32(offset, value, true)
+      },
+    }
+  }
+  const minimum = signed ? -(1n << BigInt(bits - 1)) : 0n
+  const maximum = (1n << BigInt(signed ? bits - 1 : bits)) - 1n
+  return {
+    read: (r) => {
+      const offset = r.advance(width)
+      const view = r.view
+      if (bits === 64)
+        return signed ? view.getBigInt64(offset, true) : view.getBigUint64(offset, true)
+      const high = signed ? view.getBigInt64(offset + 8, true) : view.getBigUint64(offset + 8, true)
+      return (high << 64n) | view.getBigUint64(offset, true)
+    },
+    write: (w, value) => {
+      if (typeof value !== "bigint") throw new BinaryError(w.offset, `Expected ${name}`)
+      if (value < minimum || value > maximum)
+        throw new BinaryError(w.offset, `Integer outside ${name} range`)
+      // BigUint64 setters take the value modulo 2^64, so signed halves need no special case.
+      const offset = w.advance(width)
+      w.view.setBigUint64(offset, value, true)
+      if (bits === 128) w.view.setBigUint64(offset + 8, value >> 64n, true)
+    },
   }
 }
 
