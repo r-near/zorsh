@@ -9,9 +9,12 @@ on:
 jobs:
   lint-and-typecheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Install pinned oracle Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt,clippy --no-self-update
       - name: Cache Rust oracle dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -29,15 +32,18 @@ jobs:
       - name: Verify Effect lint diagnostics
         run: vp run check-effect-lint
       - name: Check Rust oracle formatting
-        run: cargo fmt --manifest-path rust/borsh-oracle/Cargo.toml --check
+        run: cargo +1.98.0 fmt --manifest-path rust/borsh-oracle/Cargo.toml --check
       - name: Lint Rust oracle and its tests
-        run: cargo clippy --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml --all-targets -- -D warnings
+        run: cargo +1.98.0 clippy --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml --all-targets -- -D warnings
 
   tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Install pinned oracle Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt,clippy --no-self-update
       - name: Cache Rust compatibility dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -62,7 +68,7 @@ jobs:
             exit 1
           fi
       - name: Test Rust oracle conformance, properties and persistent CLI
-        run: cargo test --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml
+        run: cargo +1.98.0 test --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml
       - name: Run tests with coverage
         run: vp test run --coverage
       - name: Build libraries

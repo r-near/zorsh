@@ -4,6 +4,7 @@ use std::process::Command;
 
 mod support;
 use support::{CLI_TIMEOUT, TestChild};
+use zorsh_borsh_oracle::transport::{MAX_ITEMS, MAX_RAW_BYTES, Transport};
 use zorsh_borsh_oracle::{MAX_FRAME_BYTES, handle_line, serve};
 
 fn request(id: &str) -> Value {
@@ -21,6 +22,14 @@ fn protocol_rejects_bad_json_duplicates_surrogates_and_fields() {
         br#"{"id":"x","id":"y"}"#,
         br#"{"protocolVersion":1,"id":"x","schemaId":"option_unit","operation":"encode","value":{"tag":"None","tag":"Some"}}"#,
     ] { assert_eq!(kind(&handle_line(bytes)),"protocol"); }
+    for version in ["1e0", "\"1\""] {
+        let wire = format!(
+            r#"{{"protocolVersion":{version},"id":"version","schemaId":"u8","operation":"encode","value":"7"}}"#
+        );
+        let response = handle_line(wire.as_bytes());
+        assert_eq!(kind(&response), "protocol");
+        assert_eq!(response["id"], "version");
+    }
     for (field, value) in [
         ("protocolVersion", json!(2)),
         ("protocolVersion", json!(1.0)),
@@ -31,35 +40,42 @@ fn protocol_rejects_bad_json_duplicates_surrogates_and_fields() {
     ] {
         let mut r = request("test");
         r[field] = value;
+        let response = handle_line(&serde_json::to_vec(&r).unwrap());
+        assert_eq!(kind(&response), "protocol");
         assert_eq!(
-            kind(&handle_line(&serde_json::to_vec(&r).unwrap())),
-            "protocol"
+            response["id"],
+            if field == "id" {
+                Value::Null
+            } else {
+                json!("test")
+            }
         );
     }
     let mut r = request("x");
     r["operation"] = json!("inspect");
-    assert_eq!(
-        kind(&handle_line(&serde_json::to_vec(&r).unwrap())),
-        "unknown_operation"
-    );
+    // Unknown operation is classified before contradictory value/hex fields.
+    r["hex"] = json!("07");
+    let response = handle_line(&serde_json::to_vec(&r).unwrap());
+    assert_eq!(kind(&response), "unknown_operation");
+    assert_eq!(response["id"], "x");
     r = request("x");
     r["schemaId"] = json!("missing");
-    assert_eq!(
-        kind(&handle_line(&serde_json::to_vec(&r).unwrap())),
-        "unknown_schema"
-    );
+    let response = handle_line(&serde_json::to_vec(&r).unwrap());
+    assert_eq!(kind(&response), "unknown_schema");
+    assert_eq!(response["id"], "x");
 }
 
 #[test]
 fn resource_limits_are_distinct_and_keep_bounded_request_ids() {
-    for (field, value) in [
-        ("id", json!("a".repeat(129))),
-        ("schemaId", json!("a".repeat(65))),
+    for (field, value, response_id) in [
+        ("id", json!("a".repeat(129)), Value::Null),
+        ("schemaId", json!("a".repeat(65)), json!("x")),
     ] {
         let mut r = request("x");
         r[field] = value;
         let response = handle_line(&serde_json::to_vec(&r).unwrap());
         assert_eq!(kind(&response), "resource_limit");
+        assert_eq!(response["id"], response_id);
     }
     let mut r = request("raw");
     r["operation"] = json!("decode");
@@ -116,16 +132,23 @@ fn bounded_reader_drains_oversized_lines_and_resynchronizes() {
 
 #[test]
 fn frame_limit_is_inclusive_and_output_is_bounded() {
-    let mut line = serde_json::to_vec(&request("boundary")).unwrap();
-    line.resize(MAX_FRAME_BYTES, b' ');
-    let mut input = line.clone();
-    input.push(b'\n');
-    let mut output = Vec::new();
-    serve(&mut Cursor::new(input), &mut output).unwrap();
-    let r: Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(r["ok"], true);
-    line.push(b' ');
-    assert_eq!(kind(&handle_line(&line)), "resource_limit");
+    for (payload_length, terminator, accepted) in [
+        (MAX_FRAME_BYTES, b"\n".as_slice(), true),
+        (MAX_FRAME_BYTES - 1, b"\r\n".as_slice(), true),
+        // Only LF is excluded from the cap: this CR is one byte over.
+        (MAX_FRAME_BYTES, b"\r\n".as_slice(), false),
+    ] {
+        let mut input = serde_json::to_vec(&request("boundary")).unwrap();
+        input.resize(payload_length, b' ');
+        input.extend_from_slice(terminator);
+        let mut output = Vec::new();
+        serve(&mut Cursor::new(input), &mut output).unwrap();
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(response["ok"], accepted);
+        if !accepted {
+            assert_eq!(kind(&response), "resource_limit");
+        }
+    }
     // Vec<Option<()>> is one byte per element on wire, but JSON can expand >1 MiB.
     let mut r = request("expanded");
     r["schemaId"] = json!("vec_option_unit");
@@ -273,4 +296,68 @@ fn panic_cleanup_kills_and_reaps_before_returning() {
     assert!(reaped.load(Ordering::Acquire));
     // Drop cancels promptly rather than waiting for the five-second deadline.
     assert!(started.elapsed() < Duration::from_secs(3));
+}
+
+#[test]
+fn serde_depth_rejection_resynchronizes_at_the_next_frame() {
+    let mut input = format!(
+        r#"{{"protocolVersion":1,"id":"deep","schemaId":"unit","operation":"encode","value":{}null{}}}"#,
+        "[".repeat(130), "]".repeat(130),
+    ).into_bytes();
+    input.push(b'\n');
+    input.extend(serde_json::to_vec(&request("after-depth")).unwrap());
+    input.push(b'\n');
+    let mut output = Vec::new();
+    serve(&mut Cursor::new(input), &mut output).unwrap();
+    let responses: Vec<Value> = output
+        .split(|b| *b == b'\n')
+        .filter(|b| !b.is_empty())
+        .map(|line| serde_json::from_slice(line).unwrap())
+        .collect();
+    assert_eq!(responses.len(), 2);
+    assert_eq!(kind(&responses[0]), "protocol");
+    assert_eq!(responses[0]["id"], Value::Null);
+    assert_eq!(responses[1]["id"], "after-depth");
+    assert_eq!(responses[1]["ok"], true);
+    assert_eq!(responses[1]["hex"], "07");
+}
+
+#[test]
+fn inclusive_value_and_raw_caps_accept_valid_concrete_values() {
+    for (schema, value, raw_length) in [
+        (
+            "string",
+            json!("x".repeat(MAX_RAW_BYTES - 4)),
+            MAX_RAW_BYTES,
+        ),
+        (
+            "bytes",
+            json!("00".repeat(MAX_RAW_BYTES - 4)),
+            MAX_RAW_BYTES,
+        ),
+        ("vec_u16", json!(vec!["0"; MAX_ITEMS]), 4 + MAX_ITEMS * 2),
+    ] {
+        let mut r = request("at-cap");
+        r["schemaId"] = json!(schema);
+        r["value"] = value.clone();
+        let encoded = handle_line(&serde_json::to_vec(&r).unwrap());
+        assert_eq!(encoded["ok"], true, "{encoded}");
+        assert_eq!(encoded["hex"].as_str().unwrap().len(), raw_length * 2);
+        r["operation"] = json!("decode");
+        r.as_object_mut().unwrap().remove("value");
+        r["hex"] = encoded["hex"].clone();
+        let decoded = handle_line(&serde_json::to_vec(&r).unwrap());
+        assert_eq!(decoded["ok"], true, "{decoded}");
+        assert_eq!(decoded["value"], value);
+    }
+    // A concrete String's own transport cap excludes Borsh's length prefix.
+    // The raw cap therefore rejects encode before the full String cap can fit.
+    let mut text = "🦀".repeat(MAX_RAW_BYTES / 4);
+    assert_eq!(text.len(), MAX_RAW_BYTES);
+    assert!(String::parse(&json!(&text)).is_ok());
+    text.push('x');
+    assert_eq!(
+        String::parse(&json!(text)).unwrap_err().kind,
+        "resource_limit"
+    );
 }

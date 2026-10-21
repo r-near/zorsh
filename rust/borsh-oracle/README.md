@@ -28,7 +28,10 @@ Official source references:
 The commands below run from `rust/borsh-oracle`. On this Mac, check
 `command -v cargo` first. It must resolve to
 `/Users/ricky/Library/Application Support/mbx/bin/cargo`, or use `mbx` explicitly.
-Keep the target in the crate directory and retain `-j 1`:
+The oracle-local `rust-toolchain.toml` pins **Rust 1.98.0** with rustfmt and
+Clippy. Cargo.toml declares `rust-version = "1.98.0"`, the oldest compiler this
+crate currently tests and supports; no older minimum is claimed. Keep the target
+in the crate directory and retain `-j 1`:
 
 ```sh
 CARGO_TARGET_DIR="$PWD/target" cargo build --locked -j 1
@@ -44,12 +47,23 @@ The binary emits no startup output and flushes one response for each input frame
 
 CI runs rustfmt and Clippy with warnings denied in `lint-and-typecheck`, and
 `cargo test --locked -j 1` in `tests`. These remain the existing required job
-names. CI uses the runner's installed Rust tooling and caches both independent
-Rust crate directories; it still regenerates the legacy fixtures, checks drift,
-and runs both TypeScript packages' full tests and coverage.
+names. CI installs Rust 1.98.0 before restoring the Rust cache, then selects it
+explicitly for oracle commands. It preserves the runner's default Rust toolchain
+for the legacy fixture crate. Both Rust crate directories are cached, and the
+cache keys include the installed toolchains and oracle-local configuration. Both
+jobs have a 15-minute outer timeout in addition to the CLI child deadlines. CI
+still regenerates the legacy fixtures, checks drift, and runs both TypeScript
+packages' full tests and coverage.
 
-The 22 Rust tests consist of eight concrete-type conformance tests, four proptest
-properties (256 cases each, seed 20261020), and ten protocol/process tests.
+From the repository root, select `cargo +1.98.0` and supply
+`--manifest-path rust/borsh-oracle/Cargo.toml`. Rustup discovers toolchain files
+from the current directory, not from Cargo's manifest path; the local pin intentionally leaves
+existing root/fixture commands unaffected. See the official
+[Rustup override rules](https://rust-lang.github.io/rustup/overrides.html) and
+[Cargo rust-version contract](https://doc.rust-lang.org/cargo/reference/rust-version.html).
+
+The 24 Rust tests consist of eight concrete-type conformance tests, four proptest
+properties (256 cases each, seed 20261020), and twelve protocol/process tests.
 They cover exact bytes and rejection cases, bounded framing, process persistence,
 and nonzero exit on a broken output pipe. CLI test children have a five-second
 lifetime deadline covering pipe I/O and exit. A supervisor owns each child, kills
@@ -68,7 +82,8 @@ performance claim.
 
 UTF-8 NDJSON over stdin/stdout, persistent sequential requests. LF terminates a
 frame; a final nonempty frame at EOF is also processed. CR before LF is JSON
-whitespace. Empty lines are protocol errors. All JSON object keys must be unique,
+whitespace and **counts toward the input-frame byte cap**, including in CRLF.
+Empty lines are protocol errors. All JSON object keys must be unique,
 including keys inside transported values. Invalid UTF-8, lone JSON surrogates,
 excessive JSON nesting and extra request fields are protocol errors. Valid
 surrogate pairs represent ordinary Unicode strings. There is no BOM stripping
@@ -82,7 +97,10 @@ Exactly five request fields:
 ```
 
 Encode requires `value`; decode requires `hex`. Supplying both is a protocol
-error. `protocolVersion` must be the JSON integer `1`, not a string or `1.0`.
+error for a recognized operation. An unrecognized operation is classified as
+`unknown_operation` before operation-specific field validation, so it can take
+precedence over missing/contradictory `value`/`hex` fields. `protocolVersion` must
+be the JSON integer `1`, not a string, `1.0`, or `1e0`.
 `id` is any string up to 128 UTF-8 bytes, including the empty string; the harness
 is responsible for choosing unique IDs. `schemaId` is a string up to 64 UTF-8
 bytes matching the registry below. `operation` is `encode` or `decode`.
@@ -208,9 +226,10 @@ contains a zero-sized vector somewhere.
 
 ## Resource envelope and harness obligations
 
-- Input frame: at most **1,048,576 bytes**, excluding LF. A bounded reader checks
-  before appending; it never retains an oversized line's full body. JSON parsing
-  occurs only after that check. Serde's default JSON recursion guard is retained.
+- Input frame: at most **1,048,576 bytes**, excluding LF only; CR in CRLF counts.
+  A bounded reader checks before appending; it never retains an oversized line's
+  full body. JSON parsing occurs only after that check. Serde's default JSON
+  recursion guard is retained.
 - Output frame: at most **1,048,576 bytes**, excluding LF. If a normalized success
   response would exceed it, the process sends a bounded resource error instead.
 - Raw Borsh data: at most **65,536 bytes** on encode and decode. Hex length is

@@ -68,12 +68,12 @@ On this development Mac, Cargo must resolve to the installed Mr Boxington shim. 
 Run its checks from the repository root:
 
 ```sh
-cargo fmt --manifest-path rust/borsh-oracle/Cargo.toml --check
-cargo clippy --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml --all-targets -- -D warnings
-cargo test --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml
+cargo +1.98.0 fmt --manifest-path rust/borsh-oracle/Cargo.toml --check
+cargo +1.98.0 clippy --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml --all-targets -- -D warnings
+cargo +1.98.0 test --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml
 ```
 
-Cargo's default target stays inside `rust/borsh-oracle/target`; keep custom targets local to the worktree. Commit the oracle's Cargo.lock. CI uses the runner's installed Rust toolchain and caches each independent Rust crate. The existing `lint-and-typecheck` job runs oracle formatting/Clippy, and `tests` runs all 22 oracle tests, including proptests and the real persistent CLI. The legacy fixture generation/drift guard and both packages' TypeScript coverage remain included.
+The oracle pins Rust 1.98.0, rustfmt and Clippy in its own `rust-toolchain.toml`, and declares the tested `rust-version = "1.98.0"`. Root commands select `+1.98.0` explicitly because Rustup discovers pins from the current directory, not `--manifest-path`. CI installs that toolchain without changing the runner's default for `rust/borsh_test`. Cargo's default target stays inside `rust/borsh-oracle/target`; keep custom targets local to the worktree. Commit the oracle's Cargo.lock. CI caches each independent Rust crate. The existing `lint-and-typecheck` job runs oracle formatting/Clippy, and `tests` runs all 24 oracle tests, including proptests and the real persistent CLI. The legacy fixture generation/drift guard and both packages' TypeScript coverage remain included.
 
 This crate tests Rust transport and concrete registered Borsh types only. Cross-language checks against the Effect compiler and coverage-guided fuzzing come in a later slice and are not completed by adding the oracle. Keep Borsh errors distinct from malformed protocol/transport, resource limits and process failures. Extend the registry with concrete Rust types and derives/standard implementations; do not add a dynamic wire interpreter, schema export or contract introspection. Preserve `rust/borsh_test` as the independent older-version fixture source.
 
