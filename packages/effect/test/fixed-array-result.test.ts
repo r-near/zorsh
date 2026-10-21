@@ -274,3 +274,10 @@ it("rejects fixed-array Suspend at helper construction without evaluating its th
   )
   expect(calls).toBe(0)
 })
+
+it("uses the shorter Result failure minimum inside vectors", () => {
+  const shorterErr = Borsh.toCodec(Schema.Array(Schema.Result(Borsh.U64, Borsh.U16)))
+  const bytes = Uint8Array.of(1, 0, 0, 0, 0, 7, 0)
+  expect(Schema.decodeSync(shorterErr)(bytes)).toEqual([Result.fail(7)])
+  expect(Schema.encodeSync(shorterErr)([Result.fail(7)])).toEqual(bytes)
+})

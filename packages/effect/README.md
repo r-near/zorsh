@@ -1,6 +1,6 @@
 # @zorsh/effect
 
-Borsh serialization with native [Effect 4 schemas](https://effect.website/docs/v4/schema/introduction/) and inferred TypeScript types. This package is under development, private and unpublished. It supports primitives, structs, required tuples, fixed and variable arrays, tagged enums, and native `Option` and `Result` values.
+Borsh serialization with native [Effect 4 schemas](https://effect.website/docs/v4/schema/introduction/) and inferred TypeScript types. This package is under development, private and unpublished. It supports primitives, structs, required tuples, fixed and variable arrays, tagged enums, native `Option` and `Result` values, maps and sets.
 
 ## Quick start
 
@@ -128,6 +128,18 @@ const outcome = Schema.encodeSync(Borsh.toCodec(Outcome))(Result.succeed(513))
 
 Rust `Err` (Effect `Failure`) writes 0 followed by the failure payload. Rust `Ok` (Effect `Success`) writes 1 followed by the success payload. Both channels retain their native schemas and transformations.
 
+### Maps and sets
+
+Use `Schema.ReadonlyMap(key, value)` with JavaScript `Map`, `Schema.ReadonlySet(item)` with JavaScript `Set`, or native `Schema.HashMap` and `Schema.HashSet` with Effect's collections:
+
+```ts
+const Balances = Schema.ReadonlyMap(Schema.String, Borsh.U128)
+const balances = Schema.encodeSync(Borsh.toCodec(Balances))(new Map([["alice.near", 123n]]))
+const Members = Schema.HashSet(Schema.String)
+```
+
+Collections write a u32 count followed by entries sorted by encoded key. Keys and set elements support `Schema.Boolean`, explicit Borsh integers and `Schema.String`; other key schemas are rejected at codec construction. Integer order is numeric; strings follow Rust's UTF-8 ordering. Duplicate or descending wire keys fail before collection construction. Encoding preserves the input collection. Map values can use any supported layout, including unit. Inner transformations retain native Effect behavior; non-injective key transformations can collapse entries.
+
 ## Complex example
 
 A fictional contract accepts mixed actions in one batch. Reuse the asset, recipient and transfer structs inside a native tagged enum:
@@ -213,9 +225,9 @@ Integers and floats are little endian. Booleans use one byte, 0 or 1. Strings us
 
 Decoded input must be consumed completely: truncated data and trailing bytes fail. Encoded output and decoded byte arrays own their storage; the binary layer respects subarray offsets and does not mutate inputs.
 
-`Borsh.toCodec(schema, { maxBytes })` limits input and output bytes per operation, defaulting to **16 MiB**. Overrides must be positive safe integers; `fixedBytes` and `fixedArray` accept lengths from 0 through 2^32 - 1. Vector counts are checked against remaining bytes before items are allocated. The cap bounds binary buffers, not the work or heap needed for zero-byte fixed arrays; native schema parsing and application validators or transformations can do their own work independently.
+`Borsh.toCodec(schema, { maxBytes })` limits input and output bytes per operation, defaulting to **16 MiB**. Overrides must be positive safe integers; `fixedBytes` and `fixedArray` accept lengths from 0 through 2^32 - 1. Vector and collection counts are checked against remaining bytes before items are allocated. The cap bounds binary buffers, not the work or heap needed for zero-byte fixed arrays; native schema parsing and application validators or transformations can do their own work independently.
 
-Vectors of Rust zero-sized values, including empty tuples, empty structs and `fixedBytes(0)`, fail when visited, even for an empty array. An empty outer `Schema.Array(Schema.Array(Borsh.Unit))` succeeds because it visits no inner array. `Option.none()` also skips its inner value; `Option.some([])` visits and rejects an inner vector of unit. Fixed arrays may contain zero-sized items: `[(); 1]` uses no bytes, while `Vec<[(); 1]>` fails when visited. A zero-length fixed array skips its items, so `[Vec<()>; 0]` succeeds and `[Vec<()>; 1]` fails. Results also visit only their selected payload. Encoded struct keys and tuple positions must be required. Generic unions, single-variant enums, maps, sets, recursion and optional properties are unsupported.
+Vectors of Rust zero-sized values, including empty tuples, empty structs and `fixedBytes(0)`, fail when visited, even for an empty array. An empty outer `Schema.Array(Schema.Array(Borsh.Unit))` succeeds because it visits no inner array. `Option.none()` also skips its inner value; `Option.some([])` visits and rejects an inner vector of unit. Fixed arrays may contain zero-sized items: `[(); 1]` uses no bytes, while `Vec<[(); 1]>` fails when visited. A zero-length fixed array skips its items, so `[Vec<()>; 0]` succeeds and `[Vec<()>; 1]` fails. Results also visit only their selected payload. Encoded struct keys and tuple positions must be required. Generic unions, single-variant enums, recursion and optional properties are unsupported.
 
 The package is ESM and uses standard browser APIs. Import `Borsh` from `@zorsh/effect`, or use `import * as Borsh from "@zorsh/effect/Borsh"`. Effect is a peer dependency (`^4.0.5`); ES2022 TypeScript projects may need `ESNext.Disposable` in `lib` for Effect declarations.
 

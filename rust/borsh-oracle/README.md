@@ -1,6 +1,6 @@
 # borsh-rs oracle
 
-Independent test executable using pinned borsh 1.8.1 with `derive` and `de_strict_order`. The registry contains 43 concrete Rust types; Borsh derives and standard implementations own wire encoding. Each encode checks `borsh::object_length` before `borsh::to_vec`; decode uses `borsh::from_slice`, including trailing-byte rejection. Keep Cargo.lock. The older `rust/borsh_test` fixture source remains independent.
+Independent test executable using pinned borsh 1.8.1 with `derive` and `de_strict_order`. The registry contains 47 concrete Rust types; Borsh derives and standard implementations own wire encoding. Each encode checks `borsh::object_length` before `borsh::to_vec`; decode uses `borsh::from_slice`, including trailing-byte rejection. Keep Cargo.lock. The older `rust/borsh_test` fixture source remains independent.
 
 Build and test from the repository root:
 
@@ -58,6 +58,7 @@ Frames are limited to 1 MiB excluding LF; CR in CRLF counts. Raw Borsh data and 
 | `explicit_enum` | Derived `#[repr(u8)] #[borsh(use_discriminant = true)] enum ExplicitEnum { Idle = 3, Count(u16) = 17, Named { label: String, enabled: bool } = 250 }` |
 | `map_u16_string` | `std::collections::BTreeMap<u16, String>` |
 | `set_string` | `std::collections::BTreeSet<String>` |
+| `set_i16`, `set_i128`, `set_u128`, `set_bool` | `BTreeSet<i16>`, `BTreeSet<i128>`, `BTreeSet<u128>`, `BTreeSet<bool>` |
 | `empty` | Derived `struct Empty {}` |
 | `tuple_unit` | `((),)` |
 | `array_unit_0` | `[(); 0]` |

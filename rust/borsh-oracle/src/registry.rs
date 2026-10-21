@@ -183,6 +183,8 @@ registry! {
     "array_u16_3" => [u16; 3], "storage_deposit" => StorageDeposit, "transfer" => Transfer,
     "explicit_enum" => ExplicitEnum,
     "map_u16_string" => BTreeMap<u16, String>, "set_string" => BTreeSet<String>,
+    "set_i16" => BTreeSet<i16>, "set_i128" => BTreeSet<i128>,
+    "set_u128" => BTreeSet<u128>, "set_bool" => BTreeSet<bool>,
     "empty" => Empty, "tuple_unit" => ((),),
     "array_unit_0" => [(); 0], "array_unit_1" => [(); 1],
     "vec_unit" => Vec<()>, "vec_empty" => Vec<Empty>,
