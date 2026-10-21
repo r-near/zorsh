@@ -75,7 +75,12 @@ export function enumLayout<S extends Schema.Top>(
   options: { readonly tag: string; readonly discriminants: Readonly<Record<string, number>> },
 ): S["Rebuild"] {
   rejectSuspensions(schema.ast)
-  return withLayout(schema, { version: 1, kind: "enum", ...options })
+  return withLayout(schema, {
+    version: 1,
+    kind: "enum",
+    tag: options.tag,
+    discriminants: options.discriminants,
+  })
 }
 
 export interface Options {

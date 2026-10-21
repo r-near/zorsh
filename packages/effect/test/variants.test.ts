@@ -99,23 +99,6 @@ it("rejects malformed enums and descriptors", () => {
     expect(() =>
       Borsh.toCodec(Borsh.enumLayout(variants, { tag: "_tag", discriminants: invalidMap })),
     ).toThrow(/enum/i)
-  for (const invalid of [
-    Schema.TaggedUnion({ Idle: {} }),
-    Schema.Union([Schema.String, Schema.TaggedStruct("Idle", {})]),
-    Schema.Union([Schema.Struct({}), Schema.TaggedStruct("Idle", {})]),
-    Schema.Union([Schema.Struct({ _tag: Schema.String }), Schema.TaggedStruct("Idle", {})]),
-    Schema.Union([
-      Schema.Struct({ _tag: Schema.optionalKey(Schema.Literal("Count")) }),
-      Schema.TaggedStruct("Idle", {}),
-    ]),
-    Schema.Union([
-      Schema.TaggedStruct("Idle", { value: Borsh.U8 }),
-      Schema.TaggedStruct("Idle", {}),
-    ]),
-  ])
-    expect(() => Borsh.toCodec(Borsh.enumLayout(invalid, { tag: "_tag", discriminants }))).toThrow(
-      /enum/i,
-    )
   for (const raw of [
     { version: 1, kind: "enum" },
     { version: 1, kind: "enum", tag: "_tag", discriminants: [] },
@@ -129,6 +112,110 @@ it("rejects malformed enums and descriptors", () => {
       Borsh.Bytes.annotate({ [key]: { version: 1, kind: "enum", tag: "_tag", discriminants } }),
     ),
   ).toThrow(/Enum layout/)
+})
+
+it("keeps enum metadata fixed when options have extra structural keys", () => {
+  for (const version of [1, 99]) {
+    const options = {
+      tag: "_tag",
+      discriminants,
+      version,
+      kind: "integer",
+      bits: 8,
+      signed: false,
+      unrelated: true,
+    }
+    expect(() => Borsh.toCodec(Borsh.enumLayout(Schema.Finite, options))).toThrow(
+      /Enum layout requires a union of 2..256 object variants/,
+    )
+    const mapped = Borsh.enumLayout(variants, options)
+    expect(Schema.toEncoded(mapped).ast.annotations?.[key]).toEqual({
+      version: 1,
+      kind: "enum",
+      tag: "_tag",
+      discriminants,
+    })
+    expect(Schema.encodeSync(Borsh.toCodec(mapped))({ _tag: "Count", value: 513 })).toEqual(
+      Uint8Array.of(17, 1, 2),
+    )
+  }
+})
+
+it("rejects a single enum variant independently of map coverage", () => {
+  expect(() =>
+    Borsh.toCodec(
+      Borsh.enumLayout(Schema.TaggedUnion({ Idle: {} }), {
+        tag: "_tag",
+        discriminants: { Idle: 0 },
+      }),
+    ),
+  ).toThrow(/Enum layout requires a union of 2..256 object variants/)
+})
+
+it("rejects duplicate enum labels independently of map coverage", () => {
+  const duplicate = Schema.Union([
+    Schema.TaggedStruct("Idle", { value: Borsh.U8 }),
+    Schema.TaggedStruct("Idle", {}),
+  ])
+  expect(() =>
+    Borsh.toCodec(Borsh.enumLayout(duplicate, { tag: "_tag", discriminants: { Idle: 0 } })),
+  ).toThrow(/Duplicate enum label Idle/)
+})
+
+it("rejects optional enum tags independently of map coverage", () => {
+  const optional = Schema.Union([
+    Schema.Struct({ _tag: Schema.optionalKey(Schema.Literal("Count")) }),
+    Schema.TaggedStruct("Idle", {}),
+  ])
+  expect(() =>
+    Borsh.toCodec(
+      Borsh.enumLayout(optional, { tag: "_tag", discriminants: { Count: 1, Idle: 0 } }),
+    ),
+  ).toThrow(/Enum tag must be a required string literal/)
+})
+
+it("requires unannotated, required object enum members", () => {
+  for (const member of [
+    Schema.String,
+    Schema.optionalKey(Schema.TaggedStruct("Count", {})),
+    Schema.TaggedStruct("Count", {}).annotate({
+      [key]: { version: 1, kind: "fixedBytes", length: 0 },
+    }),
+  ]) {
+    const invalid = Schema.Union([member, Schema.TaggedStruct("Idle", {})])
+    expect(() =>
+      Borsh.toCodec(
+        Borsh.enumLayout(invalid, { tag: "_tag", discriminants: { Count: 1, Idle: 0 } }),
+      ),
+    ).toThrow(/Enum variants must be required objects without layout annotations/)
+  }
+})
+
+it("requires a single string literal enum tag", () => {
+  for (const member of [
+    Schema.Struct({}),
+    Schema.Struct({ _tag: Schema.String }),
+    Schema.Struct({ _tag: Schema.Literal(7) }),
+  ]) {
+    const invalid = Schema.Union([member, Schema.TaggedStruct("Idle", {})])
+    expect(() =>
+      Borsh.toCodec(Borsh.enumLayout(invalid, { tag: "_tag", discriminants: { "7": 1, Idle: 0 } })),
+    ).toThrow(/Enum tag must be a required string literal/)
+  }
+})
+
+it("rejects an inappropriate layout on a native Option declaration", () => {
+  const invalid = Schema.Option(Borsh.U8).annotate({
+    [key]: { version: 1, kind: "fixedBytes", length: 0 },
+  })
+  expect(() => Borsh.toCodec(invalid)).toThrow(/Borsh layout does not match encoded Declaration/)
+})
+
+it("requires an own enum tag at the binary writer boundary", () => {
+  const inherited = Object.setPrototypeOf({}, { _tag: "Idle" })
+  expect(() => compile(Schema.toEncoded(schema).ast).write(new Writer(20), inherited)).toThrow(
+    /Invalid enum label/,
+  )
 })
 
 it("finds enum metadata in final checks and nested groups and rejects conflicts", () => {

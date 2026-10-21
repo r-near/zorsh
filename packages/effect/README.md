@@ -98,7 +98,7 @@ const Status = Borsh.enumLayout(
 const status = Schema.encodeSync(Borsh.toCodec(Status))({ _tag: "Pending" })
 ```
 
-The wire format is a u8 discriminant followed by the selected variant's fields. The tag field itself is omitted only for an annotated enum; an ordinary struct's `_tag` field is serialized normally. Enum member order and discriminant-map order do not select the bytes. The mapping must cover every encoded label exactly once, with unique integers from 0 to 255. Enums require 2 through 256 object variants with a required string-literal tag; custom string tag keys also work. Native `.cases`, `.match` and `.check` remain available.
+The wire format is a u8 discriminant followed by the selected variant's fields. The tag field itself is omitted only for an annotated enum; a struct field declared as `_tag: Schema.String` is serialized normally. Enum member order and discriminant-map order do not select the bytes. The mapping must cover every encoded label exactly once, with unique integers from 0 to 255. Enums require 2 through 256 object variants with a required string-literal tag; custom string tag keys also work. Native `Schema.TaggedUnion` keeps its `.cases`, `.match` and `.check` methods.
 
 ### Options
 
