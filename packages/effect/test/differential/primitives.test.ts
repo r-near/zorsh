@@ -114,6 +114,14 @@ async function valueParity(
     expected,
     "failed operation corrupted decoder",
   )
+  const other = entry.examples.find(
+    (candidate) => JSON.stringify(candidate) !== JSON.stringify(transport),
+  )
+  if (other !== undefined) {
+    entry.decode(entry.encode(entry.fromTransport(other)))
+    assert.equal(hex(ts.value), rust.hex, "later encode overwrote earlier output")
+    assert.deepEqual(entry.normalize(decoded), expected, "later decode overwrote earlier output")
+  }
   if (offset) {
     const owned = ts.value.slice()
     offset.backing.fill(0)

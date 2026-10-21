@@ -18,7 +18,7 @@ function object(value: unknown): asserts value is Record<string, unknown> {
   assert.ok(value !== null && typeof value === "object" && !Array.isArray(value))
 }
 function keys(value: Record<string, unknown>, expected: string[]) {
-  assert.deepEqual(Object.keys(value).sort(), expected.sort())
+  assert.deepEqual(Object.keys(value).sort(), expected.sort(), "Invalid oracle response fields")
 }
 
 export class Oracle {
@@ -26,6 +26,7 @@ export class Oracle {
   private pending: Pending | undefined
   private buffer = Buffer.alloc(0)
   private stderrBytes = 0
+  private stderr = ""
   private nextId = 0
   private closing = false
   private exit
@@ -40,7 +41,7 @@ export class Oracle {
     this.exit = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
       this.child.on("close", (code, signal) => {
         if (this.pending || !this.closing || code !== 0 || signal !== null)
-          this.fail(new HarnessError(`Oracle exited (${code ?? signal})`))
+          this.fail(new HarnessError(`Oracle exited (${code ?? signal}): ${this.stderr.trim()}`))
         resolve({ code, signal })
       })
     })
@@ -55,7 +56,11 @@ export class Oracle {
     )
     this.child.stderr.on("data", (chunk: Buffer) => {
       this.stderrBytes += chunk.length
+      this.stderr += chunk.toString("utf8").slice(0, 4096 - this.stderr.length)
       if (this.stderrBytes > 65536) this.fail(new HarnessError("Oracle stderr exceeded 64 KiB"))
+    })
+    this.child.stdout.on("end", () => {
+      if (this.buffer.length) this.fail(new HarnessError("Partial oracle response at EOF"))
     })
     this.child.stdout.on("data", (chunk: Buffer) => {
       try {
@@ -71,7 +76,7 @@ export class Oracle {
         object(response)
         const pending = this.pending
         assert.equal(response.protocolVersion, 1)
-        assert.equal(response.id, pending.request.id)
+        assert.equal(response.id, pending.request.id, "Oracle response ID differs")
         if (response.ok === true) {
           keys(response, ["protocolVersion", "id", "ok", "schemaId", "operation", "value", "hex"])
           assert.equal(response.schemaId, pending.request.schemaId)
@@ -80,6 +85,7 @@ export class Oracle {
             typeof response.hex === "string" &&
               /^(?:[0-9a-f]{2})*$/.test(response.hex) &&
               response.hex.length <= 131072,
+            "Invalid oracle hex",
           )
         } else {
           assert.equal(response.ok, false)
@@ -152,7 +158,6 @@ export class Oracle {
     )
     try {
       await this.exit
-      if (this.buffer.length) this.fail(new HarnessError("Partial oracle response at EOF"))
       if (this.failure) throw this.failure
     } finally {
       clearTimeout(timer)

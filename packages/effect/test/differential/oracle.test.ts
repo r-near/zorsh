@@ -5,28 +5,38 @@ import { expect, it } from "vite-plus/test"
 import { HarnessError, Oracle, assertProperty } from "./oracle.js"
 
 it.each([
-  "timeout",
-  "crash",
-  "flood",
-  "stderr-flood",
-  "partial",
-  "transport",
-  "trailing",
-  "nonzero",
-  "hang-close",
-])("fails closed and reaps the %s child", async (mode) => {
+  ["timeout", /Oracle request timed out/],
+  ["crash", /Oracle exited \(1\): oracle panic/],
+  ["flood", /Oracle stdout exceeded 1 MiB/],
+  ["stderr-flood", /Oracle stderr exceeded 64 KiB/],
+  ["partial", /Partial oracle response at EOF/],
+  ["transport", /Oracle infrastructure error:.*transport/],
+  ["trailing", /Unsolicited oracle output/],
+  ["nonzero", /Oracle exited \(2\)/],
+  ["hang-close", /Oracle shutdown timed out/],
+  ["bad-id", /Oracle response ID differs/],
+  ["bad-hex", /Invalid oracle hex/],
+  ["bad-shape", /Invalid oracle response fields/],
+] as const)("fails closed and reaps the %s child", async (mode, expected) => {
   const client = new Oracle(
     process.execPath,
     [fileURLToPath(new URL("./child.ts", import.meta.url)), mode],
     500,
   )
-  await expect(async () => {
-    try {
-      await client.request("u8", "encode", { value: "7" })
-    } finally {
-      await client.close()
-    }
-  }).rejects.toBeInstanceOf(HarnessError)
+  await assert.rejects(
+    async () => {
+      try {
+        await client.request("u8", "encode", { value: "7" })
+      } finally {
+        await client.close()
+      }
+    },
+    (error: unknown) => {
+      assert.ok(error instanceof HarnessError)
+      assert.match(`${error.message}\n${String(error.cause)}`, expected)
+      return true
+    },
+  )
   expect(client.failure).toBeInstanceOf(HarnessError)
 })
 it("shrinks and replays an actual Rust byte mismatch", async () => {

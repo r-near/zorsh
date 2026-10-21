@@ -4,7 +4,10 @@ for await (const line of createInterface({ input: process.stdin })) {
   const request: { id: string; schemaId: string; operation: string; value: unknown } =
     JSON.parse(line)
   if (mode === "timeout") continue
-  if (mode === "crash") process.exit(1)
+  if (mode === "crash") {
+    process.stderr.write("oracle panic", () => process.exit(1))
+    continue
+  }
   if (mode === "flood") {
     process.stdout.write(Buffer.alloc(1048577, 120))
     continue
@@ -14,9 +17,8 @@ for await (const line of createInterface({ input: process.stdin })) {
     continue
   }
   if (mode === "partial") {
-    process.stdout.write("{")
-    process.exitCode = 1
-    break
+    process.stdout.write("{", () => process.exit(0))
+    continue
   }
   const response =
     mode === "transport"
@@ -28,12 +30,13 @@ for await (const line of createInterface({ input: process.stdin })) {
         }
       : {
           protocolVersion: 1,
-          id: request.id,
+          id: mode === "bad-id" ? "wrong" : request.id,
           ok: true,
           schemaId: request.schemaId,
           operation: request.operation,
           value: request.value,
-          hex: "07",
+          hex: mode === "bad-hex" ? "zz" : "07",
+          ...(mode === "bad-shape" ? { unexpected: true } : {}),
         }
   process.stdout.write(JSON.stringify(response) + "\n")
   if (mode === "trailing") setTimeout(() => process.stdout.write("x"), 10)
