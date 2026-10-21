@@ -403,6 +403,10 @@ function compileNode(
         `${path}: ${ast._tag} requires an explicit Borsh width; use a Borsh numeric schema`,
       )
   }
+  if (ast._tag === "Literal")
+    throw new Error(
+      `${path}: Unsupported encoded schema Literal; use Schema.Literals or a tagged union for a Rust enum`,
+    )
   throw new Error(`${path}: Unsupported encoded schema ${ast._tag}`)
 }
 
@@ -420,7 +424,8 @@ export function enumVariants(
   path: string,
 ): ReadonlyArray<EnumVariant> {
   const tag = layout === undefined ? "_tag" : layout.tag
-  const explicit = "assign discriminants with Borsh.discriminants"
+  const explicit =
+    "pass the Rust wire discriminants (declaration indices unless #[borsh(use_discriminant = true)]) to Borsh.discriminants"
   const objects =
     ast._tag === "Union" && ast.types.length > 0 && ast.types.every(SchemaAST.isObjects)
   const required = (member: SchemaAST.AST) => {

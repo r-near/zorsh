@@ -123,13 +123,13 @@ Reordering variants changes the bytes, as it does in Rust. Keep TypeScript decla
 
 C-like enums decode to the literal or TS enum value. `Schema.Literals` requires string literals. A string TS enum uses member order; a numeric TS enum must have values 0 through n - 1 in declaration order. Mixed string and numeric TS enums are unsupported.
 
-When the Rust enum assigns explicit discriminants, list every variant once, with unique integers from 0 to 255:
+When the Rust enum uses `#[borsh(use_discriminant = true)]`, list every variant's discriminant once, with unique integers from 0 to 255:
 
 ```ts
 const Flag = Schema.TaggedUnion({ Off: {}, On: {} }).pipe(Borsh.discriminants({ Off: 1, On: 5 }))
 ```
 
-Keys are the encoded `_tag` values, literal values as strings (`Schema.Literals([1, 5])` takes `{ 1: 4, 5: 9 }`), or TS enum member names. Missing and unknown keys are type errors, including through brands, refinements and transformations of the enum schema. Non-string literal unions, such as `Schema.Literals([1, 5])`, and sparse numeric TS enums require this map. For unions keyed by another literal field, pass `{ tag: "kind" }` as the second argument; apply `Schema.toTaggedUnion("kind")` afterwards to keep its helpers. Enums have 1 through 256 variants. A single-variant enum with an explicit map is treated as `#[repr(u8)]`, so it is not zero-sized. Other unions, including `Schema.NullOr`, are rejected at codec construction; use `Schema.Option` for nullable values.
+Without that attribute, borsh-rs writes declaration indices even if variants declare `= N` values. Keys are the encoded `_tag` values, literal values as strings (`Schema.Literals([1, 5])` takes `{ 1: 4, 5: 9 }`), or TS enum member names. Missing and unknown keys are type errors, including through brands, refinements and transformations of the enum schema; the map needs literal keys, so cast a dynamically built `Record<string, number>`. The map annotates the union itself, so a union rebuilt from its members needs it again. Non-string literal unions, such as `Schema.Literals([1, 5])`, and sparse numeric TS enums require this map. For unions keyed by another literal field, pass `{ tag: "kind" }` as the second argument; apply `Schema.toTaggedUnion("kind")` afterwards to keep its helpers. Enums have 1 through 256 variants. A dataless single-variant enum is zero-sized in Rust unless it has a `#[repr]`, which only affects vectors of it: without a map it is treated as zero-sized, and with a map as `#[repr(u8)]`. For `#[repr(u8)] enum E { Only }`, use `Borsh.discriminants({ Only: 0 })`. Other unions, including `Schema.NullOr`, are rejected at codec construction; use `Schema.Option` for nullable values.
 
 ### Options
 

@@ -202,7 +202,7 @@ it("requires explicit discriminants for numeric and non-string enums", () => {
   }
   for (const enums of [Sparse, Swapped])
     expect(() => Borsh.toCodec(Schema.Enum(enums))).toThrow(
-      /\$: Numeric enum values must be 0..n-1 in declaration order; assign discriminants with Borsh.discriminants/,
+      /\$: Numeric enum values must be 0..n-1 in declaration order; pass the Rust wire discriminants \(declaration indices unless #\[borsh\(use_discriminant = true\)\]\) to Borsh.discriminants/,
     )
   const sparse = Borsh.toCodec(Schema.Enum(Sparse).pipe(Borsh.discriminants({ A: 1, B: 5 })))
   expect(Schema.encodeSync(sparse)(Sparse.B)).toEqual(Uint8Array.of(5))
@@ -270,7 +270,7 @@ it("requires explicit discriminants for numeric and non-string enums", () => {
     Schema.Literals([2n]),
   ])
     expect(() => Borsh.toCodec(literals)).toThrow(
-      /Non-string literal enums have no Rust variant order; assign discriminants with Borsh.discriminants/,
+      /Non-string literal enums have no Rust variant order; pass the Rust wire discriminants/,
     )
   const numbers = Borsh.toCodec(Schema.Literals([1, 5]).pipe(Borsh.discriminants({ 1: 4, 5: 9 })))
   expect(Schema.encodeSync(numbers)(5)).toEqual(Uint8Array.of(9))
@@ -580,7 +580,9 @@ it("does not share struct layouts that omit an enum tag", () => {
     { action: schema, plain: schema.cases.Count },
     { plain: schema.cases.Count, action: schema },
   ])
-    expect(() => Borsh.toCodec(Schema.Struct(fields))).toThrow(/Unsupported encoded schema Literal/)
+    expect(() => Borsh.toCodec(Schema.Struct(fields))).toThrow(
+      /Unsupported encoded schema Literal; use Schema.Literals or a tagged union for a Rust enum/,
+    )
   const shared = Borsh.toCodec(Schema.Struct({ first: schema, second: schema }))
   expect(() => Schema.decodeSync(shared)(Uint8Array.of(3, 250, 0, 0, 0, 0, 2))).toThrow(
     /\$\["second"\]\["enabled"\]/,
