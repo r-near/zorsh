@@ -1,28 +1,34 @@
 import { Effect, Schema, type SchemaAST, SchemaIssue, SchemaTransformation } from "effect"
-import { parseDescriptor, withLayout } from "./internal/annotations.js"
-import { compile, enumVariants, type Layout, rejectSuspensions } from "./internal/compiler.js"
+import { isU32Length, parseDescriptor, withLayout } from "./internal/annotations.js"
+import { compile, type Layout, rejectSuspensions } from "./internal/compiler.js"
+import { homogeneousItem } from "./internal/containers.js"
+import { enumVariants } from "./internal/enums.js"
 import { BinaryError, Reader, Writer } from "./internal/io.js"
+import { integerRange } from "./internal/primitives.js"
 
 function integer(bits: 8 | 16 | 32, signed: boolean) {
-  const minimum = signed ? -(2 ** (bits - 1)) : 0
-  const maximum = 2 ** (signed ? bits - 1 : bits) - 1
+  const { minimum, maximum } = integerRange(bits, signed)
   return withLayout(Schema.Int, {
     version: 1,
     kind: "integer",
     bits,
     signed,
-  }).check(Schema.isBetween({ minimum, maximum }))
+  }).check(Schema.isBetween({ minimum: Number(minimum), maximum: Number(maximum) }))
 }
 
 function bigInteger(bits: 64 | 128, signed: boolean): Schema.BigInt {
-  const minimum = signed ? -(1n << BigInt(bits - 1)) : 0n
-  const maximum = (1n << BigInt(signed ? bits - 1 : bits)) - 1n
   return withLayout(Schema.BigInt, {
     version: 1,
     kind: "integer",
     bits,
     signed,
-  }).check(Schema.isBetweenBigInt({ minimum, maximum }))
+  }).check(Schema.isBetweenBigInt(integerRange(bits, signed)))
+}
+
+/** Reject Suspend before Schema.toEncoded can evaluate a thunk. */
+function encodedAST(schema: Schema.Constraint): SchemaAST.AST {
+  rejectSuspensions(schema.ast)
+  return Schema.toEncoded(schema).ast
 }
 
 export const U8 = integer(8, false)
@@ -56,7 +62,7 @@ export const Unit = Schema.Tuple([])
 
 /** Exactly length bytes, with no length prefix, like Rust [u8; N]. */
 export function fixedBytes(length: number): Schema.Uint8Array {
-  if (!Number.isSafeInteger(length) || length < 0 || length > 0xffff_ffff)
+  if (!isU32Length(length))
     throw new Error("$: fixedBytes length must be a safe integer between 0 and 2^32 - 1")
   return withLayout(Bytes, {
     version: 1,
@@ -71,12 +77,10 @@ export function fixedBytes(length: number): Schema.Uint8Array {
 
 /** Give a native encoded array Rust [T; N]'s layout, without a count prefix. */
 export function fixedArray(length: number): <S extends Schema.Top>(schema: S) => S["Rebuild"] {
-  if (!Number.isSafeInteger(length) || length < 0 || length > 0xffff_ffff)
+  if (!isU32Length(length))
     throw new Error("$: fixedArray length must be a safe integer between 0 and 2^32 - 1")
   return (schema) => {
-    rejectSuspensions(schema.ast)
-    const ast = Schema.toEncoded(schema).ast
-    if (ast._tag !== "Arrays" || ast.elements.length !== 0 || ast.rest.length !== 1)
+    if (homogeneousItem(encodedAST(schema)) === undefined)
       throw new Error("$: fixedArray requires a homogeneous encoded array")
     return withLayout(schema, { version: 1, kind: "fixedArray", length })
   }
@@ -157,8 +161,7 @@ export function discriminants<
     discriminants: map,
   })
   return (schema) => {
-    rejectSuspensions(schema.ast)
-    enumVariants(Schema.toEncoded(schema).ast, layout, "$")
+    enumVariants(encodedAST(schema), layout, "$")
     return withLayout(schema, layout)
   }
 }
@@ -202,8 +205,7 @@ export function toCodec<S extends Schema.Constraint>(
       S["EncodingServices"]
     >
   if (entry === undefined) {
-    rejectSuspensions(schema.ast)
-    entry = { layout: compile(Schema.toEncoded(schema).ast), codecs: new Map() }
+    entry = { layout: compile(encodedAST(schema)), codecs: new Map() }
     codecCache.set(schema, entry)
   }
   const { layout, codecs } = entry

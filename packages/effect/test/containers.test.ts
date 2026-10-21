@@ -169,22 +169,33 @@ it("rejects visited vectors of Rust zero-sized values", () => {
 })
 
 it("requires fixed encoded keys and positions and rejects mixed rests", () => {
+  const optional =
+    "Optional properties and elements have no Borsh layout; use Schema.Option for a Rust Option"
+  const mixed =
+    "Mixed tuple rests have no Borsh layout; nest the rest as a Schema.Array element, or use Schema.Array with Schema.isMinLength"
   for (const [schema, message] of [
-    [Schema.Struct({ value: Schema.optionalKey(Borsh.U8) }), /\$\["value"\]: Optional schemas/],
-    [Schema.Tuple([Schema.optionalKey(Borsh.U8)]), /\$\[0\]: Optional schemas/],
-    [Schema.Struct({ [Symbol("key")]: Borsh.U8 }), /Symbol keys have no Borsh struct layout/],
-    [Schema.Record(Schema.String, Borsh.U8), /Index signatures have no Borsh struct layout/],
+    [Schema.Struct({ value: Schema.optionalKey(Borsh.U8) }), `$["value"]: ${optional}`],
+    [Schema.Tuple([Schema.optionalKey(Borsh.U8)]), `$[0]: ${optional}`],
+    [Schema.Array(Schema.optional(Borsh.U8)), `$[]: ${optional}`],
     [
-      Schema.TupleWithRest(Schema.Tuple([Borsh.U8]), [Borsh.U8]),
-      /Mixed tuple rests have no Borsh layout/,
+      Schema.Struct({ [Symbol("key")]: Borsh.U8 }),
+      "$: Symbol key Symbol(key) has no Borsh layout; use a string key",
     ],
     [
-      Schema.TupleWithRest(Schema.Tuple([]), [Borsh.U8, Borsh.U8]),
-      /Mixed tuple rests have no Borsh layout/,
+      Schema.Record(Schema.String, Borsh.U8),
+      "$: Index signatures have no Borsh layout; use Schema.ReadonlyMap or Schema.HashMap for a Rust map",
     ],
-    [Schema.NonEmptyArray(Borsh.U8), /Mixed tuple rests have no Borsh layout/],
+    [
+      Schema.StructWithRest(Schema.Struct({ a: Borsh.U8 }), [
+        Schema.Record(Schema.String, Borsh.U8),
+      ]),
+      "$: Index signatures have no Borsh layout; use Schema.ReadonlyMap or Schema.HashMap for a Rust map",
+    ],
+    [Schema.TupleWithRest(Schema.Tuple([Borsh.U8]), [Borsh.U8]), `$: ${mixed}`],
+    [Schema.TupleWithRest(Schema.Tuple([]), [Borsh.U8, Borsh.U8]), `$: ${mixed}`],
+    [Schema.Struct({ items: Schema.NonEmptyArray(Borsh.U8) }), `$["items"]: ${mixed}`],
   ] as const)
-    expect(() => Borsh.toCodec(schema)).toThrow(message)
+    expect(() => Borsh.toCodec(schema)).toThrow(new Error(message))
 })
 
 it("retains native checks, brands and transformations inside containers", () => {

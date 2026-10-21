@@ -117,7 +117,9 @@ it("validates collection arities and native binary shapes", () => {
     expect(ast._tag).toBe("Declaration")
     if (ast._tag !== "Declaration") throw new Error("Expected Declaration")
     const malformed = new SchemaAST.Declaration([], ast.run, ast.annotations)
-    expect(() => compile(malformed)).toThrow(/Collection requires exactly/)
+    expect(() => compile(malformed)).toThrow(
+      /^\$: (ReadonlyMap|HashMap) requires exactly 2 encoded type parameters$|^\$: (ReadonlySet|HashSet) requires exactly 1 encoded type parameter$/,
+    )
     const layout = compile(ast)
     for (const value of [null, [], {}, 1])
       expect(() => layout.write(new Writer(64), value)).toThrow(/Expected native collection/)

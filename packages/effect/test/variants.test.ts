@@ -649,7 +649,7 @@ it("checks malformed Option declarations and binary encoder inputs", () => {
   const ast = Schema.Option(Borsh.U8).ast
   for (const parameters of [[], [Borsh.U8.ast, Borsh.U8.ast]]) {
     const invalid = new SchemaAST.Declaration(parameters, ast.run, ast.annotations)
-    expect(() => compile(invalid)).toThrow(/exactly one/)
+    expect(() => compile(invalid)).toThrow(/^\$: Option requires exactly 1 encoded type parameter$/)
   }
   expect(() => compile(ast).write(new Writer(20), {})).toThrow(/Expected Option/)
   const layout = compile(Schema.toEncoded(schema).ast)

@@ -416,7 +416,9 @@ describe("unsupported encoded layouts and metadata", () => {
     for (const schema of [Schema.Literal(1), Schema.Unknown, Schema.Null, Schema.Undefined])
       expect(() => Borsh.toCodec(schema)).toThrow(/\$: Unsupported encoded/)
     for (const schema of [Schema.optionalKey(Borsh.U8), Schema.optional(Borsh.U8)]) {
-      expect(() => Borsh.toCodec(schema)).toThrow(/\$: Optional schemas need an explicit Borsh/)
+      expect(() => Borsh.toCodec(schema)).toThrow(
+        /^\$: Optional properties and elements have no Borsh layout; use Schema.Option for a Rust Option$/,
+      )
     }
   })
 
@@ -539,5 +541,88 @@ describe("unsupported encoded layouts and metadata", () => {
     expect(Schema.encodeSync(Borsh.toCodec(same))(1)).toEqual(Uint8Array.of(1))
     const metadata = Borsh.U128.ast.annotations?.[key]
     expect(Object.isFrozen(metadata)).toBe(true)
+  })
+
+  it("reports nested metadata failures at their path", () => {
+    const untypedKey: string = "@zorsh/effect/borsh/layout"
+    const invalid = Schema.make(new SchemaAST.Number({ [untypedKey]: { version: 2 } }))
+    expect(() => Borsh.toCodec(Schema.Struct({ amount: invalid }))).toThrow(
+      new Error('$["amount"]: Invalid Borsh layout annotation'),
+    )
+    const discriminants = { version: 1, kind: "enum", tag: "_tag", discriminants: { A: 256 } }
+    const enumLike = Schema.make(new SchemaAST.Number({ [untypedKey]: discriminants }))
+    expect(() => Borsh.toCodec(Schema.Tuple([Borsh.U8, enumLike]))).toThrow(
+      new Error("$[1]: Borsh enum discriminants must be unique integers from 0 to 255"),
+    )
+    const conflict = Borsh.U8.check(
+      Schema.makeFilter(() => true, {
+        [untypedKey]: { version: 1, kind: "integer", bits: 16, signed: false },
+      }),
+    )
+    expect(() => Borsh.toCodec(Schema.Array(conflict))).toThrow(
+      new Error("$[]: Conflicting Borsh layout annotations"),
+    )
+  })
+})
+
+describe("native declarations", () => {
+  const unsupported =
+    "has no Borsh layout; decode it from a Borsh-encodable schema with Schema.decodeTo"
+
+  it("names declarations without a Borsh layout and suggests a transformation", () => {
+    class Point {}
+    for (const [schema, message] of [
+      [Schema.Date, `$: Declaration effect/schema/Date ${unsupported}`],
+      [Schema.DateTimeUtc, `$: Declaration effect/schema/DateTimeUtc ${unsupported}`],
+      [Schema.Duration, `$: Declaration effect/schema/Duration ${unsupported}`],
+      [Schema.instanceOf(Point), `$: Declaration ${unsupported}`],
+      [
+        Schema.Struct({ at: Schema.Array(Schema.Date) }),
+        `$["at"][]: Declaration effect/schema/Date ${unsupported}`,
+      ],
+    ] as const)
+      expect(() => Borsh.toCodec(schema)).toThrow(new Error(message))
+  })
+
+  it("looks up representation ids as own string keys only", () => {
+    const run = Schema.Uint8Array.ast
+    if (run._tag !== "Declaration") throw new Error("Expected Declaration")
+    for (const id of ["toString", "constructor", "__proto__", 1]) {
+      const ast = new SchemaAST.Declaration([], run.run, { representation: { id } })
+      const name = typeof id === "string" ? `Declaration ${id}` : "Declaration"
+      expect(() => Borsh.toCodec(Schema.make(ast))).toThrow(new Error(`$: ${name} ${unsupported}`))
+    }
+  })
+
+  it("lets an explicit layout annotation take precedence over a native representation", () => {
+    const key: string = "@zorsh/effect/borsh/layout"
+    const annotate = (schema: Schema.Top, layout: object) =>
+      schema.pipe(Schema.annotateEncoded({ [key]: layout }))
+    const fixedBytes = { version: 1, kind: "fixedBytes", length: 2 }
+    const integer = { version: 1, kind: "integer", bits: 8, signed: false }
+    const enumLayout = { version: 1, kind: "enum", tag: "_tag", discriminants: {} }
+    const fixedArray = { version: 1, kind: "fixedArray", length: 2 }
+    for (const [schema, layout, message] of [
+      [Schema.Option(Borsh.U8), fixedBytes, "$: Borsh layout does not match encoded Declaration"],
+      [
+        Schema.ReadonlySet(Borsh.U8),
+        fixedBytes,
+        "$: Borsh layout does not match encoded Declaration",
+      ],
+      [Borsh.Bytes, integer, "$: Integer layout does not match encoded schema"],
+      [
+        Schema.HashMap(Borsh.U8, Borsh.U8),
+        integer,
+        "$: Integer layout does not match encoded schema",
+      ],
+      [
+        Schema.Result(Borsh.U8, Borsh.U8),
+        enumLayout,
+        "$: Enum layout requires a tagged union, literal union or Schema.Enum",
+      ],
+      [Borsh.Bytes, fixedArray, "$: Fixed array layout requires a homogeneous encoded array"],
+      [Schema.Date, fixedBytes, "$: Borsh layout does not match encoded Declaration"],
+    ] as const)
+      expect(() => Borsh.toCodec(annotate(schema, layout))).toThrow(new Error(message))
   })
 })

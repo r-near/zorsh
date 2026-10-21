@@ -207,7 +207,7 @@ it("validates Result arity and explicitly annotated fixed-array shapes", () => {
   const ast = Schema.Result(Borsh.U8, Borsh.Unit).ast
   for (const parameters of [[], [Borsh.U8.ast], [Borsh.U8.ast, Borsh.Unit.ast, Borsh.U8.ast]]) {
     expect(() => compile(new SchemaAST.Declaration(parameters, ast.run, ast.annotations))).toThrow(
-      /Result requires exactly two encoded type parameters/,
+      /^\$: Result requires exactly 2 encoded type parameters$/,
     )
   }
   const key = "@zorsh/effect/borsh/layout"

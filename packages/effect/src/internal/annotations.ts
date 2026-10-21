@@ -28,9 +28,16 @@ declare module "effect/Schema" {
 
 export type EnumDescriptor = Extract<LayoutDescriptor, { readonly kind: "enum" }>
 
+/** Rust collection and array lengths: a safe integer that fits in a u32. */
+export function isU32Length(value: unknown): value is number {
+  return (
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 0xffff_ffff
+  )
+}
+
 export function parseDescriptor<D extends LayoutDescriptor>(value: D): D
-export function parseDescriptor(value: unknown): LayoutDescriptor | undefined
-export function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
+export function parseDescriptor(value: unknown, path: string): LayoutDescriptor | undefined
+export function parseDescriptor(value: unknown, path = "$"): LayoutDescriptor | undefined {
   if (value === undefined) return undefined
   if (
     typeof value !== "object" ||
@@ -39,7 +46,7 @@ export function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
     value.version !== 1 ||
     !("kind" in value)
   ) {
-    throw new Error("$: Invalid Borsh layout annotation")
+    throw new Error(`${path}: Invalid Borsh layout annotation`)
   }
   switch (value.kind) {
     case "integer":
@@ -68,13 +75,7 @@ export function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
       break
     case "fixedBytes":
     case "fixedArray":
-      if (
-        "length" in value &&
-        typeof value.length === "number" &&
-        Number.isSafeInteger(value.length) &&
-        value.length >= 0 &&
-        value.length <= 0xffff_ffff
-      ) {
+      if ("length" in value && isU32Length(value.length)) {
         return Object.freeze({ version: 1, kind: value.kind, length: value.length })
       }
       break
@@ -97,7 +98,9 @@ export function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
             tag > 255 ||
             tags.has(tag)
           )
-            throw new Error("$: Borsh enum discriminants must be unique integers from 0 to 255")
+            throw new Error(
+              `${path}: Borsh enum discriminants must be unique integers from 0 to 255`,
+            )
           tags.add(tag)
         }
         return Object.freeze({
@@ -108,23 +111,28 @@ export function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
         })
       }
   }
-  throw new Error("$: Invalid Borsh layout annotation")
+  throw new Error(`${path}: Invalid Borsh layout annotation`)
 }
 
-export function descriptor(ast: SchemaAST.AST): LayoutDescriptor | undefined {
-  let found = parseDescriptor(ast.annotations?.[key])
+export function descriptor(ast: SchemaAST.AST, path = "$"): LayoutDescriptor | undefined {
+  let found = parseDescriptor(ast.annotations?.[key], path)
   const checks = [...(ast.checks ?? [])]
   for (let check = checks.pop(); check !== undefined; check = checks.pop()) {
-    const next = parseDescriptor(check.annotations?.[key])
-    if (next !== undefined) {
-      if (found !== undefined && JSON.stringify(found) !== JSON.stringify(next)) {
-        throw new Error("$: Conflicting Borsh layout annotations")
-      }
-      found = next
-    }
+    const next = parseDescriptor(check.annotations?.[key], path)
+    if (next !== undefined) found = merge(found, next, path)
     if (check._tag === "FilterGroup") checks.push(...check.checks)
   }
   return found
+}
+
+function merge(
+  found: LayoutDescriptor | undefined,
+  next: LayoutDescriptor,
+  path: string,
+): LayoutDescriptor {
+  if (found !== undefined && JSON.stringify(found) !== JSON.stringify(next))
+    throw new Error(`${path}: Conflicting Borsh layout annotations`)
+  return next
 }
 
 export function withLayout<S extends Schema.Top>(
@@ -132,9 +140,6 @@ export function withLayout<S extends Schema.Top>(
   layout: LayoutDescriptor,
 ): S["Rebuild"] {
   layout = parseDescriptor(layout)
-  const existing = descriptor(Schema.toEncoded(schema).ast)
-  if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(layout)) {
-    throw new Error("$: Conflicting Borsh layout annotations")
-  }
+  merge(descriptor(Schema.toEncoded(schema).ast), layout, "$")
   return schema.pipe(Schema.annotateEncoded({ [key]: Object.freeze(layout) }))
 }
