@@ -38,11 +38,20 @@ pub struct TestChild {
 }
 impl TestChild {
     pub fn spawn(command: &mut Command, label: &str, timeout: Duration) -> io::Result<Self> {
+        Self::spawn_with_stdout(command, label, timeout, Stdio::piped())
+    }
+
+    pub fn spawn_with_stdout(
+        command: &mut Command,
+        label: &str,
+        timeout: Duration,
+        stdout: Stdio,
+    ) -> io::Result<Self> {
         let reaped = Arc::new(AtomicBool::new(false));
         let mut process = ReapingChild {
             child: command
                 .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
+                .stdout(stdout)
                 .stderr(Stdio::piped())
                 .spawn()?,
             reaped: Arc::clone(&reaped),

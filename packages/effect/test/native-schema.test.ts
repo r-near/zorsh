@@ -170,6 +170,24 @@ describe("native Effect schema composition", () => {
         Schema.encodeEffect(codec)("v7").pipe(Effect.provideService(Encode, { prefix: "v" })),
       ),
     ).toEqual(Uint8Array.of(7))
+    const nested = Borsh.toCodec(Schema.Struct({ values: Schema.Array(schema) }))
+    expectTypeOf(nested).toEqualTypeOf<
+      Schema.Codec<{ readonly values: readonly string[] }, Uint8Array, Decode, Encode>
+    >()
+    expect(
+      Effect.runSync(
+        Schema.encodeEffect(nested)({ values: ["v7"] }).pipe(
+          Effect.provideService(Encode, { prefix: "v" }),
+        ),
+      ),
+    ).toEqual(Uint8Array.of(1, 0, 0, 0, 7))
+    expect(
+      Effect.runSync(
+        Schema.decodeEffect(nested)(Uint8Array.of(1, 0, 0, 0, 7)).pipe(
+          Effect.provideService(Decode, { prefix: "v" }),
+        ),
+      ),
+    ).toEqual({ values: ["v7"] })
     const failed = Effect.runSyncExit(
       Schema.encodeEffect(codec)("bad").pipe(Effect.provideService(Encode, { prefix: "v" })),
     )
@@ -303,6 +321,23 @@ describe("native Effect schema composition", () => {
   })
 })
 
+it("rejects structurally invalid container middleware output with checks disabled", () => {
+  const sparse: number[] = []
+  sparse.length = 1
+  for (const [schema, output] of [
+    [Schema.Tuple([Borsh.U8]), [1, 2]],
+    [Schema.Struct({ value: Borsh.U8 }), {}],
+    [Schema.Array(Borsh.U8), sparse],
+  ] as const) {
+    const changed = Schema.middlewareEncoding<Schema.Constraint, never>(() =>
+      Effect.succeedSome(output),
+    )(schema)
+    expect(() =>
+      Schema.encodeUnknownSync(Borsh.toCodec(changed), { disableChecks: true })(0),
+    ).toThrow(Schema.SchemaError)
+  }
+})
+
 describe("unsupported encoded layouts and metadata", () => {
   it("does not infer widths from numeric validation bounds", () => {
     for (const schema of [
@@ -317,16 +352,12 @@ describe("unsupported encoded layouts and metadata", () => {
 
   it("rejects ambiguous and future container layouts at construction", () => {
     for (const schema of [
-      Schema.Struct({ value: Borsh.U8 }),
-      Schema.Array(Borsh.U8),
-      Schema.Tuple([Borsh.U8]),
       Schema.Union([Borsh.U8, Borsh.U16]),
       Schema.Option(Borsh.U8),
       Schema.Literal(1),
       Schema.Unknown,
       Schema.Null,
       Schema.Undefined,
-      Schema.Record(Schema.String, Borsh.U8),
     ])
       expect(() => Borsh.toCodec(schema)).toThrow(/\$: Unsupported encoded/)
     for (const schema of [Schema.optionalKey(Borsh.U8), Schema.optional(Borsh.U8)]) {

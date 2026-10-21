@@ -1,4 +1,4 @@
-# Primitive differential tests
+# Borsh differential tests
 
 From the repository root:
 
@@ -6,7 +6,7 @@ From the repository root:
 vp run test-effect-differential
 ```
 
-Vitest compares built `@zorsh/effect` exports with the independent [borsh-rs oracle](../../../../rust/borsh-oracle/README.md). Value and raw-byte properties cover 18 primitive IDs, with 1,000 generated cases each, seed 20261020, and explicit edge/malformed/boundary cases. Tests compare independently encoded bytes, cross-decoded values, acceptance, canonical re-encoding, ownership and reuse after rejection. Coverage-guided testing is separate work.
+Vitest compares built `@zorsh/effect` exports with the independent [borsh-rs oracle](../../../../rust/borsh-oracle/README.md). Value and raw-byte properties cover 18 primitive IDs, with 1,000 generated cases each, seed 20261020, and explicit edge/malformed/boundary cases. Tests compare independently encoded bytes, cross-decoded values, acceptance, canonical re-encoding, ownership and reuse after rejection. Container properties cover a derived Rust Transfer struct, a required tuple and a vector, with 300 value and 300 raw/mutated-frame cases each. Explicit cases check zero-sized visitation and malicious vector counts. Coverage-guided testing is separate work.
 
 Fast-check failures print the counterexample, seed and shrink path. Select the failing Vitest test and pass those parameters to replay it:
 

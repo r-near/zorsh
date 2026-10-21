@@ -204,6 +204,40 @@ fn malformed_borsh_is_rejected_including_trailing_bytes() {
 }
 
 #[test]
+fn transfer_struct_has_concrete_field_order_and_rejections() {
+    golden(
+        "transfer",
+        json!({"receiver":"é🦀","amount":"513"}),
+        "06000000c3a9f09fa68001020000000000000000000000000000",
+    );
+    rejection("transfer", "decode", json!("0000000001"), "borsh_rejection");
+    rejection(
+        "transfer",
+        "encode",
+        json!({"receiver":"alice.near"}),
+        "transport",
+    );
+}
+
+#[test]
+fn composite_zero_sized_vectors_are_rejected() {
+    #[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
+    struct UnitField {
+        a: (),
+    }
+    assert!(borsh::to_vec(&UnitField { a: () }).unwrap().is_empty());
+    assert!(borsh::from_slice::<UnitField>(&[]).is_ok());
+    for bytes in [vec![0, 0, 0, 0], vec![1, 0, 0, 0]] {
+        assert!(borsh::from_slice::<Vec<((),)>>(&bytes).is_err());
+        assert!(borsh::from_slice::<Vec<UnitField>>(&bytes).is_err());
+    }
+    assert!(borsh::to_vec(&Vec::<((),)>::new()).is_err());
+    assert!(borsh::to_vec(&vec![((),)]).is_err());
+    assert!(borsh::to_vec(&Vec::<UnitField>::new()).is_err());
+    assert!(borsh::to_vec(&vec![UnitField { a: () }]).is_err());
+}
+
+#[test]
 fn zst_visitation_is_owned_by_borsh_not_schema_validation() {
     for (schema, value) in [
         ("unit", Value::Null),
@@ -310,5 +344,5 @@ fn bad_transport_never_counts_as_borsh_rejection() {
 fn registry_has_no_accidental_duplicate_ids() {
     let ids: std::collections::BTreeSet<_> = SCHEMA_IDS.iter().collect();
     assert_eq!(ids.len(), SCHEMA_IDS.len());
-    assert_eq!(SCHEMA_IDS.len(), 39);
+    assert_eq!(SCHEMA_IDS.len(), 40);
 }

@@ -6,6 +6,24 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(BorshSerialize, BorshDeserialize)]
+struct Transfer {
+    receiver: String,
+    amount: u128,
+}
+impl Transport for Transfer {
+    fn parse(v: &Value) -> Result<Self> {
+        let m = object(v, &["receiver", "amount"])?;
+        Ok(Self {
+            receiver: String::parse(&m["receiver"])?,
+            amount: u128::parse(&m["amount"])?,
+        })
+    }
+    fn normalized(&self) -> Value {
+        json!({"receiver": self.receiver, "amount": self.amount.normalized()})
+    }
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
 struct StorageDeposit {
     token_id: String,
     account_id: String,
@@ -162,7 +180,7 @@ registry! {
     "f32" => f32, "f64" => f64, "string" => String, "unit" => (),
     "vec_u16" => Vec<u16>, "tuple_u8_u128" => (u8, u128),
     "option_u128" => Option<u128>, "option_option_u8" => Option<Option<u8>>,
-    "array_u16_3" => [u16; 3], "storage_deposit" => StorageDeposit,
+    "array_u16_3" => [u16; 3], "storage_deposit" => StorageDeposit, "transfer" => Transfer,
     "explicit_enum" => ExplicitEnum,
     "map_u16_string" => BTreeMap<u16, String>, "set_string" => BTreeSet<String>,
     "empty" => Empty, "tuple_unit" => ((),),

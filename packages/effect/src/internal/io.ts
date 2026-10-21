@@ -1,7 +1,15 @@
 /** Expected binary failures only. User schema defects never cross this catch boundary. */
 export class BinaryError extends Error {
-  constructor(offset: number, message: string) {
-    super(`$ at byte ${offset}: ${message}`)
+  constructor(
+    readonly offset: number,
+    readonly detail: string,
+    readonly path = "$",
+  ) {
+    super(`${path} at byte ${offset}: ${detail}`)
+  }
+
+  prepend(segment: string): BinaryError {
+    return new BinaryError(this.offset, this.detail, `$${segment}${this.path.slice(1)}`)
   }
 }
 

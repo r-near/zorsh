@@ -1,22 +1,33 @@
 # Zorsh
 
-A TypeScript workspace for Borsh binary serialization.
+Zorsh turns ordinary typed TypeScript values into [Borsh](https://borsh.io) bytes for Rust contracts, and decodes their responses back into values. Its Zod-like schema API describes the field order and numeric widths the contract expects, while TypeScript infers the shape of your objects.
 
-| Package                            | Status                                                                                    |
-| ---------------------------------- | ----------------------------------------------------------------------------------------- |
-| [`@zorsh/zorsh`](packages/zorsh)   | Existing Zod-like API, version 0.5.2. See its README for installation and API examples.   |
-| [`@zorsh/effect`](packages/effect) | Private 0.0.0 native Effect 4 Borsh primitive codecs. Containers are not implemented yet. |
-
-The private root owns shared tooling. Packages have independent versions; adding an Effect implementation does not require changing the existing Zorsh API. Rust compatibility generators and their committed fixtures live in `rust/borsh_test`.
-
-Development uses [Vite+](https://viteplus.dev/guide/), pinned Node.js and pnpm, and one workspace lockfile. Start with:
+Install the published library:
 
 ```sh
-vp install --frozen-lockfile
-vp check
-vp run test-effect-differential
-vp run test-package
-vp test run
+npm install @zorsh/zorsh
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for hooks, package verification, Rust compatibility, and the default-off release gate.
+For a contract call that takes a receiver and a 128-bit token amount:
+
+```ts
+import { b } from "@zorsh/zorsh"
+
+const Transfer = b.struct({
+  receiver: b.string(),
+  amount: b.u128(),
+})
+type Transfer = b.infer<typeof Transfer>
+
+const transfer: Transfer = { receiver: "alice.near", amount: 123n }
+const bytes = Transfer.serialize(transfer)
+const value = Transfer.deserialize(bytes)
+```
+
+`Transfer` is inferred as `{ receiver: string; amount: bigint }`; `bytes` is a `Uint8Array` you can pass to a call that accepts Borsh arguments. Choose fields, their order and their widths to match your Rust contract. The library also supports nested structs, enums, options, vectors, byte arrays, maps and sets.
+
+See the [`@zorsh/zorsh` guide](packages/zorsh/README.md) for the full API and examples.
+
+[`@zorsh/effect`](packages/effect/README.md) is a separate native Effect implementation under development. It is private and unpublished.
+
+[Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)

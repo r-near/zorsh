@@ -3,6 +3,8 @@ import { descriptor } from "./annotations.js"
 import { BinaryError, Reader, utf8Length, Writer } from "./io.js"
 
 export interface Layout {
+  readonly minBytes: number
+  readonly isZeroSized: boolean
   read(reader: Reader): unknown
   write(writer: Writer, value: unknown): void
 }
@@ -51,18 +53,36 @@ export function rejectSuspensions(ast: SchemaAST.AST): void {
 }
 
 export function compile(ast: SchemaAST.AST): Layout {
+  const memo = new Map<SchemaAST.AST, Layout>()
+  const compile = (ast: SchemaAST.AST, path: string): Layout => {
+    const cached = memo.get(ast)
+    if (cached !== undefined) return cached
+    const layout = compileNode(ast, path, compile)
+    memo.set(ast, layout)
+    return layout
+  }
+  return compile(ast, "$")
+}
+
+function compileNode(
+  ast: SchemaAST.AST,
+  path: string,
+  compile: (ast: SchemaAST.AST, path: string) => Layout,
+): Layout {
   if (ast.context?.isOptional)
-    throw new Error("$: Optional schemas need an explicit Borsh representation")
+    throw new Error(`${path}: Optional schemas need an explicit Borsh representation`)
   const layout = descriptor(ast)
   if (layout?.kind === "integer") {
     const { bits, signed } = layout
     const bigint = bits > 32
     if (ast._tag !== (bigint ? "BigInt" : "Number"))
-      throw new Error("$: Integer layout does not match encoded schema")
+      throw new Error(`${path}: Integer layout does not match encoded schema`)
     const width = bits / 8
     const minimum = signed ? -(1n << BigInt(bits - 1)) : 0n
     const maximum = (1n << BigInt(signed ? bits - 1 : bits)) - 1n
     return {
+      minBytes: width,
+      isZeroSized: false,
       read: (r) => {
         const view = r.view(width)
         let value = 0n
@@ -86,9 +106,12 @@ export function compile(ast: SchemaAST.AST): Layout {
     }
   }
   if (layout?.kind === "float") {
-    if (ast._tag !== "Number") throw new Error("$: Float layout does not match encoded schema")
+    if (ast._tag !== "Number")
+      throw new Error(`${path}: Float layout does not match encoded schema`)
     const bits = layout.bits
     return {
+      minBytes: bits / 8,
+      isZeroSized: false,
       read: (r) => {
         const offset = r.offset
         const view = r.view(bits / 8)
@@ -120,6 +143,8 @@ export function compile(ast: SchemaAST.AST): Layout {
   ) {
     const length = layout?.length
     return {
+      minBytes: length ?? 4,
+      isZeroSized: length === 0,
       read: (r) => r.take(length ?? r.u32()).slice(),
       write: (w, value) => {
         if (!(value instanceof Uint8Array)) throw new BinaryError(w.offset, "Expected Uint8Array")
@@ -133,10 +158,13 @@ export function compile(ast: SchemaAST.AST): Layout {
       },
     }
   }
-  if (layout !== undefined) throw new Error(`$: Borsh layout does not match encoded ${ast._tag}`)
+  if (layout !== undefined)
+    throw new Error(`${path}: Borsh layout does not match encoded ${ast._tag}`)
   switch (ast._tag) {
     case "String":
       return {
+        minBytes: 4,
+        isZeroSized: false,
         read: (r) => {
           const bytes = r.take(r.u32())
           try {
@@ -156,6 +184,8 @@ export function compile(ast: SchemaAST.AST): Layout {
       }
     case "Boolean":
       return {
+        minBytes: 1,
+        isZeroSized: false,
         read: (r) => {
           const offset = r.offset
           const value = r.view(1).getUint8(0)
@@ -167,20 +197,100 @@ export function compile(ast: SchemaAST.AST): Layout {
           w.view(1).setUint8(0, value ? 1 : 0)
         },
       }
-    case "Arrays":
-      if (ast.elements.length === 0 && ast.rest.length === 0) {
+    case "Objects": {
+      if (ast.indexSignatures.length)
+        throw new Error(`${path}: Index signatures have no Borsh struct layout`)
+      const fields = ast.propertySignatures.map((field) => {
+        if (typeof field.name === "symbol")
+          throw new Error(`${path}: Symbol keys have no Borsh struct layout`)
+        const name = field.name
+        const segment = `[${JSON.stringify(name)}]`
+        return { name, segment, layout: compile(field.type, path + segment) }
+      })
+      return {
+        minBytes: fields.reduce((sum, field) => sum + field.layout.minBytes, 0),
+        isZeroSized: fields.every((field) => field.layout.isZeroSized),
+        read: (r) => {
+          const value: Record<PropertyKey, unknown> = {}
+          for (const field of fields)
+            Object.defineProperty(value, field.name, {
+              value: at(field.segment, () => field.layout.read(r)),
+              enumerable: true,
+              writable: true,
+              configurable: true,
+            })
+          return value
+        },
+        write: (w, value) => {
+          if (fields.length === 0) return
+          if (typeof value !== "object" || value === null)
+            throw new BinaryError(w.offset, "Expected object")
+          for (const field of fields)
+            at(field.segment, () => {
+              if (!Object.hasOwn(value, field.name))
+                throw new BinaryError(w.offset, "Missing required field")
+              field.layout.write(w, Reflect.get(value, field.name))
+            })
+        },
+      }
+    }
+    case "Arrays": {
+      if (ast.rest.length === 0) {
+        const items = ast.elements.map((item, i) => compile(item, `${path}[${i}]`))
         return {
-          read: () => [],
+          minBytes: items.reduce((sum, item) => sum + item.minBytes, 0),
+          isZeroSized: items.every((item) => item.isZeroSized),
+          read: (r) => items.map((item, i) => at(`[${i}]`, () => item.read(r))),
           write: (w, value) => {
-            if (!Array.isArray(value) || value.length !== 0)
-              throw new BinaryError(w.offset, "Expected empty tuple")
+            if (!Array.isArray(value) || value.length !== items.length)
+              throw new BinaryError(w.offset, `Expected tuple of length ${items.length}`)
+            items.forEach((item, i) => at(`[${i}]`, () => item.write(w, value[i])))
           },
         }
       }
-      break
+      const rest = ast.rest[0]
+      if (ast.elements.length || ast.rest.length !== 1 || rest === undefined)
+        throw new Error(`${path}: Mixed tuple rests have no Borsh layout`)
+      const item = compile(rest, `${path}[]`)
+      const checkItem = (offset: number) => {
+        if (item.isZeroSized)
+          throw new BinaryError(offset, "Borsh forbids vectors of zero-sized values")
+      }
+      return {
+        minBytes: 4,
+        isZeroSized: false,
+        read: (r) => {
+          checkItem(r.offset)
+          const count = r.u32()
+          if (count > Math.floor((r.input.byteLength - r.offset) / item.minBytes))
+            throw new BinaryError(r.offset, "Truncated vector payload")
+          const value: unknown[] = []
+          for (let i = 0; i < count; i++) value.push(at(`[${i}]`, () => item.read(r)))
+          return value
+        },
+        write: (w, value) => {
+          checkItem(w.offset)
+          if (!Array.isArray(value) || value.length > 0xffff_ffff)
+            throw new BinaryError(w.offset, "Expected array with u32 length")
+          w.u32(value.length)
+          for (let i = 0; i < value.length; i++) at(`[${i}]`, () => item.write(w, value[i]))
+        },
+      }
+    }
     case "Number":
     case "BigInt":
-      throw new Error(`$: ${ast._tag} requires an explicit Borsh width; use a Borsh numeric schema`)
+      throw new Error(
+        `${path}: ${ast._tag} requires an explicit Borsh width; use a Borsh numeric schema`,
+      )
   }
-  throw new Error(`$: Unsupported encoded schema ${ast._tag}; this slice supports primitives only`)
+  throw new Error(`${path}: Unsupported encoded schema ${ast._tag}`)
+}
+
+function at<A>(segment: string, run: () => A): A {
+  try {
+    return run()
+  } catch (error) {
+    if (error instanceof BinaryError) throw error.prepend(segment)
+    throw error
+  }
 }
