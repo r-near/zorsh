@@ -14,10 +14,9 @@ Development uses [Vite+](https://viteplus.dev/guide/), pinned Node.js and pnpm, 
 ```sh
 vp install --frozen-lockfile
 vp check
+vp run test-effect-differential
+vp run test-package
 vp test run
-vp -C packages/zorsh pack
-vp -C packages/zorsh pm pack -- --pack-destination ../../.artifacts
-vp run check-package
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for hooks, package verification, Rust compatibility, and the default-off release gate.

@@ -29,8 +29,6 @@ jobs:
         run: vp install --frozen-lockfile
       - name: Check formatting, lint and types
         run: vp check
-      - name: Verify Effect lint diagnostics
-        run: vp run check-effect-lint
       - name: Check Rust oracle formatting
         run: cargo +1.98.0 fmt --manifest-path rust/borsh-oracle/Cargo.toml --check
       - name: Lint Rust oracle and its tests
@@ -69,18 +67,14 @@ jobs:
           fi
       - name: Test Rust oracle conformance, properties and persistent CLI
         run: cargo +1.98.0 test --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml
-      - name: Run tests with coverage
-        run: vp test run --coverage
+      - name: Build Rust differential oracle
+        run: cargo +1.98.0 build --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml
       - name: Build libraries
         run: vp run build
-      - name: Create npm tarball
+      - name: Create public package tarball
         run: vp -C packages/zorsh pm pack -- --pack-destination ../../.artifacts
-      - name: Verify installed tarball consumers
-        run: vp run check-package
-      - name: Create private Effect tarball
-        run: vp -C packages/effect pm pack -- --pack-destination ../../.artifacts
-      - name: Verify native Effect tarball consumers
-        run: vp run check-effect-package
+      - name: Run tests with coverage
+        run: vp test run --coverage
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:

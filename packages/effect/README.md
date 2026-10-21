@@ -6,26 +6,16 @@ Use `import { Borsh } from "@zorsh/effect"` or `import * as Borsh from "@zorsh/e
 
 ```ts
 import { Borsh } from "@zorsh/effect"
-import { Schema, SchemaTransformation } from "effect"
+import { Schema } from "effect"
 
-const Amount = Borsh.U64.pipe(
-  Schema.decodeTo(
-    Schema.Struct({ amount: Schema.String }),
-    SchemaTransformation.transform({
-      decode: (n) => ({ amount: n.toString() }),
-      encode: (value) => BigInt(value.amount),
-    }),
-  ),
-)
-
-const codec = Borsh.toCodec(Amount)
-const bytes = Schema.encodeSync(codec)({ amount: "7" })
+const codec = Borsh.toCodec(Borsh.U64)
+const bytes = Schema.encodeSync(codec)(7n)
 // Uint8Array [7, 0, 0, 0, 0, 0, 0, 0]
 const value = Schema.decodeSync(codec)(bytes)
-// { amount: "7" }
+// 7n
 ```
 
-`toCodec(schema, options?)` returns `Schema.Codec<S["Type"], Uint8Array, S["DecodingServices"], S["EncodingServices"]>`. It compiles `Schema.toEncoded(schema).ast`, then composes the binary conversion with the **original** schema through native `Schema.decodeTo`. The example's wire format is a u64 even though its application type is an object. Finite class/declaration application types also work when their encoded side is supported.
+`toCodec(schema, options?)` retains the schema's native types and decoding/encoding services while replacing its encoded representation with `Uint8Array`.
 
 Refinements, brands, transformations and separate decoding/encoding services retain their native Effect behavior and types. The numeric constants remain ordinary schemas with `.check`, `.annotate`, `.make` and `.pipe`; for example, `Borsh.U16.check(Schema.isGreaterThan(0)).pipe(Schema.brand("Amount"))`. Numeric widths are explicit metadata and are never inferred from validation bounds. Layout annotations use native [`Schema.annotateEncoded`](https://effect.website/docs/v4/schema/annotations/); private metadata keys/descriptors are implementation details and must not be modified. Detectable conflicting descriptors across check layers are rejected. Effect's ordinary annotation overwrite behavior does not retain an arbitrary caller's earlier metadata history.
 
@@ -52,4 +42,4 @@ The byte cap bounds binary buffers, not all memory or CPU used by an application
 
 Structs, nonempty tuples, vectors, options, unions/tagged variants, maps, sets, recursive wire schemas and arbitrary encoded declarations are **unsupported in this slice**. Plain `Schema.Number`/`BigInt` are ambiguous and rejected. There are no custom declaration wire hooks, registry wrappers, Rust schema exports or contract introspection.
 
-The workspace tests cover boundaries, malformed data, native composition/service inference, Borsh specification goldens and bounded fast-check properties. A persistent Rust differential oracle and broader fuzzing are follow-up work; these checks do not establish full Borsh parity for future containers.
+The workspace tests cover boundaries, malformed data, native composition/service inference, Borsh specification goldens and bounded fast-check properties. The [primitive differential suite](test/differential/README.md) also compares built public exports against the independent borsh-rs oracle with shrinking and replay. It tests 18 primitive schema IDs; these checks do not establish full Borsh parity for future containers. Coverage-guided fuzzing remains separate work.
