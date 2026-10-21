@@ -142,13 +142,13 @@ describe("Borsh primitives", () => {
     expect(Schema.decodeSync(bool)(Uint8Array.of(0))).toBe(false)
     expect(Schema.decodeSync(bool)(Uint8Array.of(1))).toBe(true)
     for (const tag of [2, 128, 255])
-      expect(() => Schema.decodeSync(bool)(Uint8Array.of(tag))).toThrow(/byte 0.*bool tag/)
+      expect(() => Schema.decodeSync(bool)(Uint8Array.of(tag))).toThrow(/bool tag.* at byte 0$/)
     expect(() => Schema.encodeUnknownSync(bool)(1)).toThrow(Schema.SchemaError)
     const unit = Borsh.toCodec(Borsh.Unit)
     expect(Schema.encodeSync(unit)([])).toEqual(new Uint8Array())
     expect(Schema.decodeSync(unit)(new Uint8Array())).toEqual([])
     expect(() => Schema.encodeUnknownSync(unit)([1])).toThrow(Schema.SchemaError)
-    expect(() => Schema.decodeSync(unit)(Uint8Array.of(0))).toThrow(/byte 0.*Trailing/)
+    expect(() => Schema.decodeSync(unit)(Uint8Array.of(0))).toThrow(/Trailing.* at byte 0$/)
   })
 
   it.each([Borsh.F32, Borsh.F64])(
@@ -188,7 +188,7 @@ describe("Borsh primitives", () => {
     for (const bits of [0x7f800001, 0x7fc00000, 0x7fffffff, 0xff800001, 0xffffffff]) {
       const bytes = new Uint8Array(4)
       new DataView(bytes.buffer).setUint32(0, bits, true)
-      expect(() => Schema.decodeSync(Borsh.toCodec(Borsh.F32))(bytes)).toThrow(/byte 0.*NaN/)
+      expect(() => Schema.decodeSync(Borsh.toCodec(Borsh.F32))(bytes)).toThrow(/NaN.* at byte 0$/)
     }
     for (const bits of [
       0x7ff0000000000001n,
@@ -199,7 +199,7 @@ describe("Borsh primitives", () => {
     ]) {
       const bytes = new Uint8Array(8)
       new DataView(bytes.buffer).setBigUint64(0, bits, true)
-      expect(() => Schema.decodeSync(Borsh.toCodec(Borsh.F64))(bytes)).toThrow(/byte 0.*NaN/)
+      expect(() => Schema.decodeSync(Borsh.toCodec(Borsh.F64))(bytes)).toThrow(/NaN.* at byte 0$/)
     }
   })
 
@@ -240,6 +240,35 @@ describe("Borsh primitives", () => {
     )
   })
 
+  it("matches TextEncoder and TextDecoder across the short ASCII string paths", () => {
+    const codec = Borsh.toCodec(Schema.String)
+    const prefixed = (bytes: Uint8Array) => {
+      const out = new Uint8Array(4 + bytes.byteLength)
+      new DataView(out.buffer).setUint32(0, bytes.byteLength, true)
+      out.set(bytes, 4)
+      return out
+    }
+    for (let length = 0; length <= 40; length++) {
+      const ascii = Array.from({ length }, (_, i) => String.fromCharCode(i % 128)).join("")
+      const values = [
+        ascii,
+        ...Array.from(ascii, (_, i) => ascii.slice(0, i) + "é" + ascii.slice(i + 1)),
+      ]
+      for (const value of values) {
+        const bytes = prefixed(new TextEncoder().encode(value))
+        expect(Schema.encodeSync(codec)(value)).toEqual(bytes)
+        expect(Schema.decodeSync(codec)(bytes)).toBe(value)
+      }
+      if (length > 0) {
+        const malformed = new TextEncoder().encode(ascii)
+        malformed[length - 1] = 0xff
+        expect(() => Schema.decodeSync(codec)(prefixed(malformed))).toThrow(
+          /^Invalid UTF-8 at byte 4$/,
+        )
+      }
+    }
+  })
+
   it.each([[0xc0, 0xaf], [0xed, 0xa0, 0x80], [0xf4, 0x90, 0x80, 0x80], [0x80], [0xe2, 0x82]])(
     "rejects malformed UTF-8 %j",
     (...payload) => {
@@ -247,7 +276,7 @@ describe("Borsh primitives", () => {
         Schema.decodeSync(Borsh.toCodec(Schema.String))(
           Uint8Array.of(payload.length, 0, 0, 0, ...payload),
         ),
-      ).toThrow(/byte 4.*UTF-8/)
+      ).toThrow(/UTF-8.* at byte 4$/)
     },
   )
 
@@ -323,15 +352,15 @@ describe("Borsh primitives", () => {
       Borsh.fixedBytes(4),
     ]) {
       const codec = Borsh.toCodec(schema)
-      expect(() => Schema.decodeSync(codec)(new Uint8Array())).toThrow(/byte 0.*Truncated/)
+      expect(() => Schema.decodeSync(codec)(new Uint8Array())).toThrow(/Truncated.* at byte 0$/)
     }
     const codec = Borsh.toCodec(Borsh.U16)
-    expect(() => Schema.decodeSync(codec)(Uint8Array.of(1))).toThrow(/byte 0.*Truncated/)
-    expect(() => Schema.decodeSync(codec)(Uint8Array.of(1, 0, 9))).toThrow(/byte 2.*Trailing/)
+    expect(() => Schema.decodeSync(codec)(Uint8Array.of(1))).toThrow(/Truncated.* at byte 0$/)
+    expect(() => Schema.decodeSync(codec)(Uint8Array.of(1, 0, 9))).toThrow(/Trailing.* at byte 2$/)
     for (const schema of [Schema.String, Borsh.Bytes])
       expect(() =>
         Schema.decodeSync(Borsh.toCodec(schema))(Uint8Array.of(255, 255, 255, 255)),
-      ).toThrow(/byte 4.*Truncated/)
+      ).toThrow(/Truncated.* at byte 4$/)
   })
 
   it("enforces custom and default byte caps before allocating payloads", () => {

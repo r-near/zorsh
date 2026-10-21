@@ -243,7 +243,7 @@ const program = Effect.gen(function* () {
 })
 ```
 
-Both operations expose `Schema.SchemaError` in the error channel. Synchronous helpers throw that error. Unsupported layouts and invalid options throw when `toCodec` is constructed. User transformations and validators retain their native Effect behavior, including defects.
+Both operations expose `Schema.SchemaError` in the error channel. Synchronous helpers throw that error. Binary failures are native issues with a path and the byte offset, so they render like other Schema errors, for example `Truncated vector payload at byte 12` followed by `at ["actions"]`. Unsupported layouts and invalid options throw when `toCodec` is constructed. Codecs are memoized by schema identity and `maxBytes`, so repeated `toCodec` calls with the same schema object are cheap; a structurally equal but separately constructed schema compiles again. User transformations and validators retain their native Effect behavior, including defects.
 
 ## Binary format and limits
 
