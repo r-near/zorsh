@@ -373,7 +373,7 @@ const maxBytesCacheSize = 8
  * Unsupported layouts and invalid options throw here, at construction. Decoding
  * must consume the whole input. Binary failures are `Schema.SchemaError`s whose
  * issue names the path and byte offset. Codecs are memoized by schema identity
- * and `maxBytes`.
+ * and `maxBytes`, keeping up to 8 `maxBytes` values per schema.
  *
  * **Example** (Encoding contract arguments)
  *

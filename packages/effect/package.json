@@ -31,11 +31,11 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "default": "./dist/index.js"
     },
     "./Borsh": {
       "types": "./dist/Borsh.d.ts",
-      "import": "./dist/Borsh.js"
+      "default": "./dist/Borsh.js"
     }
   },
   "publishConfig": {

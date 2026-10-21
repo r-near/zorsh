@@ -32,7 +32,7 @@ function install(): string {
   return temp
 }
 
-it("packs publishable metadata and resolves both entry points in Node", () => {
+it("packs publishable metadata and resolves both entry points from Node ESM and CJS", () => {
   const temp = install()
   try {
     const manifest = JSON.parse(
@@ -51,8 +51,8 @@ it("packs publishable metadata and resolves both entry points in Node", () => {
     })
     expect(manifest.dependencies).toBeUndefined()
     expect(manifest.exports).toEqual({
-      ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },
-      "./Borsh": { types: "./dist/Borsh.d.ts", import: "./dist/Borsh.js" },
+      ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
+      "./Borsh": { types: "./dist/Borsh.d.ts", default: "./dist/Borsh.js" },
     })
     const script = `
       import { Borsh } from "@zorsh/effect"
@@ -67,6 +67,14 @@ it("packs publishable metadata and resolves both entry points in Node", () => {
       cwd: temp,
       encoding: "utf8",
     })
+    const required = `
+      const { Borsh } = require("@zorsh/effect")
+      if (Borsh.toCodec !== require("@zorsh/effect/Borsh").toCodec) throw new Error("entry points differ")
+      process.stdout.write(require.resolve("@zorsh/effect"))
+    `
+    expect(execFileSync(process.execPath, ["-e", required], { cwd: temp, encoding: "utf8" })).toBe(
+      join(temp, "node_modules/@zorsh/effect/dist/index.js"),
+    )
     const dist = pathToFileURL(join(temp, "node_modules/@zorsh/effect/dist")).href
     expect(JSON.parse(output)).toEqual({
       bytes: [52, 18],
