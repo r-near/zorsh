@@ -172,7 +172,7 @@ const scalar = fc.oneof(
   fc.integer({ min: 0xe000, max: 0x10ffff }),
 )
 const strings = ["", "\uFEFF", "\uFEFFa", "\0", "é😀", "e\u0301", "\r\n"]
-const stringArbitrary = edgesAnd(
+export const stringArbitrary = edgesAnd(
   strings,
   fc.array(scalar, { maxLength: 64 }).map((v) => String.fromCodePoint(...v)),
 )

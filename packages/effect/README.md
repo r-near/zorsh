@@ -67,11 +67,11 @@ const RecipientAmount = Schema.Tuple([Schema.String, Borsh.U128])
 const recipientAmount = Schema.encodeSync(Borsh.toCodec(RecipientAmount))(["alice.near", 123n])
 ```
 
-An array writes a u32 item count followed by its items, like Rust `Vec<T>`. A tuple writes its elements in order without a prefix. `Borsh.Unit` is `Schema.Tuple([])`, representing Rust `()` with no bytes.
+An array writes a u32 item count followed by its items, like Rust `Vec<T>`. For a nonempty vector, use `Schema.Array(item).check(Schema.isMinLength(1))`. A tuple writes its elements in order without a prefix. `Borsh.Unit` is `Schema.Tuple([])`, representing Rust `()` with no bytes.
 
 ### Structs
 
-Compose schemas directly. Each nested struct writes its fields in schema order:
+Compose schemas directly. Each nested struct writes its fields in encoded schema order. Integer-index names sort numerically before ordinary string names, including names produced by `Schema.encodeKeys`:
 
 ```ts
 const Recipient = Schema.Struct({

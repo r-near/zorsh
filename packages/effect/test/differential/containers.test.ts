@@ -3,7 +3,7 @@ import { Schema } from "effect"
 import fc from "fast-check"
 import { afterAll, beforeAll, describe, it } from "vite-plus/test"
 import { Oracle, assertProperty } from "./oracle.js"
-import { attempt, bytes, hex } from "./primitives.js"
+import { attempt, bytes, hex, stringArbitrary } from "./primitives.js"
 const packageName = "@zorsh/effect"
 const { Borsh }: typeof import("../../src/index.js") = await import(packageName)
 
@@ -37,7 +37,7 @@ const entries = [
     "transfer",
     Schema.Struct({ receiver: Schema.String, amount: Borsh.U128 }),
     fc.record({
-      receiver: fc.string({ maxLength: 40 }),
+      receiver: stringArbitrary,
       amount: fc.bigInt({ min: 0n, max: (1n << 128n) - 1n }),
     }),
     ({ receiver, amount }) => ({ receiver, amount: String(amount) }),

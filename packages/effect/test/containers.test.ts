@@ -2,7 +2,7 @@ import { Effect, Exit, Result, Schema, SchemaTransformation } from "effect"
 import { expect, expectTypeOf, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 
-it("encodes the root README Transfer example with inferred ordinary objects", () => {
+it("encodes the package README Transfer example with inferred ordinary objects", () => {
   const Transfer = Schema.Struct({ receiver: Schema.String, amount: Borsh.U128 })
   type Transfer = typeof Transfer.Type
   const codec = Borsh.toCodec(Transfer)
@@ -119,6 +119,7 @@ it("rejects visited vectors of Rust zero-sized values", () => {
   for (const item of [
     Borsh.Unit,
     Schema.Struct({}),
+    Schema.Struct({ a: Borsh.Unit }),
     Borsh.fixedBytes(0),
     Schema.Tuple([Borsh.Unit]),
   ]) {
@@ -137,15 +138,22 @@ it("rejects visited vectors of Rust zero-sized values", () => {
 })
 
 it("requires fixed encoded keys and positions and rejects mixed rests", () => {
-  for (const schema of [
-    Schema.Struct({ value: Schema.optionalKey(Borsh.U8) }),
-    Schema.Tuple([Schema.optionalKey(Borsh.U8)]),
-    Schema.Struct({ [Symbol("key")]: Borsh.U8 }),
-    Schema.Record(Schema.String, Borsh.U8),
-    Schema.TupleWithRest(Schema.Tuple([Borsh.U8]), [Borsh.U8]),
-    Schema.TupleWithRest(Schema.Tuple([]), [Borsh.U8, Borsh.U8]),
-  ])
-    expect(() => Borsh.toCodec(schema)).toThrow()
+  for (const [schema, message] of [
+    [Schema.Struct({ value: Schema.optionalKey(Borsh.U8) }), /\$\["value"\]: Optional schemas/],
+    [Schema.Tuple([Schema.optionalKey(Borsh.U8)]), /\$\[0\]: Optional schemas/],
+    [Schema.Struct({ [Symbol("key")]: Borsh.U8 }), /Symbol keys have no Borsh struct layout/],
+    [Schema.Record(Schema.String, Borsh.U8), /Index signatures have no Borsh struct layout/],
+    [
+      Schema.TupleWithRest(Schema.Tuple([Borsh.U8]), [Borsh.U8]),
+      /Mixed tuple rests have no Borsh layout/,
+    ],
+    [
+      Schema.TupleWithRest(Schema.Tuple([]), [Borsh.U8, Borsh.U8]),
+      /Mixed tuple rests have no Borsh layout/,
+    ],
+    [Schema.NonEmptyArray(Borsh.U8), /Mixed tuple rests have no Borsh layout/],
+  ] as const)
+    expect(() => Borsh.toCodec(schema)).toThrow(message)
 })
 
 it("retains native checks, brands and transformations inside containers", () => {
@@ -242,4 +250,52 @@ it("keeps a nested throwing getter in the native defect channel", () => {
     ),
   )
   expect(Exit.findDefect(exit)).toEqual(Result.succeed(defect))
+})
+
+it("bounds compilation work for shared schema DAGs", () => {
+  for (const depth of [6, 12]) {
+    const Leaf = Schema.Struct({ value: Borsh.U8 })
+    let shared: Schema.Constraint = Leaf
+    for (let i = 0; i < depth; i++) shared = Schema.Struct({ x: shared, y: shared })
+    Schema.toEncoded(shared)
+    const ast = Schema.toEncoded(Leaf).ast
+    if (ast._tag !== "Objects") throw new Error("Expected struct AST")
+    const fields = ast.propertySignatures
+    let visits = 0
+    Object.defineProperty(ast, "propertySignatures", {
+      get: () => {
+        visits++
+        return fields
+      },
+    })
+    Borsh.toCodec(shared)
+    const first = visits
+    expect(first).toBeLessThanOrEqual(depth + 1)
+    Borsh.toCodec(shared)
+    expect(visits).toBeGreaterThan(first)
+    expect(visits).toBeLessThanOrEqual(2 * (depth + 1))
+  }
+})
+
+it("keeps contextual binary paths when layouts are shared", () => {
+  const Item = Schema.Struct({ active: Schema.Boolean })
+  const codec = Borsh.toCodec(Schema.Struct({ first: Item, second: Item }))
+  expect(() => Schema.decodeSync(codec)(Uint8Array.of(1, 2))).toThrow(
+    /\$\["second"\]\["active"\] at byte 1: Invalid bool tag 2/,
+  )
+})
+
+it("enumerates numeric struct keys before ordinary keys", () => {
+  const codec = Borsh.toCodec(Schema.Struct({ last: Borsh.U8, 10: Borsh.U8, 2: Borsh.U16 }))
+  const value = { last: 9, 10: 7, 2: 258 }
+  expect(Schema.encodeSync(codec)(value)).toEqual(Uint8Array.of(2, 1, 7, 9))
+  expect(Schema.decodeSync(codec)(Uint8Array.of(2, 1, 7, 9))).toEqual(value)
+})
+
+it("uses a native check for nonempty Borsh vectors", () => {
+  const Transfers = Schema.Array(Borsh.U16).check(Schema.isMinLength(1))
+  const codec = Borsh.toCodec(Transfers)
+  expect(Schema.encodeSync(codec)([7])).toEqual(Uint8Array.of(1, 0, 0, 0, 7, 0))
+  expect(() => Schema.encodeSync(codec)([])).toThrow(Schema.SchemaError)
+  expect(() => Schema.decodeSync(codec)(Uint8Array.of(0, 0, 0, 0))).toThrow(Schema.SchemaError)
 })

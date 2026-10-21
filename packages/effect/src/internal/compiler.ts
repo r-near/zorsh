@@ -52,7 +52,23 @@ export function rejectSuspensions(ast: SchemaAST.AST): void {
   }
 }
 
-export function compile(ast: SchemaAST.AST, path = "$"): Layout {
+export function compile(ast: SchemaAST.AST): Layout {
+  const memo = new Map<SchemaAST.AST, Layout>()
+  const compile = (ast: SchemaAST.AST, path: string): Layout => {
+    const cached = memo.get(ast)
+    if (cached !== undefined) return cached
+    const layout = compileNode(ast, path, compile)
+    memo.set(ast, layout)
+    return layout
+  }
+  return compile(ast, "$")
+}
+
+function compileNode(
+  ast: SchemaAST.AST,
+  path: string,
+  compile: (ast: SchemaAST.AST, path: string) => Layout,
+): Layout {
   if (ast.context?.isOptional)
     throw new Error(`${path}: Optional schemas need an explicit Borsh representation`)
   const layout = descriptor(ast)
