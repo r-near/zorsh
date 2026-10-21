@@ -42,10 +42,17 @@ expectTypeOf(batch).toEqualTypeOf<
   Schema.Codec<{ readonly values: readonly string[] }, Uint8Array, Decode, Encode>
 >()
 
-const Action = Borsh.enumLayout(
-  Schema.TaggedUnion({ Idle: {}, Set: { value: Schema.Option(schema) } }),
-  { tag: "_tag", discriminants: { Idle: 3, Set: 17 } },
-)
+const Actions = Schema.TaggedUnion({ Idle: {}, Set: { value: Schema.Option(schema) } })
+const Action = Actions.pipe(Borsh.discriminants({ Idle: 3, Set: 17 }))
+expectTypeOf(Action).toEqualTypeOf<typeof Actions>()
+// @ts-expect-error Missing discriminant for Set.
+Actions.pipe(Borsh.discriminants({ Idle: 3 }))
+// @ts-expect-error Typo in a discriminant key.
+Actions.pipe(Borsh.discriminants({ Idle: 3, Sett: 17 }))
+// @ts-expect-error Extra discriminant key.
+Actions.pipe(Borsh.discriminants({ Idle: 3, Set: 17, Other: 1 }))
+// @ts-expect-error The map must match the selected tag key.
+Actions.pipe(Borsh.discriminants({ Idle: 3, Set: 17 }, { tag: "kind" }))
 const action = Borsh.toCodec(Action)
 expectTypeOf(action).toEqualTypeOf<Schema.Codec<typeof Action.Type, Uint8Array, Decode, Encode>>()
 expectTypeOf(Action.cases.Set.make({ value: Option.some("v1") })._tag).toEqualTypeOf<"Set">()
@@ -59,6 +66,34 @@ expectTypeOf(decoded).toEqualTypeOf<Effect.Effect<typeof Action.Type, Schema.Sch
 expectTypeOf(Schema.encodeEffect(action)({ _tag: "Idle" })).toEqualTypeOf<
   Effect.Effect<Uint8Array, Schema.SchemaError, Encode>
 >()
+
+expectTypeOf(Actions.cases.Set.make({ value: Option.none() })._tag).toEqualTypeOf<"Set">()
+expectTypeOf(Borsh.toCodec(Actions)).toEqualTypeOf<
+  Schema.Codec<typeof Actions.Type, Uint8Array, Decode, Encode>
+>()
+
+const Status = Schema.Literals(["Pending", "Done"])
+expectTypeOf(Schema.decodeSync(Borsh.toCodec(Status))(Uint8Array.of(1))).toEqualTypeOf<
+  "Pending" | "Done"
+>()
+Status.pipe(Borsh.discriminants({ Pending: 1, Done: 5 }))
+// @ts-expect-error Missing discriminant for Done.
+Status.pipe(Borsh.discriminants({ Pending: 1 }))
+enum Direction {
+  Up = 1,
+  Down = 5,
+}
+const Directions = Schema.Enum(Direction).pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
+expectTypeOf(
+  Schema.decodeSync(Borsh.toCodec(Directions))(Uint8Array.of(1)),
+).toEqualTypeOf<Direction>()
+// @ts-expect-error TS enum maps use member names, not values.
+Schema.Enum(Direction).pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
+const Kinds = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("A") }),
+  Schema.Struct({ kind: Schema.Literal("B"), value: U16 }),
+]).pipe(Borsh.discriminants({ A: 2, B: 9 }, { tag: "kind" }), Schema.toTaggedUnion("kind"))
+expectTypeOf(Kinds.match({ kind: "A" }, { A: () => 0, B: (b) => b.value })).toEqualTypeOf<number>()
 
 const fixed = Schema.Array(schema).pipe(Borsh.fixedArray(2))
 expectTypeOf(fixed.Type).toEqualTypeOf<readonly string[]>()

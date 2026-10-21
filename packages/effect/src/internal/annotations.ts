@@ -2,7 +2,7 @@ import { Schema, type SchemaAST } from "effect"
 
 const key = "@zorsh/effect/borsh/layout"
 
-type LayoutDescriptor =
+export type LayoutDescriptor =
   | {
       readonly version: 1
       readonly kind: "integer"
@@ -26,9 +26,11 @@ declare module "effect/Schema" {
   }
 }
 
-function parseDescriptor(value: LayoutDescriptor): LayoutDescriptor
-function parseDescriptor(value: unknown): LayoutDescriptor | undefined
-function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
+export type EnumDescriptor = Extract<LayoutDescriptor, { readonly kind: "enum" }>
+
+export function parseDescriptor<D extends LayoutDescriptor>(value: D): D
+export function parseDescriptor(value: unknown): LayoutDescriptor | undefined
+export function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
   if (value === undefined) return undefined
   if (
     typeof value !== "object" ||
@@ -95,7 +97,7 @@ function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
             tag > 255 ||
             tags.has(tag)
           )
-            throw new Error("$: Invalid Borsh enum discriminants")
+            throw new Error("$: Borsh enum discriminants must be unique integers from 0 to 255")
           tags.add(tag)
         }
         return Object.freeze({

@@ -1,6 +1,6 @@
 # borsh-rs oracle
 
-Independent test executable using pinned borsh 1.8.1 with `derive` and `de_strict_order`. The registry contains 47 concrete Rust types; Borsh derives and standard implementations own wire encoding. Each encode checks `borsh::object_length` before `borsh::to_vec`; decode uses `borsh::from_slice`, including trailing-byte rejection. Keep Cargo.lock. The older `rust/borsh_test` fixture source remains independent.
+Independent test executable using pinned borsh 1.8.1 with `derive` and `de_strict_order`. The registry contains 49 concrete Rust types; Borsh derives and standard implementations own wire encoding. Each encode checks `borsh::object_length` before `borsh::to_vec`; decode uses `borsh::from_slice`, including trailing-byte rejection. Keep Cargo.lock. The older `rust/borsh_test` fixture source remains independent.
 
 Build and test from the repository root:
 
@@ -32,7 +32,7 @@ Frames are limited to 1 MiB excluding LF; CR in CRLF counts. Raw Borsh data and 
 - Booleans/strings use JSON booleans/Unicode strings; unit uses null. Byte vectors/arrays use even unprefixed hex strings with exact fixed lengths.
 - Options use `{ "tag": "None" }` or `{ "tag": "Some", "value": ... }`. Sequences/tuples use arrays; structs use exact named fields in declaration wire order.
 - Results use `{ "tag": "Ok", "value": ... }` or `{ "tag": "Err", "value": ... }`.
-- Enum transport is `{ "variant": "Count", "value": "513" }`; Idle carries null, Named carries `{ "label": "x", "enabled": true }`.
+- Enum transport is `{ "variant": "Count", "value": "513" }`; unit variants carry null, Named carries `{ "label": "x", "enabled": true }`.
 - Maps use key/value pair arrays and sets use value arrays. Duplicate keys/items are transport errors. Map and set entries sort by Rust value order. `de_strict_order` rejects unsorted/duplicate wire entries; this differs from permissive Borsh builds.
 
 ## Registry
@@ -56,6 +56,8 @@ Frames are limited to 1 MiB excluding LF; CR in CRLF counts. Raw Borsh data and 
 | `transfer` | `Transfer { receiver: String, amount: u128 }` |
 | `storage_deposit` | `StorageDeposit { token_id: String, account_id: String, storage_deposit_amount: Option<u128> }` |
 | `explicit_enum` | Derived `#[repr(u8)] #[borsh(use_discriminant = true)] enum ExplicitEnum { Idle = 3, Count(u16) = 17, Named { label: String, enabled: bool } = 250 }` |
+| `status` | Derived C-like `enum Status { Pending, Active, Done }` with default discriminants |
+| `shape` | Derived `enum Shape { Empty, Square(u32), Rect { width: u16, height: u16 } }` with default discriminants |
 | `map_u16_string` | `std::collections::BTreeMap<u16, String>` |
 | `set_string` | `std::collections::BTreeSet<String>` |
 | `set_i16`, `set_i128`, `set_u128`, `set_bool` | `BTreeSet<i16>`, `BTreeSet<i128>`, `BTreeSet<u128>`, `BTreeSet<bool>` |

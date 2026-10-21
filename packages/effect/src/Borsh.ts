@@ -1,6 +1,6 @@
-import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect"
-import { withLayout } from "./internal/annotations.js"
-import { compile, rejectSuspensions } from "./internal/compiler.js"
+import { Effect, Schema, type SchemaAST, SchemaIssue, SchemaTransformation } from "effect"
+import { parseDescriptor, withLayout } from "./internal/annotations.js"
+import { compile, enumVariants, rejectSuspensions } from "./internal/compiler.js"
 import { BinaryError, Reader, Writer } from "./internal/io.js"
 
 function integer(bits: 8 | 16 | 32, signed: boolean) {
@@ -82,18 +82,50 @@ export function fixedArray(length: number): <S extends Schema.Top>(schema: S) =>
   }
 }
 
-/** Assign the Rust enum's exact u8 discriminants to a native tagged union. */
-export function enumLayout<S extends Schema.Top>(
-  schema: S,
-  options: { readonly tag: string; readonly discriminants: Readonly<Record<string, number>> },
-): S["Rebuild"] {
-  rejectSuspensions(schema.ast)
-  return withLayout(schema, {
+type EnumLabels<S extends Schema.Top, Tag extends string> = S extends {
+  readonly enums: infer E
+}
+  ? Extract<keyof E, string>
+  : S["Encoded"] extends infer E
+    ? E extends SchemaAST.LiteralValue
+      ? `${E}`
+      : E extends { readonly [K in Tag]: infer L }
+        ? Extract<L, string>
+        : never
+    : never
+type MapLabels<D> = `${Extract<keyof D, string | number>}`
+type ExactDiscriminants<S extends Schema.Top, D, Tag extends string> = [
+  Exclude<EnumLabels<S, Tag>, MapLabels<D>>,
+  Exclude<MapLabels<D>, EnumLabels<S, Tag>>,
+] extends [never, never]
+  ? unknown
+  : {
+      readonly "Missing Borsh discriminants": Exclude<EnumLabels<S, Tag>, MapLabels<D>>
+      readonly "Unknown Borsh discriminants": Exclude<MapLabels<D>, EnumLabels<S, Tag>>
+    }
+
+/**
+ * Assign explicit u8 discriminants, like Rust `#[borsh(use_discriminant = true)]`. Keys are
+ * encoded tag values, string literals or TS enum member names; `tag` selects another tag key.
+ */
+export function discriminants<
+  const D extends Readonly<Record<string, number>>,
+  Tag extends string = "_tag",
+>(
+  map: D,
+  options?: { readonly tag?: Tag | undefined },
+): <S extends Schema.Top>(schema: S & ExactDiscriminants<S, D, Tag>) => S["Rebuild"] {
+  const layout = parseDescriptor({
     version: 1,
     kind: "enum",
-    tag: options.tag,
-    discriminants: options.discriminants,
+    tag: options?.tag ?? "_tag",
+    discriminants: map,
   })
+  return (schema) => {
+    rejectSuspensions(schema.ast)
+    enumVariants(Schema.toEncoded(schema).ast, layout, "$")
+    return withLayout(schema, layout)
+  }
 }
 
 export interface Options {

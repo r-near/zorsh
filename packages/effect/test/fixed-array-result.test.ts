@@ -164,17 +164,14 @@ it("retains nested Result paths, payload transformations and inactive branch non
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(0, 0, 0, 0, 0))).toThrow(
     /\$\["failure"\] at byte 1: Borsh forbids vectors of zero-sized/,
   )
-  const Nested = Borsh.enumLayout(
-    Schema.TaggedUnion({
-      Empty: {},
-      Values: {
-        rows: Schema.Array(Schema.Option(Schema.Result(Schema.Boolean, Borsh.Bytes))).pipe(
-          Borsh.fixedArray(1),
-        ),
-      },
-    }),
-    { tag: "_tag", discriminants: { Empty: 0, Values: 3 } },
-  )
+  const Nested = Schema.TaggedUnion({
+    Empty: {},
+    Values: {
+      rows: Schema.Array(Schema.Option(Schema.Result(Schema.Boolean, Borsh.Bytes))).pipe(
+        Borsh.fixedArray(1),
+      ),
+    },
+  }).pipe(Borsh.discriminants({ Empty: 0, Values: 3 }))
   const nested = Borsh.toCodec(Nested)
   expect(() => Schema.decodeSync(nested)(Uint8Array.of(3, 1, 1, 2))).toThrow(
     /\$\["rows"\]\[0\]\["value"\]\["success"\] at byte 3: Invalid bool tag 2/,

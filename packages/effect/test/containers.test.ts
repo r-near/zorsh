@@ -34,20 +34,17 @@ it("runs the package README mixed actions and Effect workflow", () => {
     recipient: Recipient,
     amount: Borsh.U128,
   })
-  const Action = Borsh.enumLayout(
-    Schema.TaggedUnion({
-      Transfer: { transfer: Transfer },
-      Call: {
-        contractId: Schema.String,
-        method: Schema.String,
-        args: Borsh.Bytes,
-        deposit: Borsh.U128,
-        gas: Borsh.U64,
-      },
-      Cancel: { nonce: Borsh.U64 },
-    }),
-    { tag: "_tag", discriminants: { Transfer: 0, Call: 1, Cancel: 2 } },
-  )
+  const Action = Schema.TaggedUnion({
+    Transfer: { transfer: Transfer },
+    Call: {
+      contractId: Schema.String,
+      method: Schema.String,
+      args: Borsh.Bytes,
+      deposit: Borsh.U128,
+      gas: Borsh.U64,
+    },
+    Cancel: { nonce: Borsh.U64 },
+  })
   const Batch = Schema.Struct({
     nonce: Borsh.U64,
     actions: Schema.Array(Action),
