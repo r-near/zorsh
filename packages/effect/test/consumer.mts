@@ -1,4 +1,4 @@
-import { Context, Effect, Option, Schema, SchemaTransformation } from "effect"
+import { Context, Effect, Option, Result, Schema, SchemaTransformation } from "effect"
 import { expectTypeOf } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { U16 } from "../src/Borsh.js"
@@ -49,4 +49,14 @@ const decoded = Schema.decodeEffect(action)(Uint8Array.of(3))
 expectTypeOf(decoded).toEqualTypeOf<Effect.Effect<typeof Action.Type, Schema.SchemaError, Decode>>()
 expectTypeOf(Schema.encodeEffect(action)({ _tag: "Idle" })).toEqualTypeOf<
   Effect.Effect<Uint8Array, Schema.SchemaError, Encode>
+>()
+
+const fixed = Schema.Array(schema).pipe(Borsh.fixedArray(2))
+expectTypeOf(fixed.Type).toEqualTypeOf<readonly string[]>()
+expectTypeOf(Borsh.toCodec(fixed)).toEqualTypeOf<
+  Schema.Codec<readonly string[], Uint8Array, Decode, Encode>
+>()
+const result = Borsh.toCodec(Schema.Result(fixed, schema))
+expectTypeOf(result).toEqualTypeOf<
+  Schema.Codec<Result.Result<readonly string[], string>, Uint8Array, Decode, Encode>
 >()

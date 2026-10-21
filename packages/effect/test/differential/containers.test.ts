@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { Option, Schema } from "effect"
+import { Option, Result, Schema } from "effect"
 import fc from "fast-check"
 import { afterAll, beforeAll, describe, it } from "vite-plus/test"
 import { Oracle, assertProperty } from "./oracle.js"
@@ -47,6 +47,36 @@ const ExplicitEnum = Borsh.enumLayout(
 )
 const u128 = fc.bigInt({ min: 0n, max: (1n << 128n) - 1n })
 const entries = [
+  spec(
+    "array_u16_3",
+    Schema.Array(Borsh.U16).pipe(Borsh.fixedArray(3)),
+    fc.array(fc.integer({ min: 0, max: 65535 }), { minLength: 3, maxLength: 3 }),
+    (values) => values.map(String),
+  ),
+  spec(
+    "result_u16_string",
+    Schema.Result(Borsh.U16, Schema.String),
+    fc.oneof(
+      fc.integer({ min: 0, max: 65535 }).map(Result.succeed),
+      stringArbitrary.map(Result.fail),
+    ),
+    (value) =>
+      Result.isSuccess(value)
+        ? { tag: "Ok", value: String(value.success) }
+        : { tag: "Err", value: value.failure },
+  ),
+  spec(
+    "result_option_u8_unit",
+    Schema.Result(Schema.Option(Borsh.U8), Borsh.Unit),
+    fc.oneof(
+      option(fc.integer({ min: 0, max: 255 })).map(Result.succeed),
+      fc.constant(Result.fail([] as const)),
+    ),
+    (value) =>
+      Result.isSuccess(value)
+        ? { tag: "Ok", value: optionTransport(value.success, String) }
+        : { tag: "Err", value: null },
+  ),
   spec(
     "explicit_enum",
     ExplicitEnum,
@@ -180,6 +210,30 @@ for (const entry of entries)
 
 it("matches Rust zero-sized visitation and malicious vector counts", async () => {
   for (const [id, schema, values, raws] of [
+    [
+      "array_unit_0",
+      Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(0)),
+      [[]],
+      [new Uint8Array(), Uint8Array.of(0)],
+    ],
+    [
+      "array_unit_1",
+      Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(1)),
+      [[[]]],
+      [new Uint8Array(), Uint8Array.of(0)],
+    ],
+    [
+      "array_vec_unit_0",
+      Schema.Array(Schema.Array(Borsh.Unit)).pipe(Borsh.fixedArray(0)),
+      [[]],
+      [new Uint8Array(), Uint8Array.of(0)],
+    ],
+    [
+      "array_vec_unit_1",
+      Schema.Array(Schema.Array(Borsh.Unit)).pipe(Borsh.fixedArray(1)),
+      [[[]]],
+      [new Uint8Array(), Uint8Array.of(0, 0, 0, 0)],
+    ],
     ["empty", Schema.Struct({}), [{}], [new Uint8Array(), Uint8Array.of(0)]],
     ["tuple_unit", Schema.Tuple([Borsh.Unit]), [[[]]], [new Uint8Array(), Uint8Array.of(0)]],
     ["vec_unit", Schema.Array(Borsh.Unit), [[], [[]]], [Uint8Array.of(0, 0, 0, 0)]],
@@ -206,7 +260,7 @@ it("matches Rust zero-sized visitation and malicious vector counts", async () =>
     const codec = Borsh.toCodec(schema)
     for (const value of values) {
       let transport: unknown = value
-      if (id === "tuple_unit") transport = [null]
+      if (id === "tuple_unit" || id === "array_unit_1") transport = [null]
       if (id === "vec_unit" || id === "vec_bytes0") {
         assert.ok(Array.isArray(value))
         transport = value.map(() => (id === "vec_unit" ? null : ""))
@@ -227,6 +281,7 @@ it("matches Rust zero-sized visitation and malicious vector counts", async () =>
 it("checks every enum discriminant and Option flag against Rust", async () => {
   const enumCodec = Borsh.toCodec(ExplicitEnum)
   const optionCodec = Borsh.toCodec(Schema.Option(Borsh.U128))
+  const resultCodec = Borsh.toCodec(Schema.Result(Borsh.U16, Schema.String))
   for (let tag = 0; tag < 256; tag++) {
     const enumRaw =
       tag === 17
@@ -238,11 +293,38 @@ it("checks every enum discriminant and Option flag against Rust", async () => {
     for (const [id, codec, raw] of [
       ["explicit_enum", enumCodec, enumRaw],
       ["option_u128", optionCodec, optionRaw],
+      [
+        "result_u16_string",
+        resultCodec,
+        tag === 0
+          ? Uint8Array.of(0, 0, 0, 0, 0)
+          : tag === 1
+            ? Uint8Array.of(1, 1, 2)
+            : Uint8Array.of(tag),
+      ],
     ] as const) {
       const ts = attempt(() => Schema.decodeSync(codec)(raw))
       const rust = await oracle.request(id, "decode", { hex: hex(raw) })
       assert.equal(ts.ok, rust.ok, `${id} tag ${tag}`)
       if (rust.ok) assert.equal(rust.hex, hex(raw))
     }
+  }
+})
+
+it("matches Rust Result inactive branch visitation", async () => {
+  const codec = Borsh.toCodec(Schema.Result(Borsh.Unit, Schema.Array(Borsh.Unit)))
+  for (const [value, transport] of [
+    [Result.succeed([]), { tag: "Ok", value: null }],
+    [Result.fail([]), { tag: "Err", value: [] }],
+  ] as const) {
+    const ts = attempt(() => Schema.encodeUnknownSync(codec)(value))
+    const rust = await oracle.request("result_unit_vec_unit", "encode", { value: transport })
+    assert.equal(ts.ok, rust.ok)
+    if (ts.ok && rust.ok) assert.equal(hex(ts.value), rust.hex)
+  }
+  for (const raw of [Uint8Array.of(1), Uint8Array.of(0, 0, 0, 0, 0)]) {
+    const ts = attempt(() => Schema.decodeSync(codec)(raw))
+    const rust = await oracle.request("result_unit_vec_unit", "decode", { hex: hex(raw) })
+    assert.equal(ts.ok, rust.ok)
   }
 })

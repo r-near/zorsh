@@ -69,6 +69,19 @@ export function fixedBytes(length: number): Schema.Uint8Array {
   )
 }
 
+/** Give a native encoded array Rust [T; N]'s layout, without a count prefix. */
+export function fixedArray(length: number): <S extends Schema.Top>(schema: S) => S["Rebuild"] {
+  if (!Number.isSafeInteger(length) || length < 0 || length > 0xffff_ffff)
+    throw new Error("$: fixedArray length must be a safe integer between 0 and 2^32 - 1")
+  return (schema) => {
+    rejectSuspensions(schema.ast)
+    const ast = Schema.toEncoded(schema).ast
+    if (ast._tag !== "Arrays" || ast.elements.length !== 0 || ast.rest.length !== 1)
+      throw new Error("$: fixedArray requires a homogeneous encoded array")
+    return withLayout(schema, { version: 1, kind: "fixedArray", length })
+  }
+}
+
 /** Assign the Rust enum's exact u8 discriminants to a native tagged union. */
 export function enumLayout<S extends Schema.Top>(
   schema: S,

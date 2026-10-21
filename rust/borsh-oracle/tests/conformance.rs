@@ -169,6 +169,81 @@ fn concrete_types_and_options() {
 }
 
 #[test]
+fn concrete_results_have_rust_tags_and_selected_payloads() {
+    golden(
+        "result_u16_string",
+        json!({"tag":"Ok","value":"513"}),
+        "010102",
+    );
+    golden(
+        "result_u16_string",
+        json!({"tag":"Err","value":"x"}),
+        "000100000078",
+    );
+    golden(
+        "result_option_u8_unit",
+        json!({"tag":"Ok","value":{"tag":"None"}}),
+        "0100",
+    );
+    golden(
+        "result_option_u8_unit",
+        json!({"tag":"Ok","value":{"tag":"Some","value":"7"}}),
+        "010107",
+    );
+    golden(
+        "result_option_u8_unit",
+        json!({"tag":"Err","value":null}),
+        "00",
+    );
+    golden(
+        "result_unit_vec_unit",
+        json!({"tag":"Ok","value":null}),
+        "01",
+    );
+    rejection(
+        "result_unit_vec_unit",
+        "encode",
+        json!({"tag":"Err","value":[]}),
+        "borsh_rejection",
+    );
+    rejection(
+        "result_unit_vec_unit",
+        "decode",
+        json!("0000000000"),
+        "borsh_rejection",
+    );
+    for hex in [
+        "",
+        "01",
+        "0101",
+        "00",
+        "0001000000",
+        "0001000000ff",
+        "01010200",
+    ] {
+        rejection("result_u16_string", "decode", json!(hex), "borsh_rejection");
+    }
+    for tag in 2u8..=255 {
+        rejection(
+            "result_u16_string",
+            "decode",
+            json!(format!("{tag:02x}")),
+            "borsh_rejection",
+        );
+    }
+    for value in [
+        json!(null),
+        json!({"tag":"Ok"}),
+        json!({"tag":"Other","value":"1"}),
+        json!({"tag":"Ok","value":"65536"}),
+        json!({"tag":"Err","value":1}),
+        json!({"tag":"Ok","value":"1","extra":null}),
+    ] {
+        rejection("result_u16_string", "encode", value, "transport");
+    }
+}
+
+#[test]
 fn malformed_borsh_is_rejected_including_trailing_bytes() {
     for (schema, hex) in [
         ("bool", "02"),
@@ -344,5 +419,5 @@ fn bad_transport_never_counts_as_borsh_rejection() {
 fn registry_has_no_accidental_duplicate_ids() {
     let ids: std::collections::BTreeSet<_> = SCHEMA_IDS.iter().collect();
     assert_eq!(ids.len(), SCHEMA_IDS.len());
-    assert_eq!(SCHEMA_IDS.len(), 40);
+    assert_eq!(SCHEMA_IDS.len(), 43);
 }

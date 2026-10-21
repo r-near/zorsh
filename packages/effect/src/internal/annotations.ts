@@ -10,7 +10,7 @@ type LayoutDescriptor =
       readonly signed: boolean
     }
   | { readonly version: 1; readonly kind: "float"; readonly bits: 32 | 64 }
-  | { readonly version: 1; readonly kind: "fixedBytes"; readonly length: number }
+  | { readonly version: 1; readonly kind: "fixedBytes" | "fixedArray"; readonly length: number }
   | {
       readonly version: 1
       readonly kind: "enum"
@@ -65,6 +65,7 @@ function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
       }
       break
     case "fixedBytes":
+    case "fixedArray":
       if (
         "length" in value &&
         typeof value.length === "number" &&
@@ -72,7 +73,7 @@ function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
         value.length >= 0 &&
         value.length <= 0xffff_ffff
       ) {
-        return Object.freeze({ version: 1, kind: "fixedBytes", length: value.length })
+        return Object.freeze({ version: 1, kind: value.kind, length: value.length })
       }
       break
     case "enum":
