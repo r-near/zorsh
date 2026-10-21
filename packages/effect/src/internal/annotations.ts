@@ -11,6 +11,12 @@ type LayoutDescriptor =
     }
   | { readonly version: 1; readonly kind: "float"; readonly bits: 32 | 64 }
   | { readonly version: 1; readonly kind: "fixedBytes"; readonly length: number }
+  | {
+      readonly version: 1
+      readonly kind: "enum"
+      readonly tag: string
+      readonly discriminants: Readonly<Record<string, number>>
+    }
 
 declare module "effect/Schema" {
   namespace Annotations {
@@ -20,6 +26,8 @@ declare module "effect/Schema" {
   }
 }
 
+function parseDescriptor(value: LayoutDescriptor): LayoutDescriptor
+function parseDescriptor(value: unknown): LayoutDescriptor | undefined
 function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
   if (value === undefined) return undefined
   if (
@@ -66,6 +74,36 @@ function parseDescriptor(value: unknown): LayoutDescriptor | undefined {
       ) {
         return Object.freeze({ version: 1, kind: "fixedBytes", length: value.length })
       }
+      break
+    case "enum":
+      if (
+        "tag" in value &&
+        typeof value.tag === "string" &&
+        "discriminants" in value &&
+        typeof value.discriminants === "object" &&
+        value.discriminants !== null &&
+        !Array.isArray(value.discriminants)
+      ) {
+        const entries = Object.entries(value.discriminants).sort(([a], [b]) => (a < b ? -1 : 1))
+        const tags = new Set<number>()
+        for (const [, tag] of entries) {
+          if (
+            typeof tag !== "number" ||
+            !Number.isInteger(tag) ||
+            tag < 0 ||
+            tag > 255 ||
+            tags.has(tag)
+          )
+            throw new Error("$: Invalid Borsh enum discriminants")
+          tags.add(tag)
+        }
+        return Object.freeze({
+          version: 1,
+          kind: "enum",
+          tag: value.tag,
+          discriminants: Object.freeze(Object.fromEntries(entries)),
+        })
+      }
   }
   throw new Error("$: Invalid Borsh layout annotation")
 }
@@ -90,6 +128,7 @@ export function withLayout<S extends Schema.Top>(
   schema: S,
   layout: LayoutDescriptor,
 ): S["Rebuild"] {
+  layout = parseDescriptor(layout)
   const existing = descriptor(Schema.toEncoded(schema).ast)
   if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(layout)) {
     throw new Error("$: Conflicting Borsh layout annotations")

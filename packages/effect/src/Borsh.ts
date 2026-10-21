@@ -69,6 +69,20 @@ export function fixedBytes(length: number): Schema.Uint8Array {
   )
 }
 
+/** Assign the Rust enum's exact u8 discriminants to a native tagged union. */
+export function enumLayout<S extends Schema.Top>(
+  schema: S,
+  options: { readonly tag: string; readonly discriminants: Readonly<Record<string, number>> },
+): S["Rebuild"] {
+  rejectSuspensions(schema.ast)
+  return withLayout(schema, {
+    version: 1,
+    kind: "enum",
+    tag: options.tag,
+    discriminants: options.discriminants,
+  })
+}
+
 export interface Options {
   /** Maximum input/output byte length per operation. Default: 16 MiB. */
   readonly maxBytes?: number | undefined

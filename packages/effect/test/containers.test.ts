@@ -1,4 +1,4 @@
-import { Effect, Exit, Result, Schema, SchemaTransformation } from "effect"
+import { Effect, Exit, Option, Result, Schema, SchemaTransformation } from "effect"
 import { expect, expectTypeOf, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 
@@ -23,25 +23,57 @@ it("encodes the package README Transfer example with inferred ordinary objects",
   )
 })
 
-it("runs the package README nested batch and Effect workflow", () => {
+it("runs the package README mixed actions and Effect workflow", () => {
   const Asset = Schema.Struct({ contractId: Schema.String })
-  const Recipient = Schema.Struct({ accountId: Schema.String, memo: Schema.String })
-  const Transfer = Schema.Struct({ asset: Asset, recipient: Recipient, amount: Borsh.U128 })
-  const Batch = Schema.Struct({ nonce: Borsh.U64, transfers: Schema.Array(Transfer) })
+  const Recipient = Schema.Struct({
+    accountId: Schema.String,
+    memo: Schema.Option(Schema.String),
+  })
+  const Transfer = Schema.Struct({
+    asset: Asset,
+    recipient: Recipient,
+    amount: Borsh.U128,
+  })
+  const Action = Borsh.enumLayout(
+    Schema.TaggedUnion({
+      Transfer: { transfer: Transfer },
+      Call: {
+        contractId: Schema.String,
+        method: Schema.String,
+        args: Borsh.Bytes,
+        deposit: Borsh.U128,
+        gas: Borsh.U64,
+      },
+      Cancel: { nonce: Borsh.U64 },
+    }),
+    { tag: "_tag", discriminants: { Transfer: 0, Call: 1, Cancel: 2 } },
+  )
+  const Batch = Schema.Struct({
+    nonce: Borsh.U64,
+    actions: Schema.Array(Action),
+  })
   type Batch = typeof Batch.Type
+
   const batch: Batch = {
     nonce: 7n,
-    transfers: [
+    actions: [
       {
-        asset: { contractId: "token.near" },
-        recipient: { accountId: "alice.near", memo: "invoice 42" },
-        amount: 1_000_000n,
+        _tag: "Transfer",
+        transfer: {
+          asset: { contractId: "token.near" },
+          recipient: { accountId: "alice.near", memo: Option.some("invoice 42") },
+          amount: 1_000_000n,
+        },
       },
       {
-        asset: { contractId: "token.near" },
-        recipient: { accountId: "bob.near", memo: "invoice 43" },
-        amount: 250_000n,
+        _tag: "Call",
+        contractId: "exchange.near",
+        method: "refresh",
+        args: new TextEncoder().encode("{}"),
+        deposit: 0n,
+        gas: 30_000_000_000_000n,
       },
+      { _tag: "Cancel", nonce: 6n },
     ],
   }
   const codec = Borsh.toCodec(Batch)

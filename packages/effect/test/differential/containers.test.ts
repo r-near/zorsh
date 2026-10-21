@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import fc from "fast-check"
 import { afterAll, beforeAll, describe, it } from "vite-plus/test"
 import { Oracle, assertProperty } from "./oracle.js"
@@ -32,7 +32,78 @@ function spec<A>(
     },
   }
 }
+const option = <A>(arbitrary: fc.Arbitrary<A>) =>
+  fc.option(arbitrary, { nil: undefined }).map(Option.fromUndefinedOr)
+function optionTransport<A>(value: Option.Option<A>, inner: (value: A) => unknown): unknown {
+  return Option.isNone(value) ? { tag: "None" } : { tag: "Some", value: inner(value.value) }
+}
+const ExplicitEnum = Borsh.enumLayout(
+  Schema.TaggedUnion({
+    Idle: {},
+    Count: { value: Borsh.U16 },
+    Named: { label: Schema.String, enabled: Schema.Boolean },
+  }),
+  { tag: "_tag", discriminants: { Idle: 3, Count: 17, Named: 250 } },
+)
+const u128 = fc.bigInt({ min: 0n, max: (1n << 128n) - 1n })
 const entries = [
+  spec(
+    "explicit_enum",
+    ExplicitEnum,
+    fc.oneof(
+      fc.constant({ _tag: "Idle" } as const),
+      fc.record({ _tag: fc.constant("Count" as const), value: fc.integer({ min: 0, max: 65535 }) }),
+      fc.record({
+        _tag: fc.constant("Named" as const),
+        label: stringArbitrary,
+        enabled: fc.boolean(),
+      }),
+    ),
+    (value) => ({
+      variant: value._tag,
+      value:
+        value._tag === "Idle"
+          ? null
+          : value._tag === "Count"
+            ? String(value.value)
+            : { label: value.label, enabled: value.enabled },
+    }),
+  ),
+  spec("option_u128", Schema.Option(Borsh.U128), option(u128), (value) =>
+    optionTransport(value, String),
+  ),
+  spec(
+    "option_option_u8",
+    Schema.Option(Schema.Option(Borsh.U8)),
+    option(option(fc.integer({ min: 0, max: 255 }))),
+    (value) => optionTransport(value, (value) => optionTransport(value, String)),
+  ),
+  spec("option_unit", Schema.Option(Borsh.Unit), option(fc.constant([] as const)), (value) =>
+    optionTransport(value, () => null),
+  ),
+  spec(
+    "vec_option_unit",
+    Schema.Array(Schema.Option(Borsh.Unit)),
+    fc.array(option(fc.constant([] as const)), { maxLength: 48 }),
+    (values) => values.map((value) => optionTransport(value, () => null)),
+  ),
+  spec(
+    "storage_deposit",
+    Schema.Struct({
+      token_id: Schema.String,
+      account_id: Schema.String,
+      storage_deposit_amount: Schema.Option(Borsh.U128),
+    }),
+    fc.record({
+      token_id: stringArbitrary,
+      account_id: stringArbitrary,
+      storage_deposit_amount: option(u128),
+    }),
+    (value) => ({
+      ...value,
+      storage_deposit_amount: optionTransport(value.storage_deposit_amount, String),
+    }),
+  ),
   spec(
     "transfer",
     Schema.Struct({ receiver: Schema.String, amount: Borsh.U128 }),
@@ -149,6 +220,29 @@ it("matches Rust zero-sized visitation and malicious vector counts", async () =>
       const ts = attempt(() => Schema.decodeSync(codec)(raw))
       const rust = await oracle.request(id, "decode", { hex: hex(raw) })
       assert.equal(ts.ok, rust.ok)
+    }
+  }
+})
+
+it("checks every enum discriminant and Option flag against Rust", async () => {
+  const enumCodec = Borsh.toCodec(ExplicitEnum)
+  const optionCodec = Borsh.toCodec(Schema.Option(Borsh.U128))
+  for (let tag = 0; tag < 256; tag++) {
+    const enumRaw =
+      tag === 17
+        ? Uint8Array.of(tag, 1, 2)
+        : tag === 250
+          ? Uint8Array.of(tag, 1, 0, 0, 0, 120, 1)
+          : Uint8Array.of(tag)
+    const optionRaw = tag === 1 ? Uint8Array.of(tag, ...new Uint8Array(16)) : Uint8Array.of(tag)
+    for (const [id, codec, raw] of [
+      ["explicit_enum", enumCodec, enumRaw],
+      ["option_u128", optionCodec, optionRaw],
+    ] as const) {
+      const ts = attempt(() => Schema.decodeSync(codec)(raw))
+      const rust = await oracle.request(id, "decode", { hex: hex(raw) })
+      assert.equal(ts.ok, rust.ok, `${id} tag ${tag}`)
+      if (rust.ok) assert.equal(rust.hex, hex(raw))
     }
   }
 })
