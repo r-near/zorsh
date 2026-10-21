@@ -1,45 +1,56 @@
 # @zorsh/effect
 
-Private development package at **0.0.0**, with native [Effect 4](https://effect.website/docs/v4/) schemas and Rust/NEAR Borsh-compatible primitive layouts. It is not published. This first slice supports primitives; container layouts follow separately.
-
-Use `import { Borsh } from "@zorsh/effect"` or `import * as Borsh from "@zorsh/effect/Borsh"`. The package is ESM and its runtime uses standard browser APIs. Effect is a peer dependency (`^4.0.5`); development and tests pin 4.0.5. TypeScript projects targeting ES2022 may need `ESNext.Disposable` in `lib` for Effect's declarations.
+Borsh codecs from native [Effect 4 schemas](https://effect.website/docs/v4/schema/introduction/). This package is private at 0.0.0 and is not published.
 
 ```ts
 import { Borsh } from "@zorsh/effect"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 
-const codec = Borsh.toCodec(Borsh.U64)
-const bytes = Schema.encodeSync(codec)(7n)
-// Uint8Array [7, 0, 0, 0, 0, 0, 0, 0]
-const value = Schema.decodeSync(codec)(bytes)
-// 7n
+const Batch = Schema.Struct({
+  receiver: Schema.String,
+  amounts: Schema.Array(Borsh.U16),
+})
+const codec = Borsh.toCodec(Batch)
+
+const program = Effect.gen(function* () {
+  const bytes = yield* Schema.encodeEffect(codec)({
+    receiver: "alice.near",
+    amounts: [7, 513],
+  })
+  return yield* Schema.decodeEffect(codec)(bytes)
+})
 ```
 
-`toCodec(schema, options?)` retains the schema's native types and decoding/encoding services while replacing its encoded representation with `Uint8Array`.
+`toCodec(schema, options?)` derives the wire layout from the schema's encoded side. It retains the native `Type`, checks, brands, transformations and separate decoding/encoding services. Use `Schema.encodeSync` and `Schema.decodeSync` for synchronous schemas, or compose the Effect helpers as above. Numeric constants are ordinary schemas with `.check`, `.annotate`, `.make` and `.pipe`.
 
-Refinements, brands, transformations and separate decoding/encoding services retain their native Effect behavior and types. The numeric constants remain ordinary schemas with `.check`, `.annotate`, `.make` and `.pipe`; for example, `Borsh.U16.check(Schema.isGreaterThan(0)).pipe(Schema.brand("Amount"))`. Numeric widths are explicit metadata and are never inferred from validation bounds. Layout annotations use native [`Schema.annotateEncoded`](https://effect.website/docs/v4/schema/annotations/); private metadata keys/descriptors are implementation details and must not be modified. Detectable conflicting descriptors across check layers are rejected. Effect's ordinary annotation overwrite behavior does not retain an arbitrary caller's earlier metadata history.
+| Schema                                 | Borsh layout                                    |
+| -------------------------------------- | ----------------------------------------------- |
+| `U8`, `U16`, `U32`, `I8`, `I16`, `I32` | Integer `number`, explicit width, little endian |
+| `U64`, `U128`, `I64`, `I128`           | Integer `bigint`, explicit width, little endian |
+| `F32`, `F64`                           | IEEE-754 little endian, excluding NaN           |
+| `Schema.Boolean`                       | One byte: 0 or 1                                |
+| `Schema.String`                        | u32 UTF-8 byte length, then UTF-8               |
+| `Schema.Uint8Array`, `Bytes`           | u32 byte length, then bytes (`Vec<u8>`)         |
+| `fixedBytes(length)`                   | Exactly `length` bytes, no prefix (`[u8; N]`)   |
+| `Unit`, `Schema.Tuple([])`             | Empty bytes (Rust `()`)                         |
+| `Schema.Struct({ ... })`               | Fields in encoded schema order, no prefix       |
+| `Schema.Tuple([ ... ])`                | Required elements in order, no prefix           |
+| `Schema.Array(item)`                   | u32 item count, then items (`Vec<T>`)           |
 
-| Schema                                 | Borsh representation                                |
-| -------------------------------------- | --------------------------------------------------- |
-| `U8`, `U16`, `U32`, `I8`, `I16`, `I32` | Integer `number`, explicit width, little endian     |
-| `U64`, `U128`, `I64`, `I128`           | Integer `bigint`, explicit width, little endian     |
-| `F32`, `F64`                           | IEEE-754 little endian, no NaN                      |
-| `Schema.Boolean`                       | Exactly one byte: 0 or 1                            |
-| `Schema.String`                        | u32 UTF-8 byte length, then UTF-8 bytes             |
-| `Schema.Uint8Array`, `Bytes`           | u32 byte length, then bytes (`Vec<u8>`)             |
-| `fixedBytes(length)`                   | Exactly `length` bytes without a prefix (`[u8; N]`) |
-| `Unit`, `Schema.Tuple([])`             | Empty bytes (Rust `()`)                             |
+Widths are never inferred from numeric validation bounds. All integer schemas enforce their range; 64-bit and 128-bit values use native `bigint`. The writer also checks integer ranges when native checks are disabled.
 
-All integer schemas validate their actual range. The writer independently checks ranges and integer types even if native parse options disable refinements, preventing truncation or wrapping. Strings reject lone UTF-16 surrogates instead of silently replacing them; UTF-8 decoding is fatal and preserves a leading U+FEFF. Decoders reject malformed booleans, every NaN payload, truncated input and trailing bytes. Encoded output and decoded byte arrays own their storage; subarray offsets are respected and input is never mutated by the binary layer.
+`F32` requires exact binary32 values: round explicitly with `Math.fround(0.1)`. Both floats preserve signed zero and allow infinities; every NaN payload is rejected. Strings reject lone UTF-16 surrogates, decode UTF-8 strictly and preserve a leading U+FEFF.
 
-`F32` accepts only exactly representable binary32 values: `!Number.isNaN(n) && Object.is(Math.fround(n), n)`. Callers explicitly choose rounding with `Math.fround(0.1)`; passing `0.1` directly fails. Both floats accept positive/negative infinity and preserve signed zero. Their native `Schema.Number` base is deliberate; the Effect linter's suggestion to use `Finite` would exclude valid infinities. No lint diagnostics are suppressed.
+Structs require encoded keys with string or number names. `_tag` is an ordinary field. Optional encoded keys/tuple positions, mixed tuple rests, index signatures, options, unions/enums, maps, sets, fixed arrays, arbitrary declarations and recursive schemas are unsupported. Plain `Schema.Number` and `Schema.BigInt` require an explicit Borsh width. Application types may use other shapes through native transformations when their encoded layout is supported. Visible `Suspend` nodes are rejected without evaluating their thunks, including on the application side.
 
-Binary failures enter Effect's native schema failure channel as `SchemaIssue.InvalidValue`, with the schema path (`$`) and byte offset in the message. Standard `Schema.decodeEffect`/`encodeEffect` expose `Schema.SchemaError`; synchronous schema helpers throw on schema mismatch. Original user getters, refinements and transformations retain native defect behavior and are not converted into binary failures. Unsupported schema layouts and invalid codec options throw deliberately during `toCodec` construction.
+Arrays of Rust zero-sized values, such as empty tuples, empty structs and `fixedBytes(0)`, are rejected when visited, even for an empty array. An empty outer `Schema.Array(Schema.Array(Unit))` succeeds because it visits no inner array.
 
-`Borsh.toCodec(schema, { maxBytes })` bounds input and output byte length **per operation**, defaulting to **16 MiB**. The override must be a positive safe integer; `fixedBytes` lengths must be integers from 0 through 2^32 - 1. Readers check available input before taking payloads. Writers grow a bounded `Uint8Array`; strings are validated and their UTF-8 length/budget checked before encoding allocates payload bytes. Every call has its own reader/writer state.
+Encoding and decoding failures use `Schema.SchemaError`; synchronous helpers throw that error. Binary messages include the field/index path and byte offset. User getters, validators and transformations retain native defect behavior. Unsupported layouts and invalid options throw during `toCodec` construction.
 
-The byte cap bounds binary buffers, not all memory or CPU used by an application schema. The original schema encoder executes before the binary writer; arbitrary user transformations, getters, validators and native parsing may allocate or do work first. That user code is trusted. Visible `Suspend` nodes, including those hidden in type parameters or encoding links, are rejected without invoking their thunks, even when the encoded side is finite. This avoids accepting recursive native parsing as though a binary byte cap bounded it.
+`Borsh.toCodec(schema, { maxBytes })` limits input and output bytes per operation; the default is **16 MiB**. Overrides must be positive safe integers. `fixedBytes` accepts lengths from 0 through 2^32 - 1. Vector decoders check their count against remaining bytes before allocating items. This byte cap bounds binary buffers; application transformations, validators and native schema parsing may allocate or do work independently.
 
-Structs, nonempty tuples, vectors, options, unions/tagged variants, maps, sets, recursive wire schemas and arbitrary encoded declarations are **unsupported in this slice**. Plain `Schema.Number`/`BigInt` are ambiguous and rejected. There are no custom declaration wire hooks, registry wrappers, Rust schema exports or contract introspection.
+Decoding consumes the whole input and rejects truncation or trailing bytes. Encoded output and decoded byte arrays own their storage. The binary layer respects subarray offsets and does not mutate inputs.
 
-The workspace tests cover boundaries, malformed data, native composition/service inference, Borsh specification goldens and bounded fast-check properties. The [primitive differential suite](test/differential/README.md) also compares built public exports against the independent borsh-rs oracle with shrinking and replay. It tests 18 primitive schema IDs; these checks do not establish full Borsh parity for future containers. Coverage-guided fuzzing remains separate work.
+Import from `@zorsh/effect` as above, or use `import * as Borsh from "@zorsh/effect/Borsh"`. The package is ESM and uses standard browser APIs. Effect is a peer dependency (`^4.0.5`); development pins 4.0.5. ES2022 TypeScript projects may need `ESNext.Disposable` in `lib` for Effect declarations.
+
+[Contributing](../../CONTRIBUTING.md) · [MIT license](LICENSE)

@@ -31,7 +31,7 @@ proptest! {
     #[test]
     fn utf8_string_roundtrips(s in ".{0,256}") { roundtrip("string",json!(s)); }
     #[test]
-    fn arbitrary_short_decode_is_a_response_not_a_panic(bytes in prop::collection::vec(any::<u8>(),0..128), index in 0usize..39) {
+    fn arbitrary_short_decode_is_a_response_not_a_panic(bytes in prop::collection::vec(any::<u8>(),0..128), index in 0usize..zorsh_borsh_oracle::registry::SCHEMA_IDS.len()) {
         let schema=zorsh_borsh_oracle::registry::SCHEMA_IDS[index];
         let response=handle_line(&serde_json::to_vec(&json!({"protocolVersion":1,"id":"bytes","schemaId":schema,"operation":"decode","hex":zorsh_borsh_oracle::transport::hex(&bytes)})).unwrap());
         prop_assert!(response["ok"].is_boolean());

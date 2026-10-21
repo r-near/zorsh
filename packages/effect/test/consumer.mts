@@ -23,3 +23,12 @@ expectTypeOf(Schema.decodeEffect(codec)(Uint8Array.of(1, 0))).toEqualTypeOf<
 expectTypeOf(Schema.encodeEffect(codec)("v1")).toEqualTypeOf<
   Effect.Effect<Uint8Array, Schema.SchemaError, Encode>
 >()
+
+const Transfer = Schema.Struct({ receiver: Schema.String, amount: Borsh.U128 })
+const transfer = Borsh.toCodec(Transfer)
+const bytes = Schema.encodeSync(transfer)({ receiver: "alice.near", amount: 123n })
+expectTypeOf(Schema.decodeSync(transfer)(bytes)).toEqualTypeOf<typeof Transfer.Type>()
+const batch = Borsh.toCodec(Schema.Struct({ values: Schema.Array(schema) }))
+expectTypeOf(batch).toEqualTypeOf<
+  Schema.Codec<{ readonly values: readonly string[] }, Uint8Array, Decode, Encode>
+>()
