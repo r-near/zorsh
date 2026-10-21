@@ -1,34 +1,33 @@
 # Zorsh
 
-Zorsh turns ordinary typed TypeScript values into [Borsh](https://borsh.io) bytes for Rust contracts, and decodes their responses back into values. A schema describes the field order and numeric widths the contract expects, while TypeScript infers the shape of your objects.
+Zorsh turns ordinary typed TypeScript values into [Borsh](https://borsh.io) bytes for Rust contracts, and decodes their responses back into values. Its Zod-like schema API describes the field order and numeric widths the contract expects, while TypeScript infers the shape of your objects.
+
+Install the published library:
+
+```sh
+npm install @zorsh/zorsh
+```
 
 For a contract call that takes a receiver and a 128-bit token amount:
 
 ```ts
-import { Borsh } from "@zorsh/effect"
-import { Schema } from "effect"
+import { b } from "@zorsh/zorsh"
 
-const Transfer = Schema.Struct({
-  receiver: Schema.String,
-  amount: Borsh.U128,
+const Transfer = b.struct({
+  receiver: b.string(),
+  amount: b.u128(),
 })
-type Transfer = typeof Transfer.Type
+type Transfer = b.infer<typeof Transfer>
 
-const codec = Borsh.toCodec(Transfer)
-const bytes = Schema.encodeSync(codec)({
-  receiver: "alice.near",
-  amount: 123n,
-})
-const value = Schema.decodeSync(codec)(bytes)
+const transfer: Transfer = { receiver: "alice.near", amount: 123n }
+const bytes = Transfer.serialize(transfer)
+const value = Transfer.deserialize(bytes)
 ```
 
-`Transfer` is inferred as `{ readonly receiver: string; readonly amount: bigint }`; `bytes` is a `Uint8Array` you can pass to a call that accepts Borsh arguments. Choose fields, their order and their widths to match your Rust contract.
+`Transfer` is inferred as `{ receiver: string; amount: bigint }`; `bytes` is a `Uint8Array` you can pass to a call that accepts Borsh arguments. Choose fields, their order and their widths to match your Rust contract. The library also supports nested structs, enums, options, vectors, byte arrays, maps and sets.
 
-The repository contains two packages:
+See the [`@zorsh/zorsh` guide](packages/zorsh/README.md) for the full API and examples.
 
-- [`@zorsh/zorsh`](packages/zorsh/README.md) is the published library, with a Zod-like schema API.
-- [`@zorsh/effect`](packages/effect/README.md) builds on native Effect schemas and integrates with Effect workflows. It is under development, private and unpublished.
+[`@zorsh/effect`](packages/effect/README.md) is a separate native Effect implementation under development. It is private and unpublished.
 
-See the package guides for examples, or [CONTRIBUTING.md](CONTRIBUTING.md) to work on Zorsh.
-
-[MIT license](LICENSE)
+[Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)
