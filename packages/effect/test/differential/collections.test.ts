@@ -14,7 +14,7 @@ afterAll(async () => {
   await oracle.close()
 })
 
-function mutations(raw: Uint8Array, entries: readonly Uint8Array[], keyOffset = 4) {
+function mutations(raw: Uint8Array, entries: readonly Uint8Array[], keyOffset = 4, mask = 0x80) {
   const first = entries[0]
   const second = entries[1]
   assert.ok(first !== undefined && second !== undefined)
@@ -29,7 +29,7 @@ function mutations(raw: Uint8Array, entries: readonly Uint8Array[], keyOffset = 
     return output
   }
   const changed = raw.slice()
-  changed[keyOffset] = (changed[keyOffset] ?? 0) ^ 0x80
+  changed[keyOffset] = (changed[keyOffset] ?? 0) ^ mask
   return [
     raw,
     frame([second, first, ...entries.slice(2)]),
@@ -81,29 +81,42 @@ for (const entry of [
     await assertProperty(entry.arbitrary, check, { numRuns: 200, seed: 20261020 })
     const pairs = Borsh.toCodec(Schema.Array(Schema.Tuple([Borsh.U16, Schema.String])))
     const pair = Borsh.toCodec(Schema.Tuple([Borsh.U16, Schema.String]))
+    for (const [upper, accepted] of [
+      [65535, true],
+      [1, false],
+    ] as const)
+      await checkMutations(
+        [
+          [0, ""],
+          [upper, ""],
+        ],
+        accepted,
+      )
     await assertProperty(
       mapEntries.filter((entries) => entries.length >= 2),
-      async (value) => {
-        const raw = entry.encode(value)
-        const parts = Schema.decodeSync(pairs)(raw).map((value) => Schema.encodeSync(pair)(value))
-        for (const [index, mutated] of mutations(raw, parts).entries()) {
-          const ts = attempt(() => entry.decode(mutated))
-          const rust = await oracle.request(entry.id, "decode", { hex: hex(mutated) })
-          assert.equal(ts.ok, rust.ok)
-          if (index < 5) assert.equal(rust.ok, index === 0)
-          if (ts.ok && rust.ok) {
-            assert.deepEqual(
-              Array.from(ts.value)
-                .sort(([a], [b]) => a - b)
-                .map(([key, value]) => [String(key), value]),
-              rust.value,
-            )
-            assert.equal(hex(entry.encode(Array.from(ts.value))), hex(mutated))
-          }
-        }
-      },
+      checkMutations,
       { numRuns: 200, seed: 20261020 },
     )
+    async function checkMutations(value: [number, string][], changedAccepted?: boolean) {
+      const raw = entry.encode(value)
+      const parts = Schema.decodeSync(pairs)(raw).map((value) => Schema.encodeSync(pair)(value))
+      for (const [index, mutated] of mutations(raw, parts, 5).entries()) {
+        const ts = attempt(() => entry.decode(mutated))
+        const rust = await oracle.request(entry.id, "decode", { hex: hex(mutated) })
+        assert.equal(ts.ok, rust.ok)
+        if (index < 5) assert.equal(rust.ok, index === 0)
+        if (index === 5 && changedAccepted !== undefined) assert.equal(rust.ok, changedAccepted)
+        if (ts.ok && rust.ok) {
+          assert.deepEqual(
+            Array.from(ts.value)
+              .sort(([a], [b]) => a - b)
+              .map(([key, value]) => [String(key), value]),
+            rust.value,
+          )
+          assert.equal(hex(entry.encode(Array.from(ts.value))), hex(mutated))
+        }
+      }
+    }
     async function check(value: [number, string][]) {
       const transport = value.map(([key, value]) => [String(key), value])
       const rust = await oracle.request(entry.id, "encode", { value: transport })
@@ -129,6 +142,7 @@ function sets<A>(
   arbitrary: fc.Arbitrary<A>,
   examples: A[],
   transport: (value: A) => unknown,
+  changes?: readonly [A[], A[]],
 ) {
   for (const [schema, make] of [
     [Schema.ReadonlySet(item), (values: A[]) => new Set(values)],
@@ -156,31 +170,50 @@ function sets<A>(
       })
       const vector = Borsh.toCodec(Schema.Array(item))
       const itemCodec = Borsh.toCodec(item)
+      if (changes !== undefined) {
+        await checkMutations(changes[0], true)
+        await checkMutations(changes[1], false)
+      }
+      if (id === "set_bool") {
+        const raw = Uint8Array.of(1, 0, 0, 0, 0)
+        raw[4] = 1
+        assert.deepEqual(await oracle.request(id, "decode", { hex: hex(raw) }), {
+          ok: true,
+          value: [true],
+          hex: hex(raw),
+        })
+        assert.deepEqual(new Set(decode(raw)), new Set([true]))
+        assert.equal(hex(encode(decode(raw))), hex(raw))
+      }
       await assertProperty(
         fc.uniqueArray(arbitrary, { minLength: 2, maxLength: id === "set_bool" ? 2 : 12 }),
-        async (values) => {
-          const raw = encode(make(values))
-          const parts = Schema.decodeSync(vector)(raw).map((value) =>
-            Schema.encodeSync(itemCodec)(value),
-          )
-          for (const [index, mutated] of mutations(
-            raw,
-            parts,
-            id === "set_string" ? 8 + (parts[0]?.length ?? 0) : 4,
-          ).entries()) {
-            const ts = attempt(() => decode(mutated))
-            const rust = await oracle.request(id, "decode", { hex: hex(mutated) })
-            assert.equal(ts.ok, rust.ok)
-            if (index < 5) assert.equal(rust.ok, index === 0)
-            if (ts.ok && rust.ok) {
-              assert.ok(Array.isArray(rust.value))
-              assert.deepEqual(new Set(Array.from(ts.value, transport)), new Set(rust.value))
-              assert.equal(hex(encode(ts.value)), hex(mutated))
-            }
-          }
-        },
+        checkMutations,
         { numRuns: 200, seed: 20261020 },
       )
+      async function checkMutations(
+        values: A[],
+        changedAccepted = id === "set_bool" ? false : undefined,
+      ) {
+        const raw = encode(make(values))
+        const parts = Schema.decodeSync(vector)(raw).map((value) =>
+          Schema.encodeSync(itemCodec)(value),
+        )
+        const offset =
+          id === "set_string" ? 8 + (parts[0]?.length ?? 0) : 3 + (parts[0]?.length ?? 0)
+        const mask = id === "set_string" ? 0x20 : id === "set_bool" ? 1 : 0x80
+        for (const [index, mutated] of mutations(raw, parts, offset, mask).entries()) {
+          const ts = attempt(() => decode(mutated))
+          const rust = await oracle.request(id, "decode", { hex: hex(mutated) })
+          assert.equal(ts.ok, rust.ok)
+          if (index < 5) assert.equal(rust.ok, index === 0)
+          if (index === 5 && changedAccepted !== undefined) assert.equal(rust.ok, changedAccepted)
+          if (ts.ok && rust.ok) {
+            assert.ok(Array.isArray(rust.value))
+            assert.deepEqual(new Set(Array.from(ts.value, transport)), new Set(rust.value))
+            assert.equal(hex(encode(ts.value)), hex(mutated))
+          }
+        }
+      }
     })
 }
 sets(
@@ -189,6 +222,10 @@ sets(
   stringArbitrary,
   ["\u{10000}", "\ue000", "aa", "a", "", "\u{10001}"],
   (v) => v,
+  [
+    ["A", "B"],
+    ["Z", "a"],
+  ],
 )
 sets(
   "set_i16",
@@ -196,6 +233,10 @@ sets(
   fc.integer({ min: -32768, max: 32767 }),
   [-32768, -256, -1, 0, 1, 255, 256, 32767],
   String,
+  [
+    [-32768, 32767],
+    [-2, -1],
+  ],
 )
 sets(
   "set_i128",
@@ -203,6 +244,10 @@ sets(
   fc.bigInt({ min: -(1n << 127n), max: (1n << 127n) - 1n }),
   [-(1n << 127n), -1n, 0n, 1n, (1n << 127n) - 1n],
   String,
+  [
+    [-(1n << 127n), (1n << 127n) - 1n],
+    [-2n, -1n],
+  ],
 )
 sets(
   "set_u128",
@@ -210,6 +255,10 @@ sets(
   fc.bigInt({ min: 0n, max: (1n << 128n) - 1n }),
   [0n, 1n, 255n, 256n, (1n << 128n) - 1n],
   String,
+  [
+    [0n, (1n << 128n) - 1n],
+    [0n, 1n],
+  ],
 )
 sets("set_bool", Schema.Boolean, fc.boolean(), [true, false], (v) => v)
 
