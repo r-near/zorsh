@@ -547,6 +547,10 @@ it("reports enum tag, value and variant field failures at native paths and offse
   expect(decode(Schema.Array(Schema.Enum(Text)), [2, 0, 0, 0, 1, 2])).toThrow(
     /^Invalid enum tag 2 at byte 5\n {2}at \[1\]$/,
   )
+  expect(decode(Schema.Option(schema), [1, 9])).toThrow(
+    /^Invalid enum tag 9 at byte 1\n {2}at \["value"\]$/,
+  )
+  expect(decode(schema, [])).toThrow(/^Truncated input: need 1 bytes at byte 0$/)
 
   const write = (s: Schema.Top, value: unknown) => () =>
     compile(Schema.toEncoded(s).ast).write(new Writer(64), value)
@@ -565,6 +569,9 @@ it("reports enum tag, value and variant field failures at native paths and offse
   ]).pipe(Borsh.discriminants({ A: 0, B: 1 }, { tag: "kind" }))
   expect(write(Schema.Array(kinds), [{ kind: "B", v: 1 }, { kind: "C" }])).toThrow(
     failure("Invalid enum label at byte 6", [1, "kind"]),
+  )
+  expect(decode(Schema.Array(kinds), [1, 0, 0, 0, 1])).toThrow(
+    /^Truncated input: need 1 bytes at byte 5\n {2}at \[0\]\["v"\]$/,
   )
   expect(write(Schema.Struct({ status: Schema.Literals(["A", "B"]) }), { status: "C" })).toThrow(
     failure("Invalid enum value at byte 0", ["status"]),
@@ -646,8 +653,14 @@ it("checks malformed Option declarations and binary encoder inputs", () => {
   }
   expect(() => compile(ast).write(new Writer(20), {})).toThrow(/Expected Option/)
   const layout = compile(Schema.toEncoded(schema).ast)
-  for (const value of [null, 1, {}, { _tag: "toString" }, { _tag: 3 }])
-    expect(() => layout.write(new Writer(20), value)).toThrow(/enum/i)
+  for (const value of [null, 1])
+    expect(() => layout.write(new Writer(20), value)).toThrow(
+      expect.objectContaining({ message: "Expected enum object at byte 0", path: [] }),
+    )
+  for (const value of [{}, { _tag: "toString" }, { _tag: 3 }])
+    expect(() => layout.write(new Writer(20), value)).toThrow(
+      expect.objectContaining({ message: "Invalid enum label at byte 0", path: ["_tag"] }),
+    )
   expect(() => compile(Schema.Option(Borsh.U8).ast).read(new Reader(Uint8Array.of(1), 20))).toThrow(
     expect.objectContaining({
       message: "Truncated input: need 1 bytes at byte 1",

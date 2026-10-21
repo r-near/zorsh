@@ -561,18 +561,22 @@ function compileEnum(
   }
   const read = select(objects)
   const byLabel = new Map(objects.map((variant) => [variant.label, variant]))
+  // As for struct fields, assignment would hit an inherited setter or a frozen inherited property.
+  const define = tag in Object.prototype
   return {
     minBytes: 1 + Math.min(...objects.map((variant) => variant.payload.minBytes)),
     isZeroSized,
     read: (r) => {
       const variant = read(r)
-      const value = variant.payload.read(r)
-      Object.defineProperty(value, tag, {
-        value: variant.label,
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      })
+      const value = variant.payload.read(r) as Record<string, unknown>
+      if (define)
+        Object.defineProperty(value, tag, {
+          value: variant.label,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        })
+      else value[tag] = variant.label
       return value
     },
     write: (w, value) => {
