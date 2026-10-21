@@ -248,11 +248,11 @@ impl Transport for BTreeMap<u16, String> {
         )
     }
 }
-impl Transport for BTreeSet<String> {
+impl<T: Transport + Ord> Transport for BTreeSet<T> {
     fn parse(v: &Value) -> Result<Self> {
         let mut out = Self::new();
         for val in array(v)? {
-            if !out.insert(String::parse(val)?) {
+            if !out.insert(T::parse(val)?) {
                 return Err(Error::transport("duplicate set item"));
             }
         }

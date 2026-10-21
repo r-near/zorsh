@@ -1,10 +1,11 @@
-import { Option, Result, SchemaAST } from "effect"
+import { HashMap, HashSet, Option, Result, SchemaAST } from "effect"
 import { descriptor } from "./annotations.js"
 import { BinaryError, Reader, utf8Length, Writer } from "./io.js"
 
 export interface Layout {
   readonly minBytes: number
   readonly isZeroSized: boolean
+  readonly compare?: (left: unknown, right: unknown) => number
   read(reader: Reader): unknown
   write(writer: Writer, value: unknown): void
 }
@@ -81,6 +82,7 @@ function compileNode(
     const minimum = signed ? -(1n << BigInt(bits - 1)) : 0n
     const maximum = (1n << BigInt(signed ? bits - 1 : bits)) - 1n
     return {
+      compare: comparePrimitive,
       minBytes: width,
       isZeroSized: false,
       read: (r) => {
@@ -158,6 +160,70 @@ function compileNode(
         if (length === undefined) w.u32(value.byteLength)
         w.bytes(value)
       },
+    }
+  }
+  if (ast._tag === "Declaration" && layout === undefined) {
+    const adapter =
+      representationId === "effect/schema/ReadonlyMap"
+        ? readonlyMap
+        : representationId === "effect/schema/ReadonlySet"
+          ? readonlySet
+          : representationId === "effect/schema/HashMap"
+            ? hashMap
+            : representationId === "effect/schema/HashSet"
+              ? hashSet
+              : undefined
+    if (adapter !== undefined) {
+      const [key, value] = ast.typeParameters
+      if (ast.typeParameters.length !== adapter.arity || key === undefined)
+        throw new Error(
+          `${path}: Collection requires exactly ${adapter.arity} encoded type parameters`,
+        )
+      const keyLayout = compile(key, `${path}["key"]`)
+      const compare = keyLayout.compare
+      if (compare === undefined)
+        throw new Error(`${path}: Collection keys require Boolean, integer or String Rust ordering`)
+      const valueLayout = value === undefined ? undefined : compile(value, `${path}["value"]`)
+      const minimum = keyLayout.minBytes + (valueLayout?.minBytes ?? 0)
+      const ordered = (previous: unknown, key: unknown, offset: number) => {
+        if (compare(previous, key) >= 0)
+          throw new BinaryError(offset, "Collection keys must be strictly increasing")
+      }
+      return {
+        minBytes: 4,
+        isZeroSized: false,
+        read: (r) => {
+          const count = r.u32()
+          if (count > Math.floor((r.input.byteLength - r.offset) / minimum))
+            throw new BinaryError(r.offset, "Truncated collection payload")
+          const entries: [unknown, unknown][] = []
+          for (let i = 0; i < count; i++)
+            at(`[${i}]`, () => {
+              const offset = r.offset
+              const key = at('["key"]', () => keyLayout.read(r))
+              if (i > 0) at('["key"]', () => ordered(entries[i - 1]?.[0], key, offset))
+              entries.push([
+                key,
+                valueLayout === undefined ? undefined : at('["value"]', () => valueLayout.read(r)),
+              ])
+            })
+          return adapter.make(entries)
+        },
+        write: (w, value) => {
+          const collection = adapter.get(value)
+          if (collection === undefined || collection.size > 0xffff_ffff)
+            throw new BinaryError(w.offset, "Expected native collection with u32 length")
+          w.ensure(4 + collection.size * minimum)
+          const entries = Array.from(collection.entries).sort(([a], [b]) => compare(a, b))
+          w.u32(entries.length)
+          for (const [i, [key, value]] of entries.entries())
+            at(`[${i}]`, () => {
+              if (i > 0) at('["key"]', () => ordered(entries[i - 1]?.[0], key, w.offset))
+              at('["key"]', () => keyLayout.write(w, key))
+              if (valueLayout !== undefined) at('["value"]', () => valueLayout.write(w, value))
+            })
+        },
+      }
     }
   }
   if (layout?.kind === "enum") {
@@ -307,6 +373,7 @@ function compileNode(
   switch (ast._tag) {
     case "String":
       return {
+        compare: compareString,
         minBytes: 4,
         isZeroSized: false,
         read: (r) => {
@@ -328,6 +395,7 @@ function compileNode(
       }
     case "Boolean":
       return {
+        compare: comparePrimitive,
         minBytes: 1,
         isZeroSized: false,
         read: (r) => {
@@ -448,4 +516,67 @@ function at<A>(segment: string, run: () => A): A {
     if (error instanceof BinaryError) throw error.prepend(segment)
     throw error
   }
+}
+
+interface CollectionAdapter {
+  readonly arity: number
+  get(
+    value: unknown,
+  ): { readonly size: number; readonly entries: Iterable<readonly [unknown, unknown]> } | undefined
+  make(entries: [unknown, unknown][]): unknown
+}
+const readonlyMap: CollectionAdapter = {
+  arity: 2,
+  get: (value) => (value instanceof Map ? { size: value.size, entries: value } : undefined),
+  make: (entries) => new Map(entries),
+}
+const readonlySet: CollectionAdapter = {
+  arity: 1,
+  get: (value) =>
+    value instanceof Set ? { size: value.size, entries: value.entries() } : undefined,
+  make: (entries) => new Set(entries.map(([key]) => key)),
+}
+const hashMap: CollectionAdapter = {
+  arity: 2,
+  get: (value) =>
+    HashMap.isHashMap(value) ? { size: HashMap.size(value), entries: value } : undefined,
+  make: HashMap.fromIterable,
+}
+const hashSet: CollectionAdapter = {
+  arity: 1,
+  get: (value) =>
+    HashSet.isHashSet(value)
+      ? {
+          size: HashSet.size(value),
+          entries: (function* () {
+            for (const key of value) yield [key, key] as const
+          })(),
+        }
+      : undefined,
+  make: (entries) => HashSet.fromIterable(entries.map(([key]) => key)),
+}
+function comparePrimitive(a: unknown, b: unknown): number {
+  if (
+    (typeof a === "number" && typeof b === "number") ||
+    (typeof a === "bigint" && typeof b === "bigint") ||
+    (typeof a === "boolean" && typeof b === "boolean")
+  )
+    return a < b ? -1 : a > b ? 1 : 0
+  throw new BinaryError(0, "Expected ordered primitive")
+}
+function compareString(a: unknown, b: unknown): number {
+  if (typeof a !== "string" || typeof b !== "string")
+    throw new BinaryError(0, "Expected string key")
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    const x = a.charCodeAt(i++)
+    const y = b.charCodeAt(j++)
+    const left =
+      x >= 0xd800 && x <= 0xdbff ? 0x10000 + ((x - 0xd800) << 10) + a.charCodeAt(i++) - 0xdc00 : x
+    const right =
+      y >= 0xd800 && y <= 0xdbff ? 0x10000 + ((y - 0xd800) << 10) + b.charCodeAt(j++) - 0xdc00 : y
+    if (left !== right) return left < right ? -1 : 1
+  }
+  return a.length - b.length
 }

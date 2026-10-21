@@ -1,4 +1,13 @@
-import { Context, Effect, Option, Result, Schema, SchemaTransformation } from "effect"
+import {
+  Context,
+  Effect,
+  HashMap,
+  HashSet,
+  Option,
+  Result,
+  Schema,
+  SchemaTransformation,
+} from "effect"
 import { expectTypeOf } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { U16 } from "../src/Borsh.js"
@@ -59,4 +68,19 @@ expectTypeOf(Borsh.toCodec(fixed)).toEqualTypeOf<
 const result = Borsh.toCodec(Schema.Result(fixed, schema))
 expectTypeOf(result).toEqualTypeOf<
   Schema.Codec<Result.Result<readonly string[], string>, Uint8Array, Decode, Encode>
+>()
+
+const maps = Borsh.toCodec(Schema.ReadonlyMap(schema, Schema.Option(schema)))
+expectTypeOf(maps).toEqualTypeOf<
+  Schema.Codec<ReadonlyMap<string, Option.Option<string>>, Uint8Array, Decode, Encode>
+>()
+const hashMaps = Borsh.toCodec(Schema.HashMap(schema, Schema.Result(schema, schema)))
+expectTypeOf(hashMaps).toEqualTypeOf<
+  Schema.Codec<HashMap.HashMap<string, Result.Result<string, string>>, Uint8Array, Decode, Encode>
+>()
+expectTypeOf(Borsh.toCodec(Schema.ReadonlySet(schema))).toEqualTypeOf<
+  Schema.Codec<ReadonlySet<string>, Uint8Array, Decode, Encode>
+>()
+expectTypeOf(Borsh.toCodec(Schema.HashSet(schema))).toEqualTypeOf<
+  Schema.Codec<HashSet.HashSet<string>, Uint8Array, Decode, Encode>
 >()

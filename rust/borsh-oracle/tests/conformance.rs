@@ -419,5 +419,35 @@ fn bad_transport_never_counts_as_borsh_rejection() {
 fn registry_has_no_accidental_duplicate_ids() {
     let ids: std::collections::BTreeSet<_> = SCHEMA_IDS.iter().collect();
     assert_eq!(ids.len(), SCHEMA_IDS.len());
-    assert_eq!(SCHEMA_IDS.len(), 43);
+    assert_eq!(SCHEMA_IDS.len(), 47);
+}
+
+#[test]
+fn primitive_set_ordering() {
+    golden(
+        "set_i16",
+        json!(["-32768", "-1", "0", "32767"]),
+        "040000000080ffff0000ff7f",
+    );
+    golden("set_bool", json!([false, true]), "020000000001");
+    golden(
+        "set_i128",
+        json!([
+            "-170141183460469231731687303715884105728",
+            "170141183460469231731687303715884105727"
+        ]),
+        "0200000000000000000000000000000000000080ffffffffffffffffffffffffffffff7f",
+    );
+    golden(
+        "set_u128",
+        json!(["0", "340282366920938463463374607431768211455"]),
+        "0200000000000000000000000000000000000000ffffffffffffffffffffffffffffffff",
+    );
+    for (schema, raw) in [
+        ("set_i16", "020000000000ffff"),
+        ("set_bool", "020000000101"),
+        ("set_bool", "0100000002"),
+    ] {
+        rejection(schema, "decode", json!(raw), "borsh_rejection");
+    }
 }
