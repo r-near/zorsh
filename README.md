@@ -1,6 +1,8 @@
 # Zorsh
 
-Borsh binary serialization for TypeScript. Define native [Effect 4 schemas](https://effect.website/docs/v4/schema/introduction/), choose integer widths, and encode ordinary objects:
+Zorsh turns ordinary typed TypeScript values into [Borsh](https://borsh.io) bytes for Rust contracts, and decodes their responses back into values. A schema describes the field order and numeric widths the contract expects, while TypeScript infers the shape of your objects.
+
+For a contract call that takes a receiver and a 128-bit token amount:
 
 ```ts
 import { Borsh } from "@zorsh/effect"
@@ -20,10 +22,13 @@ const bytes = Schema.encodeSync(codec)({
 const value = Schema.decodeSync(codec)(bytes)
 ```
 
-`Transfer` is inferred as `{ readonly receiver: string; readonly amount: bigint }`. The codec carries that type and uses `Uint8Array` for its encoded bytes. Structs, tuples and arrays compose with native Effect validation, brands and transformations; `Schema.encodeEffect` and `Schema.decodeEffect` fit into Effect workflows.
+`Transfer` is inferred as `{ readonly receiver: string; readonly amount: bigint }`; `bytes` is a `Uint8Array` you can pass to a call that accepts Borsh arguments. Choose fields, their order and their widths to match your Rust contract.
 
-[`@zorsh/effect`](packages/effect/README.md) is private and unpublished while its API develops. See its README for supported layouts and limits.
+The repository contains two packages:
 
-The published [`@zorsh/zorsh`](packages/zorsh/README.md) package provides the existing Zod-like API at version 0.5.2.
+- [`@zorsh/zorsh`](packages/zorsh/README.md) is the published library, with a Zod-like schema API.
+- [`@zorsh/effect`](packages/effect/README.md) builds on native Effect schemas and integrates with Effect workflows. It is under development, private and unpublished.
 
-[Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)
+See the package guides for examples, or [CONTRIBUTING.md](CONTRIBUTING.md) to work on Zorsh.
+
+[MIT license](LICENSE)

@@ -1,4 +1,4 @@
-import { Effect, Schema, SchemaTransformation } from "effect"
+import { Effect, Exit, Result, Schema, SchemaTransformation } from "effect"
 import { expect, expectTypeOf, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 
@@ -23,14 +23,62 @@ it("encodes the root README Transfer example with inferred ordinary objects", ()
   )
 })
 
-it("runs the package README Effect workflow", () => {
-  const Batch = Schema.Struct({ receiver: Schema.String, amounts: Schema.Array(Borsh.U16) })
+it("runs the package README nested batch and Effect workflow", () => {
+  const Asset = Schema.Struct({ contractId: Schema.String })
+  const Recipient = Schema.Struct({ accountId: Schema.String, memo: Schema.String })
+  const Transfer = Schema.Struct({ asset: Asset, recipient: Recipient, amount: Borsh.U128 })
+  const Batch = Schema.Struct({ nonce: Borsh.U64, transfers: Schema.Array(Transfer) })
+  type Batch = typeof Batch.Type
+  const batch: Batch = {
+    nonce: 7n,
+    transfers: [
+      {
+        asset: { contractId: "token.near" },
+        recipient: { accountId: "alice.near", memo: "invoice 42" },
+        amount: 1_000_000n,
+      },
+      {
+        asset: { contractId: "token.near" },
+        recipient: { accountId: "bob.near", memo: "invoice 43" },
+        amount: 250_000n,
+      },
+    ],
+  }
   const codec = Borsh.toCodec(Batch)
+  const bytes = Schema.encodeSync(codec)(batch)
+  const decoded = Schema.decodeSync(codec)(bytes)
+  expectTypeOf(decoded).toEqualTypeOf<Batch>()
+  expect(decoded).toEqual(batch)
   const program = Effect.gen(function* () {
-    const bytes = yield* Schema.encodeEffect(codec)({ receiver: "alice.near", amounts: [7, 513] })
+    const bytes = yield* Schema.encodeEffect(codec)(batch)
     return yield* Schema.decodeEffect(codec)(bytes)
   })
-  expect(Effect.runSync(program)).toEqual({ receiver: "alice.near", amounts: [7, 513] })
+  expectTypeOf(program).toEqualTypeOf<Effect.Effect<Batch, Schema.SchemaError>>()
+  expect(Effect.runSync(program)).toEqual(batch)
+})
+
+it("runs the package README number, byte, array and tuple examples", () => {
+  const Amount = Borsh.U128
+  const amount = Schema.encodeSync(Borsh.toCodec(Amount))(1_000_000n)
+  const Nonce = Borsh.U64
+  const nonce = Schema.encodeSync(Borsh.toCodec(Nonce))(7n)
+  expect(amount).toHaveLength(16)
+  expect(nonce).toEqual(Uint8Array.of(7, 0, 0, 0, 0, 0, 0, 0))
+  const Payload = Borsh.Bytes
+  const RequestId = Borsh.fixedBytes(32)
+  const payload = Schema.encodeSync(Borsh.toCodec(Payload))(Uint8Array.of(1, 2, 3))
+  const requestId = Schema.encodeSync(Borsh.toCodec(RequestId))(new Uint8Array(32))
+  expect(payload).toEqual(Uint8Array.of(3, 0, 0, 0, 1, 2, 3))
+  expect(requestId).toEqual(new Uint8Array(32))
+  const Amounts = Schema.Array(Borsh.U16)
+  const amounts = Schema.encodeSync(Borsh.toCodec(Amounts))([7, 513])
+  const RecipientAmount = Schema.Tuple([Schema.String, Borsh.U128])
+  const recipientAmount = Schema.encodeSync(Borsh.toCodec(RecipientAmount))(["alice.near", 123n])
+  expect(amounts).toEqual(Uint8Array.of(2, 0, 0, 0, 7, 0, 1, 2))
+  expect(Schema.decodeSync(Borsh.toCodec(RecipientAmount))(recipientAmount)).toEqual([
+    "alice.near",
+    123n,
+  ])
 })
 
 it("uses schema field order for nested structs and tuples, including _tag", () => {
@@ -163,4 +211,35 @@ it("treats empty strings and vectors as prefixed values rather than zero-sized R
   }
   const codec = Borsh.toCodec(Schema.Array(Schema.String))
   expect(Schema.decodeSync(codec)(Uint8Array.of(1, 0, 0, 0, 0, 0, 0, 0))).toEqual([""])
+})
+
+it("checks composite vector minimums including nested length prefixes", () => {
+  const codec = Borsh.toCodec(Schema.Array(Schema.Tuple([Borsh.Unit, Borsh.U16, Schema.String])))
+  const raw = Uint8Array.of(2, 0, 0, 0, 7, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0)
+  expect(Schema.decodeSync(codec)(raw)).toEqual([
+    [[], 7, ""],
+    [[], 8, ""],
+  ])
+  expect(() => Schema.decodeSync(codec)(raw.subarray(0, 15))).toThrow(/Truncated vector payload/)
+})
+
+it("keeps a nested throwing getter in the native defect channel", () => {
+  const defect = new Error("nested getter defect")
+  const codec = Borsh.toCodec(
+    Schema.Struct({ rows: Schema.Array(Schema.Struct({ value: Borsh.U8 })) }),
+  )
+  const exit = Effect.runSyncExit(
+    Effect.suspend(() =>
+      Schema.encodeEffect(codec)({
+        rows: [
+          {
+            get value(): number {
+              throw defect
+            },
+          },
+        ],
+      }),
+    ),
+  )
+  expect(Exit.findDefect(exit)).toEqual(Result.succeed(defect))
 })

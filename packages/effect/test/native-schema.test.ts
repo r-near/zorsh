@@ -321,6 +321,23 @@ describe("native Effect schema composition", () => {
   })
 })
 
+it("rejects structurally invalid container middleware output with checks disabled", () => {
+  const sparse: number[] = []
+  sparse.length = 1
+  for (const [schema, output] of [
+    [Schema.Tuple([Borsh.U8]), [1, 2]],
+    [Schema.Struct({ value: Borsh.U8 }), {}],
+    [Schema.Array(Borsh.U8), sparse],
+  ] as const) {
+    const changed = Schema.middlewareEncoding<Schema.Constraint, never>(() =>
+      Effect.succeedSome(output),
+    )(schema)
+    expect(() =>
+      Schema.encodeUnknownSync(Borsh.toCodec(changed), { disableChecks: true })(0),
+    ).toThrow(Schema.SchemaError)
+  }
+})
+
 describe("unsupported encoded layouts and metadata", () => {
   it("does not infer widths from numeric validation bounds", () => {
     for (const schema of [
