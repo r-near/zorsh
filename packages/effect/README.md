@@ -1,6 +1,14 @@
 # @zorsh/effect
 
-Borsh serialization with native [Effect 4 schemas](https://effect.website/docs/v4/schema/introduction/) and inferred TypeScript types. This package is under development, private and unpublished. It supports primitives, structs, required tuples, fixed and variable arrays, Rust enums, native `Option` and `Result` values, maps and sets.
+Borsh serialization with native [Effect 4 schemas](https://effect.website/docs/v4/schema/introduction/) and inferred TypeScript types. It supports primitives, structs, required tuples, fixed and variable arrays, Rust enums, native `Option` and `Result` values, maps and sets.
+
+## Install
+
+```sh
+npm install @zorsh/effect effect
+```
+
+`effect` is a peer dependency (`^4.0.5`).
 
 ## Quick start
 
@@ -257,4 +265,4 @@ Vectors of Rust zero-sized values, including empty tuples, empty structs, `fixed
 
 The package is ESM and uses standard browser APIs. Import `Borsh` from `@zorsh/effect`, or use `import * as Borsh from "@zorsh/effect/Borsh"`. Effect is a peer dependency (`^4.0.5`); ES2022 TypeScript projects may need `ESNext.Disposable` in `lib` for Effect declarations.
 
-[Contributing](../../CONTRIBUTING.md) · [MIT license](LICENSE)
+[Contributing](https://github.com/r-near/zorsh/blob/main/CONTRIBUTING.md) · [MIT license](https://github.com/r-near/zorsh/blob/main/packages/effect/LICENSE)

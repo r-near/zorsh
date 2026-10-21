@@ -55,5 +55,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Empty on purpose: npm authenticates through the workflow's OIDC token
-          # (trusted publisher configured for @zorsh/zorsh on npmjs.com).
+          # (trusted publishers on npmjs.com: @zorsh/zorsh, and @zorsh/effect once its
+          # manual first publish exists; see CONTRIBUTING.md).
           NPM_TOKEN: ""

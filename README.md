@@ -28,6 +28,10 @@ const value = Transfer.deserialize(bytes)
 
 See the [`@zorsh/zorsh` guide](packages/zorsh/README.md) for the full API and examples.
 
-[`@zorsh/effect`](packages/effect/README.md) is a separate native Effect implementation under development. It is private and unpublished.
+[`@zorsh/effect`](packages/effect/README.md) is a separate package that derives Borsh codecs from native [Effect 4](https://effect.website/docs/v4/) schemas. Install it with its `effect` peer dependency:
+
+```sh
+npm install @zorsh/effect effect
+```
 
 [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)

@@ -1,3 +1,12 @@
+/**
+ * Borsh codecs derived from native Effect schemas.
+ *
+ * Build a schema with Effect's `Schema` module, use these constants and
+ * combinators where Rust needs an explicit width or layout, then derive a codec
+ * with {@link toCodec}.
+ *
+ * @since 0.1.0
+ */
 import { Effect, Schema, type SchemaAST, SchemaIssue, SchemaTransformation } from "effect"
 import { isU32Length, parseDescriptor, withLayout } from "./internal/annotations.js"
 import { compile, type Layout, rejectSuspensions } from "./internal/compiler.js"
@@ -31,36 +40,141 @@ function encodedAST(schema: Schema.Constraint): SchemaAST.AST {
   return Schema.toEncoded(schema).ast
 }
 
+/**
+ * Rust `u8`: an integer `number` from 0 to 255, written little endian.
+ *
+ * @category integers
+ * @since 0.1.0
+ */
 export const U8 = integer(8, false)
+/**
+ * Rust `u16`: an integer `number` from 0 to 65535, written little endian.
+ *
+ * @category integers
+ * @since 0.1.0
+ */
 export const U16 = integer(16, false)
+/**
+ * Rust `u32`: an integer `number` from 0 to 2^32 - 1, written little endian.
+ *
+ * @category integers
+ * @since 0.1.0
+ */
 export const U32 = integer(32, false)
+/**
+ * Rust `i8`: an integer `number` from -128 to 127, written little endian.
+ *
+ * @category integers
+ * @since 0.1.0
+ */
 export const I8 = integer(8, true)
+/**
+ * Rust `i16`: an integer `number` from -32768 to 32767, written little endian.
+ *
+ * @category integers
+ * @since 0.1.0
+ */
 export const I16 = integer(16, true)
+/**
+ * Rust `i32`: an integer `number` from -2^31 to 2^31 - 1, written little endian.
+ *
+ * @category integers
+ * @since 0.1.0
+ */
 export const I32 = integer(32, true)
+/**
+ * Rust `u64`: a `bigint` from 0 to 2^64 - 1, written little endian.
+ *
+ * @category integers
+ * @since 0.1.0
+ */
 export const U64 = bigInteger(64, false)
+/**
+ * Rust `u128`: a `bigint` from 0 to 2^128 - 1, written little endian.
+ *
+ * @category integers
+ * @since 0.1.0
+ */
 export const U128 = bigInteger(128, false)
+/**
+ * Rust `i64`: a `bigint` from -2^63 to 2^63 - 1, written little endian.
+ *
+ * @category integers
+ * @since 0.1.0
+ */
 export const I64 = bigInteger(64, true)
+/**
+ * Rust `i128`: a `bigint` from -2^127 to 2^127 - 1, written little endian.
+ *
+ * @category integers
+ * @since 0.1.0
+ */
 export const I128 = bigInteger(128, true)
 
-/** Exact IEEE-754 binary32 values; narrow explicitly with Math.fround. */
+/**
+ * Rust `f32`: a `number` exactly representable as IEEE-754 binary32, written
+ * little endian. Infinities and signed zero are allowed; NaN is rejected.
+ * Round explicitly with `Math.fround`.
+ *
+ * @category floats
+ * @since 0.1.0
+ */
 export const F32 = withLayout(Schema.Number, { version: 1, kind: "float", bits: 32 }).check(
   Schema.makeFilter((n) => !Number.isNaN(n) && Object.is(Math.fround(n), n), {
     expected: "an exactly representable binary32 number",
   }),
 )
-/** IEEE-754 binary64, including infinities and signed zero, excluding NaN. */
+/**
+ * Rust `f64`: an IEEE-754 binary64 `number`, written little endian.
+ * Infinities and signed zero are allowed; NaN is rejected.
+ *
+ * @category floats
+ * @since 0.1.0
+ */
 export const F64 = withLayout(Schema.Number, {
   version: 1,
   kind: "float",
   bits: 64,
 }).check(Schema.makeFilter((n) => !Number.isNaN(n), { expected: "a non-NaN number" }))
 
-/** A u32 byte length followed by the bytes, like Rust Vec<u8>. */
+/**
+ * Rust `Vec<u8>`: a u32 byte length followed by the bytes. This is
+ * `Schema.Uint8Array`, which has the same layout.
+ *
+ * @category bytes
+ * @since 0.1.0
+ */
 export const Bytes = Schema.Uint8Array
-/** The empty tuple uses Rust unit's empty wire representation. */
+/**
+ * Rust `()`: the empty tuple, which writes no bytes.
+ *
+ * @category containers
+ * @since 0.1.0
+ */
 export const Unit = Schema.Tuple([])
 
-/** Exactly length bytes, with no length prefix, like Rust [u8; N]. */
+/**
+ * Rust `[u8; N]`: exactly `length` bytes with no length prefix.
+ *
+ * **Details**
+ *
+ * The schema checks the byte length, so encoding and decoding reject other
+ * sizes. `length` must be an integer from 0 through 2^32 - 1.
+ *
+ * **Example** (A 32-byte identifier)
+ *
+ * ```ts
+ * import { Borsh } from "@zorsh/effect"
+ * import { Schema } from "effect"
+ *
+ * const RequestId = Borsh.fixedBytes(32)
+ * const bytes = Schema.encodeSync(Borsh.toCodec(RequestId))(new Uint8Array(32))
+ * // bytes.length === 32
+ * ```
+ *
+ * @category bytes
+ * @since 0.1.0
+ */
 export function fixedBytes(length: number): Schema.Uint8Array {
   if (!isU32Length(length))
     throw new Error("$: fixedBytes length must be a safe integer between 0 and 2^32 - 1")
@@ -75,7 +189,32 @@ export function fixedBytes(length: number): Schema.Uint8Array {
   )
 }
 
-/** Give a native encoded array Rust [T; N]'s layout, without a count prefix. */
+/**
+ * Rust `[T; N]`: gives a native array schema a fixed-length layout with no
+ * count prefix.
+ *
+ * **Details**
+ *
+ * The schema's encoded side must be a homogeneous array, such as
+ * `Schema.Array(item)`; other shapes throw when the combinator is applied. The
+ * codec requires exactly `length` items. The schema is otherwise unchanged, so
+ * transformations to application types are kept and no check is added to the
+ * decoded value. `length` must be an integer from 0 through 2^32 - 1.
+ *
+ * **Example** (Three u16 values)
+ *
+ * ```ts
+ * import { Borsh } from "@zorsh/effect"
+ * import { Schema } from "effect"
+ *
+ * const Amounts = Schema.Array(Borsh.U16).pipe(Borsh.fixedArray(3))
+ * const bytes = Schema.encodeSync(Borsh.toCodec(Amounts))([7, 513, 0])
+ * // Uint8Array [7, 0, 1, 2, 0, 0]
+ * ```
+ *
+ * @category containers
+ * @since 0.1.0
+ */
 export function fixedArray(length: number): <S extends Schema.Top>(schema: S) => S["Rebuild"] {
   if (!isU32Length(length))
     throw new Error("$: fixedArray length must be a safe integer between 0 and 2^32 - 1")
@@ -144,8 +283,34 @@ type ExactLabels<S extends Schema.Top, D, Tag extends string> = [
     }
 
 /**
- * Assign explicit u8 discriminants, like Rust `#[borsh(use_discriminant = true)]`. Keys are
- * encoded tag values, literals as strings or TS enum member names; `tag` selects another tag key.
+ * Rust `#[borsh(use_discriminant = true)]`: assigns explicit u8 discriminants
+ * to an enum schema.
+ *
+ * **Details**
+ *
+ * Without this, each variant's discriminant is its declaration index. Keys are
+ * the encoded `_tag` values, literal values as strings, or TS enum member
+ * names; every variant needs exactly one unique integer from 0 to 255. Missing
+ * and unknown keys are type errors. Pass `{ tag: "kind" }` for unions tagged by
+ * another literal field. Values are checked when the combinator is called and
+ * labels when it is applied to a schema.
+ *
+ * **Example** (Sparse discriminants)
+ *
+ * ```ts
+ * import { Borsh } from "@zorsh/effect"
+ * import { Schema } from "effect"
+ *
+ * // enum Flag { Off = 1, On = 5 }
+ * const Flag = Schema.TaggedUnion({ Off: {}, On: {} }).pipe(
+ *   Borsh.discriminants({ Off: 1, On: 5 }),
+ * )
+ * const bytes = Schema.encodeSync(Borsh.toCodec(Flag))({ _tag: "On" })
+ * // Uint8Array [5]
+ * ```
+ *
+ * @category enums
+ * @since 0.1.0
  */
 export function discriminants<
   const D extends Readonly<Record<string, number>>,
@@ -169,8 +334,19 @@ export function discriminants<
   }
 }
 
+/**
+ * Options for {@link toCodec}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Options {
-  /** Maximum input/output byte length per operation. Default: 16 MiB. */
+  /**
+   * Maximum input or output byte length per operation, as a positive safe
+   * integer. Default: 16 MiB.
+   *
+   * @since 0.1.0
+   */
   readonly maxBytes?: number | undefined
 }
 
@@ -188,8 +364,33 @@ const codecCache = new WeakMap<
 const maxBytesCacheSize = 8
 
 /**
- * Derive Borsh from the encoded side while retaining the original native parser.
- * Codecs are memoized by schema identity and maxBytes; layouts by schema identity.
+ * Derives a Borsh codec from a schema.
+ *
+ * **Details**
+ *
+ * The binary layout is compiled from the encoded side of the schema, and the
+ * schema's own checks, brands, transformations and services still apply.
+ * Unsupported layouts and invalid options throw here, at construction. Decoding
+ * must consume the whole input. Binary failures are `Schema.SchemaError`s whose
+ * issue names the path and byte offset. Codecs are memoized by schema identity
+ * and `maxBytes`.
+ *
+ * **Example** (Encoding contract arguments)
+ *
+ * ```ts
+ * import { Borsh } from "@zorsh/effect"
+ * import { Schema } from "effect"
+ *
+ * const Transfer = Schema.Struct({ receiver: Schema.String, amount: Borsh.U128 })
+ * const codec = Borsh.toCodec(Transfer)
+ *
+ * const bytes = Schema.encodeSync(codec)({ receiver: "alice.near", amount: 123n })
+ * const transfer = Schema.decodeSync(codec)(bytes)
+ * // { receiver: "alice.near", amount: 123n }
+ * ```
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export function toCodec<S extends Schema.Constraint>(
   schema: S,
