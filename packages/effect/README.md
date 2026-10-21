@@ -1,6 +1,14 @@
 # @zorsh/effect
 
-Borsh serialization with native [Effect 4 schemas](https://effect.website/docs/v4/schema/introduction/) and inferred TypeScript types. This package is under development, private and unpublished. It supports primitives, structs, required tuples, fixed and variable arrays, Rust enums, native `Option` and `Result` values, maps and sets.
+Borsh serialization with native [Effect 4 schemas](https://effect.website/docs/v4/schema/introduction/) and inferred TypeScript types. It supports primitives, structs, required tuples, fixed and variable arrays, Rust enums, native `Option` and `Result` values, maps and sets.
+
+## Install
+
+```sh
+npm install @zorsh/effect effect
+```
+
+`effect` is a peer dependency (`^4.0.5`).
 
 ## Quick start
 
@@ -255,6 +263,6 @@ Decoded input must be consumed completely: truncated data and trailing bytes fai
 
 Vectors of Rust zero-sized values, including empty tuples, empty structs, `fixedBytes(0)` and enums with one dataless variant and default discriminants, fail when visited, even for an empty array. An empty outer `Schema.Array(Schema.Array(Borsh.Unit))` succeeds because it visits no inner array. `Option.none()` also skips its inner value; `Option.some([])` visits and rejects an inner vector of unit. Fixed arrays may contain zero-sized items: `[(); 1]` uses no bytes, while `Vec<[(); 1]>` fails when visited. A zero-length fixed array skips its items, so `[Vec<()>; 0]` succeeds and `[Vec<()>; 1]` fails. Results also visit only their selected payload. Encoded struct keys and tuple positions must be required. Non-enum unions, recursion and optional properties are unsupported.
 
-The package is ESM and uses standard browser APIs. Import `Borsh` from `@zorsh/effect`, or use `import * as Borsh from "@zorsh/effect/Borsh"`. Effect is a peer dependency (`^4.0.5`); ES2022 TypeScript projects may need `ESNext.Disposable` in `lib` for Effect declarations.
+The package is ESM and uses standard browser APIs. CommonJS code can `require` it on Node 20.19+ and 22.12+, which support `require(esm)`; TypeScript CommonJS files then need `module` `node20` or `nodenext`. Import `Borsh` from `@zorsh/effect`, or use `import * as Borsh from "@zorsh/effect/Borsh"`. Effect is a peer dependency (`^4.0.5`); ES2022 TypeScript projects may need `ESNext.Disposable` in `lib` for Effect declarations.
 
-[Contributing](../../CONTRIBUTING.md) · [MIT license](LICENSE)
+[Contributing](https://github.com/r-near/zorsh/blob/main/CONTRIBUTING.md) · [MIT license](https://github.com/r-near/zorsh/blob/main/packages/effect/LICENSE)

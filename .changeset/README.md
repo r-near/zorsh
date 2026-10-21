@@ -22,5 +22,7 @@ revisions can behave differently. The gate does not revoke npm publishing
 authority or change npm-side credentials.
 
 Future releases use Changesets monorepo tags: `@zorsh/zorsh@X.Y.Z`, with separate
-`<package-name>@<version>` tags for any future public packages. Existing `vX.Y.Z`
+`<package-name>@<version>` tags for other public packages, such as `@zorsh/effect@X.Y.Z`.
+The first `@zorsh/effect` release is published by hand; see "Hooks and releases" in
+`CONTRIBUTING.md`. Existing `vX.Y.Z`
 tags remain as historical releases; no alias tagging step is needed.
