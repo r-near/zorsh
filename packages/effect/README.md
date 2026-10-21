@@ -129,7 +129,7 @@ When the Rust enum assigns explicit discriminants, list every variant once, with
 const Flag = Schema.TaggedUnion({ Off: {}, On: {} }).pipe(Borsh.discriminants({ Off: 1, On: 5 }))
 ```
 
-Keys are the encoded `_tag` values, literal values as strings (`Schema.Literals([1, 5])` takes `{ 1: 4, 5: 9 }`), or TS enum member names. Missing and unknown keys are type errors; apply the map to the enum schema, a brand or a transformation of it, not to a flipped schema. Non-string literal unions, such as `Schema.Literals([1, 5])`, and sparse numeric TS enums require this map. For unions keyed by another literal field, pass `{ tag: "kind" }` as the second argument; apply `Schema.toTaggedUnion("kind")` afterwards to keep its helpers. Enums have 1 through 256 variants. Other unions, including `Schema.NullOr`, are rejected at codec construction; use `Schema.Option` for nullable values.
+Keys are the encoded `_tag` values, literal values as strings (`Schema.Literals([1, 5])` takes `{ 1: 4, 5: 9 }`), or TS enum member names. Missing and unknown keys are type errors, including through brands, refinements and transformations of the enum schema. Non-string literal unions, such as `Schema.Literals([1, 5])`, and sparse numeric TS enums require this map. For unions keyed by another literal field, pass `{ tag: "kind" }` as the second argument; apply `Schema.toTaggedUnion("kind")` afterwards to keep its helpers. Enums have 1 through 256 variants. Other unions, including `Schema.NullOr`, are rejected at codec construction; use `Schema.Option` for nullable values.
 
 ### Options
 

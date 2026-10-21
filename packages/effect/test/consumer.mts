@@ -110,6 +110,26 @@ DirectionText.pipe(Schema.brand("Text"), Borsh.discriminants({ Up: 1, Down: 5 })
 Status.pipe(Borsh.discriminants({ Pending: 1, Done: 5 }, { tag: "kind" }))
 // @ts-expect-error Only object variants have a tag key.
 Schema.Enum(Direction).pipe(Borsh.discriminants({ Up: 1, Down: 5 }, { tag: "kind" }))
+const RefinedDirection = Schema.Enum(Direction).pipe(
+  Schema.refine((d): d is Direction.Up => d === Direction.Up),
+)
+RefinedDirection.pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
+// @ts-expect-error Refined TS enums still use member names.
+RefinedDirection.pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
+Schema.toEncoded(Schema.Enum(Direction)).pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
+// @ts-expect-error Encoded TS enums still use member names.
+Schema.toEncoded(Schema.Enum(Direction)).pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
+Schema.flip(Schema.Enum(Direction)).pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
+Schema.Enum({ 0: "zero", 1: "one" } as const).pipe(Borsh.discriminants({ 0: 1, 1: 5 }))
+// @ts-expect-error Plain object enums use their keys, including integer keys.
+Schema.Enum({ 0: "zero", 1: "one" } as const).pipe(Borsh.discriminants({ zero: 1, one: 5 }))
+// @ts-expect-error Array items are not enum names.
+Schema.Array(Schema.Enum(Direction)).pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
+declare const eitherTag: "_tag" | "kind"
+// @ts-expect-error The tag key must be one string literal.
+Actions.pipe(Borsh.discriminants({ Idle: 3, Set: 17 }, { tag: eitherTag }))
+// @ts-expect-error The tag key must be one string literal.
+Actions.pipe(Borsh.discriminants({ Idle: 3, Set: 17 }, { tag: "_tag" as string }))
 const partial: Partial<Record<"Idle" | "Set", number>> = { Idle: 3 }
 // @ts-expect-error Optional map entries do not cover a variant.
 Actions.pipe(Borsh.discriminants(partial))

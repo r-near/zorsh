@@ -82,13 +82,15 @@ export function fixedArray(length: number): <S extends Schema.Top>(schema: S) =>
   }
 }
 
-/** TS enum member names, found through brands and the encoded side of transformations. */
+/** TS enum member names, found through wrappers that keep the encoded side. */
 type EnumNames<S> = S extends { readonly enums: infer E }
-  ? Extract<keyof E, string>
+  ? `${Extract<keyof E, string | number>}`
   : S extends { readonly from: infer F; readonly to: unknown }
     ? EnumNames<F>
-    : S extends { readonly schema: infer I; readonly identifier: string }
-      ? EnumNames<I>
+    : S extends { readonly schema: infer I extends Schema.Top; readonly Encoded: infer E }
+      ? [E, I["Encoded"]] extends [I["Encoded"], E]
+        ? EnumNames<I>
+        : never
       : never
 type EnumLabels<S extends Schema.Top, Tag extends string> = [EnumNames<S>] extends [never]
   ? S["Encoded"] extends infer E
@@ -107,7 +109,21 @@ type MapLabels<D, Required = false> = `${Extract<
   { [K in keyof D]-?: Required extends true ? ({} extends Pick<D, K> ? never : K) : K }[keyof D],
   string | number
 >}`
-type ExactDiscriminants<S extends Schema.Top, D, Tag extends string> = [
+type SingleTag<Tag extends string> = string extends Tag
+  ? false
+  : [Tag] extends [infer T]
+    ? T extends unknown
+      ? [Tag] extends [T]
+        ? true
+        : false
+      : never
+    : never
+type ExactDiscriminants<S extends Schema.Top, D, Tag extends string> = [SingleTag<Tag>] extends [
+  true,
+]
+  ? ExactLabels<S, D, Tag>
+  : { readonly "Borsh discriminants tag must be one string literal": Tag }
+type ExactLabels<S extends Schema.Top, D, Tag extends string> = [
   Exclude<EnumLabels<S, Tag>, MapLabels<D, true>>,
   Exclude<MapLabels<D>, EnumLabels<S, Tag>>,
 ] extends [never, never]
