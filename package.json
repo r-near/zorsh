@@ -8,6 +8,7 @@
     "build": "vp -C packages/zorsh pack && vp -C packages/effect pack",
     "check": "vp check",
     "test": "vp test run",
+    "bench": "vp run build && vp test bench --run packages/effect/bench --coverage.enabled=false --reporter=verbose",
     "test-effect-differential": "CARGO_TARGET_DIR=rust/borsh-oracle/target cargo +1.98.0 build --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml && vp -C packages/effect pack && vp test run packages/effect/test/differential --coverage.enabled=false",
     "version-packages": "vp exec changeset version",
     "release": "vp run build && vp exec changeset publish",
