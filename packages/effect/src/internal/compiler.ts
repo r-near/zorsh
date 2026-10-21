@@ -311,7 +311,12 @@ function compileNode(
         if (!Array.isArray(value) || value.length !== length)
           throw new BinaryError(w.offset, `Expected fixed array of length ${length}`)
         w.ensure(minBytes)
-        writeItems(w, item, value)
+        let i = 0
+        try {
+          for (; i < length; i++) item.write(w, value[i])
+        } catch (error) {
+          throw prepend(error, i)
+        }
       },
     }
   }

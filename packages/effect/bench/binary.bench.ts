@@ -1,11 +1,13 @@
+import { createRequire } from "node:module"
 import { Option, Schema } from "effect"
 import { expect, test } from "vite-plus/test"
 
-// Measure the built packages, as consumers load them; run `vp run bench` to rebuild first.
-const effectEntry = new URL("../dist/index.js", import.meta.url).href
-const zorshEntry = new URL("../../zorsh/dist/src/index.js", import.meta.url).href
-const { Borsh }: typeof import("../src/index.js") = await import(effectEntry)
-const { b }: typeof import("../../zorsh/src/index.js") = await import(zorshEntry)
+// Measure the built packages through Node's own loader, bypassing Vite's module runner.
+// `vp run bench` rebuilds them first; running this file directly measures the existing dist.
+const require = createRequire(import.meta.url)
+const { Borsh }: typeof import("../src/index.js") = require("../dist/index.js")
+const { b }: typeof import("../../zorsh/src/index.js") = require("../../zorsh/dist/src/index.js")
+expect(Schema.isSchema(Borsh.U8)).toBe(true)
 
 // The README complex example, with 100 actions cycling through every variant.
 const Asset = Schema.Struct({ contractId: Schema.String })

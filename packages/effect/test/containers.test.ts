@@ -305,8 +305,7 @@ it("bounds compilation work for shared schema DAGs", () => {
     expect(Borsh.toCodec(shared)).toBe(codec)
     expect(visits).toBe(first)
     expect(Borsh.toCodec(shared, { maxBytes: 1024 })).not.toBe(codec)
-    expect(visits).toBeGreaterThan(first)
-    expect(visits).toBeLessThanOrEqual(2 * (depth + 1))
+    expect(visits).toBe(first)
   }
 })
 

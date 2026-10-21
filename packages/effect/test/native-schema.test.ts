@@ -254,6 +254,21 @@ describe("native Effect schema composition", () => {
     expect(() => Schema.decodeSync(bounded)(Uint8Array.of(7, 0))).toThrow(/maxBytes \(1\)/)
     expect(Schema.decodeSync(codec)(Uint8Array.of(7))).toEqual({ value: 7 })
     expect(Borsh.toCodec(schema.annotate({}))).not.toBe(codec)
+    for (let maxBytes = 2; maxBytes < 10; maxBytes++) Borsh.toCodec(schema, { maxBytes })
+    expect(Borsh.toCodec(schema, { maxBytes: 9 })).toBe(Borsh.toCodec(schema, { maxBytes: 9 }))
+    expect(Borsh.toCodec(schema)).not.toBe(codec)
+  })
+
+  it("treats empty and detached inputs as truncated or complete, not as defects", () => {
+    const detached = () => {
+      const bytes = new Uint8Array(1)
+      structuredClone(bytes.buffer, { transfer: [bytes.buffer] })
+      return bytes
+    }
+    const failed = Effect.runSyncExit(Schema.decodeEffect(Borsh.toCodec(Borsh.U8))(detached()))
+    expect(Exit.hasDies(failed)).toBe(false)
+    expect(String(failed)).toMatch(/Truncated input: need 1 bytes at byte 0/)
+    expect(Schema.decodeSync(Borsh.toCodec(Borsh.Unit))(detached())).toEqual([])
   })
 
   it("preserves native defects from user refinements, transformations and getters", () => {

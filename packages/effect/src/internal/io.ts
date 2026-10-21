@@ -19,6 +19,9 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
 /** Below this many bytes, plain loops beat the fixed cost of TextEncoder and TextDecoder. */
 const shortString = 32
+// Empty inputs, including detached ones, cannot back a view.
+const empty = new Uint8Array(0)
+const emptyView = new DataView(empty.buffer)
 
 export class Reader {
   offset = 0
@@ -28,8 +31,9 @@ export class Reader {
   constructor(input: Uint8Array, maxBytes: number) {
     if (input.byteLength > maxBytes)
       throw new BinaryError(0, `Input exceeds maxBytes (${maxBytes})`)
-    this.input = new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
-    this.view = new DataView(input.buffer, input.byteOffset, input.byteLength)
+    const length = input.byteLength
+    this.input = length === 0 ? empty : new Uint8Array(input.buffer, input.byteOffset, length)
+    this.view = length === 0 ? emptyView : new DataView(input.buffer, input.byteOffset, length)
   }
 
   /** Reserve length bytes and return their start offset. */

@@ -233,6 +233,19 @@ it("keeps native array checks and fixed-item error paths", () => {
     /Invalid bool tag 2 at byte 1\n {2}at \["b"\]\[0\]$/,
   )
   const layout = compile(Schema.toEncoded(shared).ast)
+  const shrinking = [true, true]
+  Object.defineProperty(shrinking, 0, {
+    get: () => {
+      shrinking.length = 1
+      return true
+    },
+  })
+  expect(() =>
+    compile(Schema.toEncoded(Schema.Array(Schema.Boolean).pipe(Borsh.fixedArray(2))).ast).write(
+      new Writer(8),
+      shrinking,
+    ),
+  ).toThrow(expect.objectContaining({ message: "Expected boolean at byte 1", path: [1] }))
   expect(() => layout.write(new Writer(8), [2])).toThrow(
     expect.objectContaining({ message: "Expected boolean at byte 0", path: [0] }),
   )

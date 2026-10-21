@@ -1,6 +1,6 @@
 import { Effect, Schema, type SchemaAST, SchemaIssue, SchemaTransformation } from "effect"
 import { parseDescriptor, withLayout } from "./internal/annotations.js"
-import { compile, enumVariants, rejectSuspensions } from "./internal/compiler.js"
+import { compile, enumVariants, type Layout, rejectSuspensions } from "./internal/compiler.js"
 import { BinaryError, Reader, Writer } from "./internal/io.js"
 
 function integer(bits: 8 | 16 | 32, signed: boolean) {
@@ -174,11 +174,16 @@ function binaryFailure(error: unknown): SchemaIssue.Issue {
   return error.path.length === 0 ? issue : new SchemaIssue.Pointer(error.path, issue)
 }
 
-const codecCache = new WeakMap<Schema.Constraint, Map<number, unknown>>()
+const codecCache = new WeakMap<
+  Schema.Constraint,
+  { readonly layout: Layout; readonly codecs: Map<number, unknown> }
+>()
+/** Bound the codecs retained per schema when callers vary maxBytes. */
+const maxBytesCacheSize = 8
 
 /**
  * Derive Borsh from the encoded side while retaining the original native parser.
- * Codecs are memoized by schema identity and maxBytes.
+ * Codecs are memoized by schema identity and maxBytes; layouts by schema identity.
  */
 export function toCodec<S extends Schema.Constraint>(
   schema: S,
@@ -187,8 +192,8 @@ export function toCodec<S extends Schema.Constraint>(
   const maxBytes = options?.maxBytes === undefined ? 16 * 1024 * 1024 : options.maxBytes
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)
     throw new Error("$: maxBytes must be a positive safe integer")
-  let codecs = codecCache.get(schema)
-  const cached = codecs?.get(maxBytes)
+  let entry = codecCache.get(schema)
+  const cached = entry?.codecs.get(maxBytes)
   if (cached !== undefined)
     return cached as Schema.Codec<
       S["Type"],
@@ -196,8 +201,12 @@ export function toCodec<S extends Schema.Constraint>(
       S["DecodingServices"],
       S["EncodingServices"]
     >
-  rejectSuspensions(schema.ast)
-  const layout = compile(Schema.toEncoded(schema).ast)
+  if (entry === undefined) {
+    rejectSuspensions(schema.ast)
+    entry = { layout: compile(Schema.toEncoded(schema).ast), codecs: new Map() }
+    codecCache.set(schema, entry)
+  }
+  const { layout, codecs } = entry
   const binary = Schema.Uint8Array.pipe(
     Schema.decodeTo(
       Schema.Unknown,
@@ -226,7 +235,7 @@ export function toCodec<S extends Schema.Constraint>(
     ),
   )
   const codec = binary.pipe(Schema.decodeTo(schema))
-  if (codecs === undefined) codecCache.set(schema, (codecs = new Map()))
+  if (codecs.size >= maxBytesCacheSize) codecs.delete(codecs.keys().next().value as number)
   codecs.set(maxBytes, codec)
   return codec
 }
