@@ -1,8 +1,22 @@
 {
   "name": "@zorsh/effect",
   "version": "0.0.0",
-  "private": true,
-  "description": "Native Effect schemas for Borsh serialization (private development package).",
+  "description": "Borsh binary codecs derived from native Effect 4 schemas, with inferred TypeScript types for Rust contract arguments and results.",
+  "keywords": [
+    "binary",
+    "borsh",
+    "codec",
+    "effect",
+    "near",
+    "rust",
+    "schema",
+    "serialization",
+    "typescript"
+  ],
+  "homepage": "https://github.com/r-near/zorsh/tree/main/packages/effect#readme",
+  "bugs": {
+    "url": "https://github.com/r-near/zorsh/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -13,6 +27,7 @@
     "dist"
   ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -23,9 +38,13 @@
       "import": "./dist/Borsh.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "vp pack",
-    "test": "vp test run"
+    "test": "vp test run",
+    "prepublishOnly": "vp pack"
   },
   "devDependencies": {
     "effect": "4.0.5"

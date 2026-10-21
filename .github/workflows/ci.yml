@@ -71,8 +71,10 @@ jobs:
         run: cargo +1.98.0 build --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml
       - name: Build libraries
         run: vp run build
-      - name: Create public package tarball
-        run: vp -C packages/zorsh pm pack -- --pack-destination ../../.artifacts
+      - name: Create public package tarballs
+        run: |
+          vp -C packages/zorsh pm pack -- --pack-destination ../../.artifacts
+          vp -C packages/effect pm pack -- --pack-destination ../../.artifacts
       - name: Run tests with coverage
         run: vp test run --coverage
       - name: Upload coverage to Codecov
