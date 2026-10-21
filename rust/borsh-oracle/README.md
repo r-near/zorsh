@@ -1,6 +1,6 @@
 # borsh-rs oracle
 
-Independent test executable using pinned borsh 1.8.1 with `derive` and `de_strict_order`. The registry contains 49 concrete Rust types; Borsh derives and standard implementations own wire encoding. Each encode checks `borsh::object_length` before `borsh::to_vec`; decode uses `borsh::from_slice`, including trailing-byte rejection. Keep Cargo.lock. The older `rust/borsh_test` fixture source remains independent.
+Independent test executable using pinned borsh 1.8.1 with `derive` and `de_strict_order`. The registry contains 50 concrete Rust types; Borsh derives and standard implementations own wire encoding. Each encode checks `borsh::object_length` before `borsh::to_vec`; decode uses `borsh::from_slice`, including trailing-byte rejection. Keep Cargo.lock. The older `rust/borsh_test` fixture source remains independent.
 
 Build and test from the repository root:
 
@@ -57,6 +57,7 @@ Frames are limited to 1 MiB excluding LF; CR in CRLF counts. Raw Borsh data and 
 | `storage_deposit` | `StorageDeposit { token_id: String, account_id: String, storage_deposit_amount: Option<u128> }` |
 | `explicit_enum` | Derived `#[repr(u8)] #[borsh(use_discriminant = true)] enum ExplicitEnum { Idle = 3, Count(u16) = 17, Named { label: String, enabled: bool } = 250 }` |
 | `status` | Derived C-like `enum Status { Pending, Active, Done }` with default discriminants |
+| `sparse_status` | Derived `#[repr(u8)] #[borsh(use_discriminant = true)] enum SparseStatus { Pending = 1, Done = 5 }` |
 | `shape` | Derived `enum Shape { Empty, Square(u32), Rect { width: u16, height: u16 } }` with default discriminants |
 | `map_u16_string` | `std::collections::BTreeMap<u16, String>` |
 | `set_string` | `std::collections::BTreeSet<String>` |

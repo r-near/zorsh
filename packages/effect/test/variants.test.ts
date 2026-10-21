@@ -201,6 +201,7 @@ it("requires explicit discriminants for numeric and non-string enums", () => {
         encode: (v) => (v === "DONE" ? Text.Done : Text.Pending),
       }),
     ),
+    Schema.brand("Named"),
     Borsh.discriminants({ Pending: 7, Done: 2 }),
   )
   expect(Schema.decodeSync(Borsh.toCodec(named))(Uint8Array.of(2))).toBe("DONE")

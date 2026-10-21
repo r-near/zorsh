@@ -110,6 +110,32 @@ impl Transport for Status {
 }
 
 #[derive(BorshSerialize, BorshDeserialize)]
+#[borsh(use_discriminant = true)]
+#[repr(u8)]
+enum SparseStatus {
+    Pending = 1,
+    Done = 5,
+}
+impl Transport for SparseStatus {
+    fn parse(v: &Value) -> Result<Self> {
+        let m = object(v, &["variant", "value"])?;
+        <()>::parse(&m["value"])?;
+        match transport::text(&m["variant"])? {
+            "Pending" => Ok(Self::Pending),
+            "Done" => Ok(Self::Done),
+            _ => Err(Error::transport("unknown SparseStatus variant")),
+        }
+    }
+    fn normalized(&self) -> Value {
+        let variant = match self {
+            Self::Pending => "Pending",
+            Self::Done => "Done",
+        };
+        json!({"variant":variant,"value":null})
+    }
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
 enum Shape {
     Empty,
     Square(u32),
@@ -243,7 +269,8 @@ registry! {
     "vec_u16" => Vec<u16>, "tuple_u8_u128" => (u8, u128),
     "option_u128" => Option<u128>, "option_option_u8" => Option<Option<u8>>,
     "array_u16_3" => [u16; 3], "storage_deposit" => StorageDeposit, "transfer" => Transfer,
-    "explicit_enum" => ExplicitEnum, "status" => Status, "shape" => Shape,
+    "explicit_enum" => ExplicitEnum, "status" => Status,
+    "sparse_status" => SparseStatus, "shape" => Shape,
     "map_u16_string" => BTreeMap<u16, String>, "set_string" => BTreeSet<String>,
     "set_i16" => BTreeSet<i16>, "set_i128" => BTreeSet<i128>,
     "set_u128" => BTreeSet<u128>, "set_bool" => BTreeSet<bool>,

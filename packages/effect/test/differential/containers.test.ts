@@ -51,6 +51,19 @@ enum StatusEnum {
   Done = "done",
 }
 const statusNames = { pending: "Pending", active: "Active", done: "Done" } as const
+enum NumericStatus {
+  Pending,
+  Active,
+  Done,
+}
+enum SparseStatus {
+  Pending = 1,
+  Done = 5,
+}
+const sparseStatuses = [
+  Schema.Literals(["Pending", "Done"]).pipe(Borsh.discriminants({ Pending: 1, Done: 5 })),
+  Schema.Enum(SparseStatus).pipe(Borsh.discriminants({ Pending: 1, Done: 5 })),
+] as const
 const Shape = Schema.TaggedUnion({
   Empty: {},
   Square: { value: Borsh.U32 },
@@ -124,6 +137,27 @@ const entries = [
     fc.constantFrom(...Object.values(StatusEnum)),
     (value) => ({ variant: statusNames[value], value: null }),
     "status Schema.Enum",
+  ),
+  spec(
+    "status",
+    Schema.Enum(NumericStatus),
+    fc.constantFrom(NumericStatus.Pending, NumericStatus.Active, NumericStatus.Done),
+    (value) => ({ variant: NumericStatus[value], value: null }),
+    "status numeric Schema.Enum",
+  ),
+  spec(
+    "sparse_status",
+    sparseStatuses[0],
+    fc.constantFrom("Pending" as const, "Done" as const),
+    (value) => ({ variant: value, value: null }),
+    "sparse_status Schema.Literals",
+  ),
+  spec(
+    "sparse_status",
+    sparseStatuses[1],
+    fc.constantFrom(SparseStatus.Pending, SparseStatus.Done),
+    (value) => ({ variant: SparseStatus[value], value: null }),
+    "sparse_status Schema.Enum",
   ),
   spec(
     "shape",
@@ -324,7 +358,12 @@ it("matches Rust zero-sized visitation and malicious vector counts", async () =>
 
 it("checks every enum discriminant and Option flag against Rust", async () => {
   const enumCodec = Borsh.toCodec(ExplicitEnum)
-  const statusCodecs = [Borsh.toCodec(Status), Borsh.toCodec(Schema.Enum(StatusEnum))]
+  const statusCodecs = [
+    Borsh.toCodec(Status),
+    Borsh.toCodec(Schema.Enum(StatusEnum)),
+    Borsh.toCodec(Schema.Enum(NumericStatus)),
+  ]
+  const sparseCodecs = sparseStatuses.map((schema) => Borsh.toCodec(schema))
   const shapeCodec = Borsh.toCodec(Shape)
   const optionCodec = Borsh.toCodec(Schema.Option(Borsh.U128))
   const resultCodec = Borsh.toCodec(Schema.Result(Borsh.U16, Schema.String))
@@ -345,6 +384,7 @@ it("checks every enum discriminant and Option flag against Rust", async () => {
     for (const [id, codec, raw] of [
       ["explicit_enum", enumCodec, enumRaw],
       ...statusCodecs.map((codec) => ["status", codec, Uint8Array.of(tag)] as const),
+      ...sparseCodecs.map((codec) => ["sparse_status", codec, Uint8Array.of(tag)] as const),
       ["shape", shapeCodec, shapeRaw],
       ["option_u128", optionCodec, optionRaw],
       [

@@ -168,6 +168,16 @@ fn concrete_types_and_options() {
     );
     golden("status", json!({"variant":"Pending","value":null}), "00");
     golden("status", json!({"variant":"Done","value":null}), "02");
+    golden(
+        "sparse_status",
+        json!({"variant":"Pending","value":null}),
+        "01",
+    );
+    golden(
+        "sparse_status",
+        json!({"variant":"Done","value":null}),
+        "05",
+    );
     golden("shape", json!({"variant":"Empty","value":null}), "00");
     golden(
         "shape",
@@ -270,6 +280,8 @@ fn malformed_borsh_is_rejected_including_trailing_bytes() {
         ("explicit_enum", "00"),
         ("explicit_enum", "11"),
         ("status", "03"),
+        ("sparse_status", "00"),
+        ("sparse_status", "02"),
         ("shape", "03"),
         ("shape", "01050000"),
         ("bytes", "ffffffff"),
@@ -437,7 +449,7 @@ fn bad_transport_never_counts_as_borsh_rejection() {
 fn registry_has_no_accidental_duplicate_ids() {
     let ids: std::collections::BTreeSet<_> = SCHEMA_IDS.iter().collect();
     assert_eq!(ids.len(), SCHEMA_IDS.len());
-    assert_eq!(SCHEMA_IDS.len(), 49);
+    assert_eq!(SCHEMA_IDS.len(), 50);
 }
 
 #[test]

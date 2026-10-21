@@ -105,6 +105,11 @@ expectTypeOf(
 ).toEqualTypeOf<string>()
 // @ts-expect-error Transformed TS enums use their encoded member names.
 DirectionText.pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
+DirectionText.pipe(Schema.brand("Text"), Borsh.discriminants({ Up: 1, Down: 5 }))
+// @ts-expect-error Only object variants have a tag key.
+Status.pipe(Borsh.discriminants({ Pending: 1, Done: 5 }, { tag: "kind" }))
+// @ts-expect-error Only object variants have a tag key.
+Schema.Enum(Direction).pipe(Borsh.discriminants({ Up: 1, Down: 5 }, { tag: "kind" }))
 const partial: Partial<Record<"Idle" | "Set", number>> = { Idle: 3 }
 // @ts-expect-error Optional map entries do not cover a variant.
 Actions.pipe(Borsh.discriminants(partial))

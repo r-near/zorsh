@@ -119,7 +119,7 @@ const shape = Schema.encodeSync(Borsh.toCodec(Shape))({ _tag: "Square", value: 5
 
 The wire format is a u8 discriminant followed by the selected variant's fields in encoded order, excluding `_tag`. Tuple and struct variants are identical on the wire, so the TypeScript field names are free. Values keep Effect's internally tagged shape, such as `{ _tag: "Square", value: 5 }`, so `.cases`, `.guards`, `.match` and `Match.tag` work unchanged. `Schema.Union` of `TaggedStruct` or `TaggedClass` members works the same way.
 
-Reordering variants changes the bytes, as it does in Rust. Keep TypeScript declaration order identical to the Rust enum. `Schema.TaggedUnion` follows JavaScript key order, which puts integer-like names first; Rust variant names never have that form.
+Reordering variants changes the bytes, as it does in Rust. Keep TypeScript declaration order identical to the Rust enum. `Schema.TaggedUnion`, like `Schema.Enum` of a plain object, follows JavaScript key order, which puts integer-like names first; Rust variant and TS enum member names never have that form.
 
 C-like enums decode to the literal or TS enum value. `Schema.Literals` requires string literals. A string TS enum uses member order; a numeric TS enum must have values 0 through n - 1 in declaration order. Mixed string and numeric TS enums are unsupported.
 
@@ -129,7 +129,7 @@ When the Rust enum assigns explicit discriminants, list every variant once, with
 const Flag = Schema.TaggedUnion({ Off: {}, On: {} }).pipe(Borsh.discriminants({ Off: 1, On: 5 }))
 ```
 
-Keys are the encoded `_tag` values, string literals, or TS enum member names. Missing and unknown keys are type errors. Non-string literal unions, such as `Schema.Literals([1, 5])`, and sparse numeric TS enums require this map. For unions keyed by another literal field, pass `{ tag: "kind" }` as the second argument; apply `Schema.toTaggedUnion("kind")` afterwards to keep its helpers. Enums have 1 through 256 variants. Other unions, including `Schema.NullOr`, are rejected at codec construction; use `Schema.Option` for nullable values.
+Keys are the encoded `_tag` values, literal values as strings (`Schema.Literals([1, 5])` takes `{ 1: 4, 5: 9 }`), or TS enum member names. Missing and unknown keys are type errors; apply the map to the enum schema, a brand or a transformation of it, not to a flipped schema. Non-string literal unions, such as `Schema.Literals([1, 5])`, and sparse numeric TS enums require this map. For unions keyed by another literal field, pass `{ tag: "kind" }` as the second argument; apply `Schema.toTaggedUnion("kind")` afterwards to keep its helpers. Enums have 1 through 256 variants. Other unions, including `Schema.NullOr`, are rejected at codec construction; use `Schema.Option` for nullable values.
 
 ### Options
 

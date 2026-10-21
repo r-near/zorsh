@@ -87,18 +87,22 @@ type EnumNames<S> = S extends { readonly enums: infer E }
   ? Extract<keyof E, string>
   : S extends { readonly from: infer F; readonly to: unknown }
     ? EnumNames<F>
-    : S extends { readonly ast: SchemaAST.Enum; readonly schema: infer I }
+    : S extends { readonly schema: infer I; readonly identifier: string }
       ? EnumNames<I>
       : never
 type EnumLabels<S extends Schema.Top, Tag extends string> = [EnumNames<S>] extends [never]
   ? S["Encoded"] extends infer E
     ? E extends SchemaAST.LiteralValue
-      ? `${E}`
+      ? Tag extends "_tag"
+        ? `${E}`
+        : never
       : E extends { readonly [K in Tag]: infer L }
         ? Extract<L, string>
         : never
     : never
-  : EnumNames<S>
+  : Tag extends "_tag"
+    ? EnumNames<S>
+    : never
 type MapLabels<D, Required = false> = `${Extract<
   { [K in keyof D]-?: Required extends true ? ({} extends Pick<D, K> ? never : K) : K }[keyof D],
   string | number
@@ -115,7 +119,7 @@ type ExactDiscriminants<S extends Schema.Top, D, Tag extends string> = [
 
 /**
  * Assign explicit u8 discriminants, like Rust `#[borsh(use_discriminant = true)]`. Keys are
- * encoded tag values, string literals or TS enum member names; `tag` selects another tag key.
+ * encoded tag values, literals as strings or TS enum member names; `tag` selects another tag key.
  */
 export function discriminants<
   const D extends Readonly<Record<string, number>>,
