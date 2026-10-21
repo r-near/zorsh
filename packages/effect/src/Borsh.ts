@@ -82,25 +82,34 @@ export function fixedArray(length: number): <S extends Schema.Top>(schema: S) =>
   }
 }
 
-type EnumLabels<S extends Schema.Top, Tag extends string> = S extends {
-  readonly enums: infer E
-}
+/** TS enum member names, found through brands and the encoded side of transformations. */
+type EnumNames<S> = S extends { readonly enums: infer E }
   ? Extract<keyof E, string>
-  : S["Encoded"] extends infer E
+  : S extends { readonly from: infer F; readonly to: unknown }
+    ? EnumNames<F>
+    : S extends { readonly ast: SchemaAST.Enum; readonly schema: infer I }
+      ? EnumNames<I>
+      : never
+type EnumLabels<S extends Schema.Top, Tag extends string> = [EnumNames<S>] extends [never]
+  ? S["Encoded"] extends infer E
     ? E extends SchemaAST.LiteralValue
       ? `${E}`
       : E extends { readonly [K in Tag]: infer L }
         ? Extract<L, string>
         : never
     : never
-type MapLabels<D> = `${Extract<keyof D, string | number>}`
+  : EnumNames<S>
+type MapLabels<D, Required = false> = `${Extract<
+  { [K in keyof D]-?: Required extends true ? ({} extends Pick<D, K> ? never : K) : K }[keyof D],
+  string | number
+>}`
 type ExactDiscriminants<S extends Schema.Top, D, Tag extends string> = [
-  Exclude<EnumLabels<S, Tag>, MapLabels<D>>,
+  Exclude<EnumLabels<S, Tag>, MapLabels<D, true>>,
   Exclude<MapLabels<D>, EnumLabels<S, Tag>>,
 ] extends [never, never]
   ? unknown
   : {
-      readonly "Missing Borsh discriminants": Exclude<EnumLabels<S, Tag>, MapLabels<D>>
+      readonly "Missing Borsh discriminants": Exclude<EnumLabels<S, Tag>, MapLabels<D, true>>
       readonly "Unknown Borsh discriminants": Exclude<MapLabels<D>, EnumLabels<S, Tag>>
     }
 

@@ -6,6 +6,7 @@ import {
   Option,
   Result,
   Schema,
+  SchemaGetter,
   SchemaTransformation,
 } from "effect"
 import { expectTypeOf } from "vite-plus/test"
@@ -89,6 +90,24 @@ expectTypeOf(
 ).toEqualTypeOf<Direction>()
 // @ts-expect-error TS enum maps use member names, not values.
 Schema.Enum(Direction).pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
+const BrandedDirection = Schema.Enum(Direction).pipe(Schema.brand("Direction"))
+BrandedDirection.pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
+// @ts-expect-error Branded TS enums still use member names.
+BrandedDirection.pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
+const DirectionText = Schema.Enum(Direction).pipe(
+  Schema.decodeTo(Schema.String, {
+    decode: SchemaGetter.transform(String),
+    encode: SchemaGetter.transform((text) => (text === "1" ? Direction.Up : Direction.Down)),
+  }),
+)
+expectTypeOf(
+  DirectionText.pipe(Borsh.discriminants({ Up: 1, Down: 5 })).Type,
+).toEqualTypeOf<string>()
+// @ts-expect-error Transformed TS enums use their encoded member names.
+DirectionText.pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
+const partial: Partial<Record<"Idle" | "Set", number>> = { Idle: 3 }
+// @ts-expect-error Optional map entries do not cover a variant.
+Actions.pipe(Borsh.discriminants(partial))
 const Kinds = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("A") }),
   Schema.Struct({ kind: Schema.Literal("B"), value: U16 }),

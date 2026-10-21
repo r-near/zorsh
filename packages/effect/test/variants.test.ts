@@ -186,6 +186,24 @@ it("requires explicit discriminants for numeric and non-string enums", () => {
   expect(() => Schema.decodeSync(sparse)(Uint8Array.of(0))).toThrow(/Invalid enum tag 0/)
   const text = Borsh.toCodec(Schema.Enum(Text).pipe(Borsh.discriminants({ Pending: 7, Done: 2 })))
   expect(Schema.encodeSync(text)(Text.Pending)).toEqual(Uint8Array.of(7))
+  const branded = Schema.Enum(Sparse).pipe(
+    Schema.brand("Sparse"),
+    Borsh.discriminants({ A: 1, B: 5 }),
+  )
+  expect(Schema.encodeSync(Borsh.toCodec(branded))(Sparse.B as typeof branded.Type)).toEqual(
+    Uint8Array.of(5),
+  )
+  const named = Schema.Enum(Text).pipe(
+    Schema.decodeTo(
+      Schema.String,
+      SchemaTransformation.transform({
+        decode: (v) => v.toUpperCase(),
+        encode: (v) => (v === "DONE" ? Text.Done : Text.Pending),
+      }),
+    ),
+    Borsh.discriminants({ Pending: 7, Done: 2 }),
+  )
+  expect(Schema.decodeSync(Borsh.toCodec(named))(Uint8Array.of(2))).toBe("DONE")
   enum Mixed {
     A = 0,
     B = "b",
