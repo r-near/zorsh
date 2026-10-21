@@ -7,6 +7,7 @@ Install the global [Vite+ CLI](https://viteplus.dev/guide/), then run all JavaSc
 - `packages/zorsh`: the existing public package and its tests, snapshots, API documentation and changelog.
 - `packages/effect`: private native Effect 4 schemas and Borsh primitive codecs. Read the current [official Effect v4 documentation](https://effect.website/docs/v4/) and the pinned package source before designing or reviewing its runtime.
 - `rust/borsh_test`: independent Rust fixture generators, Cargo lockfile and committed Borsh vectors.
+- `rust/borsh-oracle`: a private test executable using pinned borsh-rs 1.8.1 and 39 fixed concrete Rust types. Its [protocol contract](rust/borsh-oracle/README.md) documents transport, normalization, error categories and resource limits.
 - `scripts/check-package.mjs`: checks the actual npm tarball after installing it into an isolated consumer workspace under ignored `.artifacts`.
 
 The root and Effect package are private. Changesets uses independent package versions (`fixed` and `linked` are empty). Keep package-specific runtime dependencies with their package and shared development tools at the root.
@@ -61,6 +62,26 @@ vp test run
 ```
 
 On this development Mac, Cargo must resolve to the installed Mr Boxington shim. Check `command -v cargo` before the first build and use `mbx` if needed. Keep `-j 1`. CI uses the runner's Cargo. Default `cargo test` alone does not execute the ignored fixture generators. Review fixture changes intentionally; CI rejects unexpected drift.
+
+### Fixed-type Rust oracle
+
+Run its checks from the repository root:
+
+```sh
+cargo +1.98.0 fmt --manifest-path rust/borsh-oracle/Cargo.toml --check
+cargo +1.98.0 clippy --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml --all-targets -- -D warnings
+cargo +1.98.0 test --locked -j 1 --manifest-path rust/borsh-oracle/Cargo.toml
+```
+
+The oracle pins Rust 1.98.0, rustfmt and Clippy in its own `rust-toolchain.toml`, and declares the tested `rust-version = "1.98.0"`. Root commands select `+1.98.0` explicitly because Rustup discovers pins from the current directory, not `--manifest-path`. CI installs that toolchain without changing the runner's default for `rust/borsh_test`. Cargo's default target stays inside `rust/borsh-oracle/target`; keep custom targets local to the worktree. Commit the oracle's Cargo.lock. CI caches each independent Rust crate. The existing `lint-and-typecheck` job runs oracle formatting/Clippy, and `tests` runs all 24 oracle tests, including proptests and the real persistent CLI. The legacy fixture generation/drift guard and both packages' TypeScript coverage remain included.
+
+This crate tests Rust transport and concrete registered Borsh types only. Cross-language checks against the Effect compiler and coverage-guided fuzzing come in a later slice and are not completed by adding the oracle. Keep Borsh errors distinct from malformed protocol/transport, resource limits and process failures. Extend the registry with concrete Rust types and derives/standard implementations; do not add a dynamic wire interpreter, schema export or contract introspection. Preserve `rust/borsh_test` as the independent older-version fixture source.
+
+Any change to observable semantics names the verification boundary it affects.
+
+- Concurrency, interleaving, scheduling, retry, cancellation, recovery, ownership handoff, or liveness updates the system model, or the change states why that model is unaffected.
+- Executable Rust behavior updates the Rust verification layer. A theorem-owned kernel updates its proof. Workflow or DSL semantics update conformance or differential tests.
+- Do not clone one state machine across Rust, TLA+, Lean, and a DSL for symmetry. Passing independent suites does not establish equivalence.
 
 ## Releases
 

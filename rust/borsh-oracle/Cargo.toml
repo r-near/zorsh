@@ -1,0 +1,20 @@
+[package]
+name = "zorsh-borsh-oracle"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98.0"
+publish = false
+
+[dependencies]
+borsh = { version = "=1.8.1", features = ["derive", "de_strict_order"] }
+serde = "1.0"
+serde_json = "1.0"
+
+[dev-dependencies]
+proptest = "1.9"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
