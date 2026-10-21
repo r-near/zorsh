@@ -446,7 +446,7 @@ it("rejects an inappropriate layout on a native Option declaration", () => {
     [key]: { version: 1, kind: "fixedBytes", length: 0 },
   })
   expect(() => Borsh.toCodec(invalid)).toThrow(
-    new Error("$: Fixed bytes layout does not match encoded Declaration"),
+    new Error("$: Fixed bytes layout requires an encoded Uint8Array"),
   )
 })
 

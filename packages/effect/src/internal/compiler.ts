@@ -3,7 +3,7 @@ import { descriptor, type LayoutDescriptor } from "./annotations.js"
 import { compileArrays, compileObject, fixedArray } from "./containers.js"
 import { compileEnum } from "./enums.js"
 import type { Reader, Writer } from "./io.js"
-import { compileDeclaration, representationId, uint8ArrayId } from "./natives.js"
+import { compileDeclaration, isUint8Array } from "./natives.js"
 import { boolean, bytes, float, integer, string } from "./primitives.js"
 
 export interface Layout {
@@ -122,8 +122,8 @@ function compileDescriptor(
         throw new Error(`${path}: Float layout does not match encoded ${ast._tag}`)
       return float(layout.bits)
     case "fixedBytes":
-      if (ast._tag !== "Declaration" || representationId(ast) !== uint8ArrayId)
-        throw new Error(`${path}: Fixed bytes layout does not match encoded ${ast._tag}`)
+      if (!isUint8Array(ast))
+        throw new Error(`${path}: Fixed bytes layout requires an encoded Uint8Array`)
       return bytes(layout.length)
     case "fixedArray":
       return fixedArray(ast, layout.length, path, compile)

@@ -35,9 +35,9 @@ export function isU32Length(value: unknown): value is number {
   )
 }
 
-export function parseDescriptor<D extends LayoutDescriptor>(value: D): D
+export function parseDescriptor<D extends LayoutDescriptor>(value: D, path: string): D
 export function parseDescriptor(value: unknown, path: string): LayoutDescriptor | undefined
-export function parseDescriptor(value: unknown, path = "$"): LayoutDescriptor | undefined {
+export function parseDescriptor(value: unknown, path: string): LayoutDescriptor | undefined {
   if (value === undefined) return undefined
   if (
     typeof value !== "object" ||
@@ -139,7 +139,7 @@ export function withLayout<S extends Schema.Top>(
   schema: S,
   layout: LayoutDescriptor,
 ): S["Rebuild"] {
-  layout = parseDescriptor(layout)
-  merge(descriptor(Schema.toEncoded(schema).ast, "$"), layout, "$")
+  const next = parseDescriptor(layout, "$")
+  layout = merge(descriptor(Schema.toEncoded(schema).ast, "$"), next, "$")
   return schema.pipe(Schema.annotateEncoded({ [key]: Object.freeze(layout) }))
 }

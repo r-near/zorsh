@@ -539,7 +539,7 @@ describe("unsupported encoded layouts and metadata", () => {
       }),
     )
     expect(() => Borsh.toCodec(fixedOnString)).toThrow(
-      new Error("$: Fixed bytes layout does not match encoded String"),
+      new Error("$: Fixed bytes layout requires an encoded Uint8Array"),
     )
     const conflict = Borsh.U8.check(Schema.isGreaterThan(0)).pipe(
       Schema.annotateEncoded({ [key]: { version: 1, kind: "integer", bits: 16, signed: false } }),
@@ -613,15 +613,11 @@ describe("native declarations", () => {
     const enumLayout = { version: 1, kind: "enum", tag: "_tag", discriminants: {} }
     const fixedArray = { version: 1, kind: "fixedArray", length: 2 }
     for (const [schema, layout, message] of [
-      [
-        Schema.Option(Borsh.U8),
-        fixedBytes,
-        "$: Fixed bytes layout does not match encoded Declaration",
-      ],
+      [Schema.Option(Borsh.U8), fixedBytes, "$: Fixed bytes layout requires an encoded Uint8Array"],
       [
         Schema.ReadonlySet(Borsh.U8),
         fixedBytes,
-        "$: Fixed bytes layout does not match encoded Declaration",
+        "$: Fixed bytes layout requires an encoded Uint8Array",
       ],
       [Borsh.Bytes, integer, "$: Integer layout does not match encoded Declaration"],
       [
@@ -635,7 +631,7 @@ describe("native declarations", () => {
         "$: Enum layout requires a tagged union, literal union or Schema.Enum",
       ],
       [Borsh.Bytes, fixedArray, "$: Fixed array layout requires a homogeneous encoded array"],
-      [Schema.Date, fixedBytes, "$: Fixed bytes layout does not match encoded Declaration"],
+      [Schema.Date, fixedBytes, "$: Fixed bytes layout requires an encoded Uint8Array"],
     ] as const)
       expect(() => Borsh.toCodec(annotate(schema, layout))).toThrow(new Error(message))
   })

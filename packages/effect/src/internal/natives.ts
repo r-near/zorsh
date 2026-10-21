@@ -3,7 +3,7 @@ import type { Compile, Layout } from "./compiler.js"
 import { BinaryError, prepend } from "./io.js"
 import { bytes } from "./primitives.js"
 
-export const uint8ArrayId = "effect/schema/Uint8Array"
+const uint8ArrayId = "effect/schema/Uint8Array"
 
 type Native = (ast: SchemaAST.Declaration, path: string, compile: Compile) => Layout
 
@@ -21,7 +21,12 @@ export function compileDeclaration(
   return native(ast, path, compile)
 }
 
-export function representationId(ast: SchemaAST.Declaration): string | undefined {
+/** The declaration fixedBytes may annotate. */
+export function isUint8Array(ast: SchemaAST.AST): boolean {
+  return ast._tag === "Declaration" && representationId(ast) === uint8ArrayId
+}
+
+function representationId(ast: SchemaAST.Declaration): string | undefined {
   const representation = ast.annotations?.representation
   return typeof representation === "object" &&
     representation !== null &&
@@ -118,7 +123,7 @@ interface CollectionAdapter {
 }
 
 /** Rust BTreeMap/BTreeSet, also for Hash collections: a u32 count, then strictly increasing keys. */
-function collection(adapter: CollectionAdapter) {
+function collectionLayout(adapter: CollectionAdapter) {
   return (ast: SchemaAST.Declaration, path: string, compile: Compile): Layout => {
     const [key, value] = parameters(ast, adapter.arity, adapter.name, path)
     const keyLayout = compile(key, `${path}["key"]`)
@@ -183,27 +188,27 @@ function collection(adapter: CollectionAdapter) {
   }
 }
 
-const readonlyMap = collection({
+const readonlyMap = collectionLayout({
   name: "ReadonlyMap",
   arity: 2,
   get: (value) => (value instanceof Map ? { size: value.size, entries: value } : undefined),
   make: (entries) => new Map(entries),
 })
-const readonlySet = collection({
+const readonlySet = collectionLayout({
   name: "ReadonlySet",
   arity: 1,
   get: (value) =>
     value instanceof Set ? { size: value.size, entries: value.entries() } : undefined,
   make: (entries) => new Set(entries.map(([key]) => key)),
 })
-const hashMap = collection({
+const hashMap = collectionLayout({
   name: "HashMap",
   arity: 2,
   get: (value) =>
     HashMap.isHashMap(value) ? { size: HashMap.size(value), entries: value } : undefined,
   make: HashMap.fromIterable,
 })
-const hashSet = collection({
+const hashSet = collectionLayout({
   name: "HashSet",
   arity: 1,
   get: (value) =>

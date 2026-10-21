@@ -154,12 +154,15 @@ export function discriminants<
   map: D,
   options?: { readonly tag?: Tag | undefined },
 ): <S extends Schema.Top>(schema: S & ExactDiscriminants<S, D, Tag>) => S["Rebuild"] {
-  const layout = parseDescriptor({
-    version: 1,
-    kind: "enum",
-    tag: options?.tag ?? "_tag",
-    discriminants: map,
-  })
+  const layout = parseDescriptor(
+    {
+      version: 1,
+      kind: "enum",
+      tag: options?.tag ?? "_tag",
+      discriminants: map,
+    },
+    "$",
+  )
   return (schema) => {
     enumVariants(encodedAST(schema), layout, "$")
     return withLayout(schema, layout)
