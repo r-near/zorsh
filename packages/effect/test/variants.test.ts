@@ -529,6 +529,51 @@ it("composes nested enums, options and arrays with relative paths and byte limit
   expect(() => Schema.decodeSync(bounded)(Uint8Array.of(1, 17, 1, 2))).toThrow(/maxBytes/)
 })
 
+it("reports enum tag, value and variant field failures at native paths and offsets", () => {
+  const decode = (s: Schema.Top, raw: ReadonlyArray<number>) => () =>
+    Schema.decodeSync(Borsh.toCodec(s as Schema.Codec<unknown>))(Uint8Array.from(raw))
+  expect(decode(Schema.Struct({ actions: Schema.Array(schema) }), [2, 0, 0, 0, 3, 9])).toThrow(
+    /^Invalid enum tag 9 at byte 5\n {2}at \["actions"\]\[1\]$/,
+  )
+  expect(decode(Schema.Tuple([Borsh.U8, schema]), [7])).toThrow(
+    /^Truncated input: need 1 bytes at byte 1\n {2}at \[1\]$/,
+  )
+  expect(decode(Schema.ReadonlyMap(Borsh.U8, schema), [1, 0, 0, 0, 4, 250, 0, 0, 0, 0, 2])).toThrow(
+    /^Invalid bool tag 2 at byte 10\n {2}at \[0\]\["value"\]\["enabled"\]$/,
+  )
+  expect(decode(Schema.Struct({ status: Schema.Literals(["A", "B"]) }), [2])).toThrow(
+    /^Invalid enum tag 2 at byte 0\n {2}at \["status"\]$/,
+  )
+  expect(decode(Schema.Array(Schema.Enum(Text)), [2, 0, 0, 0, 1, 2])).toThrow(
+    /^Invalid enum tag 2 at byte 5\n {2}at \[1\]$/,
+  )
+
+  const write = (s: Schema.Top, value: unknown) => () =>
+    compile(Schema.toEncoded(s).ast).write(new Writer(64), value)
+  const failure = (message: string, path: ReadonlyArray<PropertyKey>) =>
+    expect.objectContaining({ message, path })
+  const actions = Schema.Array(schema)
+  expect(write(actions, [{ _tag: "Idle" }, { _tag: "Nope" }])).toThrow(
+    failure("Invalid enum label at byte 5", [1, "_tag"]),
+  )
+  expect(write(actions, [{ _tag: "Count", value: 70_000 }])).toThrow(
+    failure("Integer outside u16 range at byte 5", [0, "value"]),
+  )
+  const kinds = Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("A") }),
+    Schema.Struct({ kind: Schema.Literal("B"), v: Borsh.U8 }),
+  ]).pipe(Borsh.discriminants({ A: 0, B: 1 }, { tag: "kind" }))
+  expect(write(Schema.Array(kinds), [{ kind: "B", v: 1 }, { kind: "C" }])).toThrow(
+    failure("Invalid enum label at byte 6", [1, "kind"]),
+  )
+  expect(write(Schema.Struct({ status: Schema.Literals(["A", "B"]) }), { status: "C" })).toThrow(
+    failure("Invalid enum value at byte 0", ["status"]),
+  )
+  expect(write(Schema.Array(Schema.Enum(Numeric)), [0, 7])).toThrow(
+    failure("Invalid enum value at byte 5", [1]),
+  )
+})
+
 it("visits only present Option payloads and treats Option<Unit> as nonzero sized", () => {
   const c = Borsh.toCodec(Schema.Option(Schema.Array(Borsh.Unit)))
   expect(Schema.encodeSync(c)(Option.none())).toEqual(Uint8Array.of(0))
