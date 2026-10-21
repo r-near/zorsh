@@ -166,6 +166,29 @@ fn concrete_types_and_options() {
         json!({"variant":"Named","value":{"label":"x","enabled":true}}),
         "fa010000007801",
     );
+    golden("status", json!({"variant":"Pending","value":null}), "00");
+    golden("status", json!({"variant":"Done","value":null}), "02");
+    golden(
+        "sparse_status",
+        json!({"variant":"Pending","value":null}),
+        "01",
+    );
+    golden(
+        "sparse_status",
+        json!({"variant":"Done","value":null}),
+        "05",
+    );
+    golden("shape", json!({"variant":"Empty","value":null}), "00");
+    golden(
+        "shape",
+        json!({"variant":"Square","value":"5"}),
+        "0105000000",
+    );
+    golden(
+        "shape",
+        json!({"variant":"Rect","value":{"width":"513","height":"2"}}),
+        "0201020200",
+    );
 }
 
 #[test]
@@ -256,6 +279,12 @@ fn malformed_borsh_is_rejected_including_trailing_bytes() {
         ("string", "0200000061"),
         ("explicit_enum", "00"),
         ("explicit_enum", "11"),
+        ("status", "03"),
+        ("sparse_status", "00"),
+        ("sparse_status", "02"),
+        ("only", "01"),
+        ("shape", "03"),
+        ("shape", "01050000"),
         ("bytes", "ffffffff"),
         ("vec_u16", "ffffffff"),
         ("map_u16_string", "ffffffff"),
@@ -333,7 +362,8 @@ fn zst_visitation_is_owned_by_borsh_not_schema_validation() {
         json!([{"tag":"None"},{"tag":"Some","value":null}]),
         "020000000001",
     );
-    for schema in ["vec_unit", "vec_empty", "vec_bytes0"] {
+    golden("only", json!({"variant":"Only","value":null}), "00");
+    for schema in ["vec_unit", "vec_empty", "vec_bytes0", "vec_only"] {
         rejection(schema, "encode", json!([]), "borsh_rejection");
         rejection(schema, "decode", json!("00000000"), "borsh_rejection");
     }
@@ -341,6 +371,11 @@ fn zst_visitation_is_owned_by_borsh_not_schema_validation() {
         ("vec_unit", json!([null]), "01000000"),
         ("vec_empty", json!([{}]), "01000000"),
         ("vec_bytes0", json!([""]), "01000000"),
+        (
+            "vec_only",
+            json!([{"variant":"Only","value":null}]),
+            "0100000000",
+        ),
         ("vec_vec_unit", json!([[]]), "0100000000000000"),
         ("array_vec_unit_1", json!([[]]), "00000000"),
     ] {
@@ -404,6 +439,8 @@ fn bad_transport_never_counts_as_borsh_rejection() {
             "explicit_enum",
             json!({"variant":"Count","value":"1","extra":true}),
         ),
+        ("status", json!({"variant":"Done","value":"0"})),
+        ("shape", json!({"variant":"Circle","value":null})),
     ] {
         rejection(schema, "encode", value, "transport");
     }
@@ -419,7 +456,7 @@ fn bad_transport_never_counts_as_borsh_rejection() {
 fn registry_has_no_accidental_duplicate_ids() {
     let ids: std::collections::BTreeSet<_> = SCHEMA_IDS.iter().collect();
     assert_eq!(ids.len(), SCHEMA_IDS.len());
-    assert_eq!(SCHEMA_IDS.len(), 47);
+    assert_eq!(SCHEMA_IDS.len(), 52);
 }
 
 #[test]

@@ -1,6 +1,6 @@
 # @zorsh/effect
 
-Borsh serialization with native [Effect 4 schemas](https://effect.website/docs/v4/schema/introduction/) and inferred TypeScript types. This package is under development, private and unpublished. It supports primitives, structs, required tuples, fixed and variable arrays, tagged enums, native `Option` and `Result` values, maps and sets.
+Borsh serialization with native [Effect 4 schemas](https://effect.website/docs/v4/schema/introduction/) and inferred TypeScript types. This package is under development, private and unpublished. It supports primitives, structs, required tuples, fixed and variable arrays, Rust enums, native `Option` and `Result` values, maps and sets.
 
 ## Quick start
 
@@ -88,19 +88,48 @@ const Transfer = Schema.Struct({
 
 Native checks, brands, transformations and decoding/encoding service requirements carry through `Borsh.toCodec`. The binary layout follows the schema's encoded side.
 
-### Tagged enums
+### Enums
 
-Use a native tagged union and assign the exact discriminants from the Rust enum:
+Rust enums map to native Effect unions without a Borsh-specific call. As in Rust, each variant's discriminant is its declaration index:
 
-```ts
-const Status = Borsh.enumLayout(
-  Schema.TaggedUnion({ Pending: {}, Complete: { receiptId: Borsh.U64 } }),
-  { tag: "_tag", discriminants: { Pending: 0, Complete: 1 } },
-)
-const status = Schema.encodeSync(Borsh.toCodec(Status))({ _tag: "Pending" })
+```rust
+enum Shape {
+    Empty,
+    Square(u32),
+    Rect { width: u16, height: u16 },
+}
 ```
 
-The wire format is a u8 discriminant followed by the selected variant's fields. The tag field itself is omitted only for an annotated enum; a struct field declared as `_tag: Schema.String` is serialized normally. Enum member order and discriminant-map order do not select the bytes. The mapping must cover every encoded label exactly once, with unique integers from 0 to 255. Enums require 2 through 256 object variants with a required string-literal tag; custom string tag keys also work. Native `Schema.TaggedUnion` keeps its `.cases`, `.match` and `.check` methods.
+```ts
+const Shape = Schema.TaggedUnion({
+  Empty: {},
+  Square: { value: Borsh.U32 },
+  Rect: { width: Borsh.U16, height: Borsh.U16 },
+})
+const shape = Schema.encodeSync(Borsh.toCodec(Shape))({ _tag: "Square", value: 5 })
+```
+
+| Rust                                                  | Effect schema                                                   |
+| ----------------------------------------------------- | --------------------------------------------------------------- |
+| Unit variant `Empty`                                  | `Empty: {}`                                                     |
+| Tuple or newtype variant `Square(u32)`                | `Square: { value: Borsh.U32 }`; name the fields in order        |
+| Struct variant `Rect { width: u16, height: u16 }`     | `Rect: { width: Borsh.U16, height: Borsh.U16 }`                 |
+| C-like enum `enum Status { Pending, Done }`           | `Schema.Literals(["Pending", "Done"])` or `Schema.Enum(Status)` |
+| `#[borsh(use_discriminant = true)]` with `= N` values | `.pipe(Borsh.discriminants({ ... }))`                           |
+
+The wire format is a u8 discriminant followed by the selected variant's fields in encoded order, excluding `_tag`. Tuple and struct variants are identical on the wire, so the TypeScript field names are free. Values keep Effect's internally tagged shape, such as `{ _tag: "Square", value: 5 }`, so `.cases`, `.guards`, `.match` and `Match.tag` work unchanged. `Schema.Union` of `TaggedStruct` or `TaggedClass` members works the same way.
+
+Reordering variants changes the bytes, as it does in Rust. Keep TypeScript declaration order identical to the Rust enum. `Schema.TaggedUnion`, like `Schema.Enum` of a plain object, follows JavaScript key order, which puts integer-like names first; Rust variant and TS enum member names never have that form.
+
+C-like enums decode to the literal or TS enum value. `Schema.Literals` requires string literals. A string TS enum uses member order; a numeric TS enum must have values 0 through n - 1 in declaration order. Mixed string and numeric TS enums are unsupported.
+
+When the Rust enum uses `#[borsh(use_discriminant = true)]`, list every variant's discriminant once, with unique integers from 0 to 255:
+
+```ts
+const Flag = Schema.TaggedUnion({ Off: {}, On: {} }).pipe(Borsh.discriminants({ Off: 1, On: 5 }))
+```
+
+Without that attribute, borsh-rs writes declaration indices even if variants declare `= N` values. Keys are the encoded `_tag` values, literal values as strings (`Schema.Literals([1, 5])` takes `{ 1: 4, 5: 9 }`), or TS enum member names. Missing and unknown keys are type errors, including through brands, refinements and transformations of the enum schema; the map needs literal keys, so cast a dynamically built `Record<string, number>`. The map annotates the union itself, so a union rebuilt from its members needs it again. Non-string literal unions, such as `Schema.Literals([1, 5])`, and sparse numeric TS enums require this map. For unions keyed by another literal field, pass `{ tag: "kind" }` as the second argument; apply `Schema.toTaggedUnion("kind")` afterwards to keep its helpers. Enums have 1 through 256 variants. A dataless single-variant enum is zero-sized in Rust unless it has a `#[repr]`, which only affects vectors of it: without a map it is treated as zero-sized, and with a map as `#[repr(u8)]`. For `#[repr(u8)] enum E { Only }`, use `Borsh.discriminants({ Only: 0 })`. A `use_discriminant` single-variant enum without `#[repr]` stays zero-sized in Rust, so borsh-rs rejects vectors of it that this codec accepts. Other unions, including `Schema.NullOr`, are rejected at codec construction; use `Schema.Option` for nullable values.
 
 ### Options
 
@@ -142,7 +171,7 @@ Collections write a u32 count followed by entries sorted by encoded key. Keys an
 
 ## Complex example
 
-A fictional contract accepts mixed actions in one batch. Reuse the asset, recipient and transfer structs inside a native tagged enum:
+A fictional contract accepts mixed actions in one batch. Reuse the asset, recipient and transfer structs inside a native enum:
 
 ```ts
 const Asset = Schema.Struct({ contractId: Schema.String })
@@ -155,20 +184,17 @@ const Transfer = Schema.Struct({
   recipient: Recipient,
   amount: Borsh.U128,
 })
-const Action = Borsh.enumLayout(
-  Schema.TaggedUnion({
-    Transfer: { transfer: Transfer },
-    Call: {
-      contractId: Schema.String,
-      method: Schema.String,
-      args: Borsh.Bytes,
-      deposit: Borsh.U128,
-      gas: Borsh.U64,
-    },
-    Cancel: { nonce: Borsh.U64 },
-  }),
-  { tag: "_tag", discriminants: { Transfer: 0, Call: 1, Cancel: 2 } },
-)
+const Action = Schema.TaggedUnion({
+  Transfer: { transfer: Transfer },
+  Call: {
+    contractId: Schema.String,
+    method: Schema.String,
+    args: Borsh.Bytes,
+    deposit: Borsh.U128,
+    gas: Borsh.U64,
+  },
+  Cancel: { nonce: Borsh.U64 },
+})
 const Batch = Schema.Struct({
   nonce: Borsh.U64,
   actions: Schema.Array(Action),
@@ -202,7 +228,7 @@ const bytes = Schema.encodeSync(codec)(batch)
 const decoded = Schema.decodeSync(codec)(bytes)
 ```
 
-The inferred `Batch` type includes every nested field and narrows each action by `_tag`. Field order, integer widths and enum discriminants must match the actual Rust contract.
+The inferred `Batch` type includes every nested field and narrows each action by `_tag`. Field order, integer widths and enum variant order must match the actual Rust contract.
 
 ## Using with Effect
 
@@ -227,7 +253,7 @@ Decoded input must be consumed completely: truncated data and trailing bytes fai
 
 `Borsh.toCodec(schema, { maxBytes })` limits input and output bytes per operation, defaulting to **16 MiB**. Overrides must be positive safe integers; `fixedBytes` and `fixedArray` accept lengths from 0 through 2^32 - 1. Vector and collection counts are checked against remaining bytes before items are allocated. The cap bounds binary buffers, not the work or heap needed for zero-byte fixed arrays; native schema parsing and application validators or transformations can do their own work independently.
 
-Vectors of Rust zero-sized values, including empty tuples, empty structs and `fixedBytes(0)`, fail when visited, even for an empty array. An empty outer `Schema.Array(Schema.Array(Borsh.Unit))` succeeds because it visits no inner array. `Option.none()` also skips its inner value; `Option.some([])` visits and rejects an inner vector of unit. Fixed arrays may contain zero-sized items: `[(); 1]` uses no bytes, while `Vec<[(); 1]>` fails when visited. A zero-length fixed array skips its items, so `[Vec<()>; 0]` succeeds and `[Vec<()>; 1]` fails. Results also visit only their selected payload. Encoded struct keys and tuple positions must be required. Generic unions, single-variant enums, recursion and optional properties are unsupported.
+Vectors of Rust zero-sized values, including empty tuples, empty structs, `fixedBytes(0)` and enums with one dataless variant and default discriminants, fail when visited, even for an empty array. An empty outer `Schema.Array(Schema.Array(Borsh.Unit))` succeeds because it visits no inner array. `Option.none()` also skips its inner value; `Option.some([])` visits and rejects an inner vector of unit. Fixed arrays may contain zero-sized items: `[(); 1]` uses no bytes, while `Vec<[(); 1]>` fails when visited. A zero-length fixed array skips its items, so `[Vec<()>; 0]` succeeds and `[Vec<()>; 1]` fails. Results also visit only their selected payload. Encoded struct keys and tuple positions must be required. Non-enum unions, recursion and optional properties are unsupported.
 
 The package is ESM and uses standard browser APIs. Import `Borsh` from `@zorsh/effect`, or use `import * as Borsh from "@zorsh/effect/Borsh"`. Effect is a peer dependency (`^4.0.5`); ES2022 TypeScript projects may need `ESNext.Disposable` in `lib` for Effect declarations.
 

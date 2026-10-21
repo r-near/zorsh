@@ -172,10 +172,9 @@ it("preflights collection bytes before copying entries and preserves precise pay
 })
 
 it("composes map values with arrays, Options, Results, structs, enums and owned bytes", () => {
-  const action = Borsh.enumLayout(Schema.TaggedUnion({ Idle: {}, Data: { bytes: Borsh.Bytes } }), {
-    tag: "_tag",
-    discriminants: { Idle: 0, Data: 7 },
-  })
+  const action = Schema.TaggedUnion({ Idle: {}, Data: { bytes: Borsh.Bytes } }).pipe(
+    Borsh.discriminants({ Idle: 0, Data: 7 }),
+  )
   const schema = Schema.Array(
     Schema.ReadonlyMap(
       Schema.Boolean,

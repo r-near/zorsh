@@ -351,13 +351,10 @@ describe("unsupported encoded layouts and metadata", () => {
   })
 
   it("rejects ambiguous and future container layouts at construction", () => {
-    for (const schema of [
-      Schema.Union([Borsh.U8, Borsh.U16]),
-      Schema.Literal(1),
-      Schema.Unknown,
-      Schema.Null,
-      Schema.Undefined,
-    ])
+    expect(() => Borsh.toCodec(Schema.Union([Borsh.U8, Borsh.U16]))).toThrow(
+      /\$: Union has no Borsh layout/,
+    )
+    for (const schema of [Schema.Literal(1), Schema.Unknown, Schema.Null, Schema.Undefined])
       expect(() => Borsh.toCodec(schema)).toThrow(/\$: Unsupported encoded/)
     for (const schema of [Schema.optionalKey(Borsh.U8), Schema.optional(Borsh.U8)]) {
       expect(() => Borsh.toCodec(schema)).toThrow(/\$: Optional schemas need an explicit Borsh/)

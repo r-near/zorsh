@@ -19,12 +19,14 @@ function spec<A>(
   schema: Schema.Codec<A>,
   arbitrary: fc.Arbitrary<A>,
   transport: (value: A) => unknown,
+  name = id,
 ) {
   const codec = Borsh.toCodec(schema)
   const encode = Schema.encodeSync(codec)
   const decode = Schema.decodeSync(codec)
   return {
     id,
+    name,
     arbitrary: arbitrary.map((value) => ({ raw: encode(value), transport: transport(value) })),
     decode: (raw: Uint8Array) => {
       const value = decode(raw)
@@ -37,14 +39,37 @@ const option = <A>(arbitrary: fc.Arbitrary<A>) =>
 function optionTransport<A>(value: Option.Option<A>, inner: (value: A) => unknown): unknown {
   return Option.isNone(value) ? { tag: "None" } : { tag: "Some", value: inner(value.value) }
 }
-const ExplicitEnum = Borsh.enumLayout(
-  Schema.TaggedUnion({
-    Idle: {},
-    Count: { value: Borsh.U16 },
-    Named: { label: Schema.String, enabled: Schema.Boolean },
-  }),
-  { tag: "_tag", discriminants: { Idle: 3, Count: 17, Named: 250 } },
-)
+const ExplicitEnum = Schema.TaggedUnion({
+  Idle: {},
+  Count: { value: Borsh.U16 },
+  Named: { label: Schema.String, enabled: Schema.Boolean },
+}).pipe(Borsh.discriminants({ Idle: 3, Count: 17, Named: 250 }))
+const Status = Schema.Literals(["Pending", "Active", "Done"])
+enum StatusEnum {
+  Pending = "pending",
+  Active = "active",
+  Done = "done",
+}
+const statusNames = { pending: "Pending", active: "Active", done: "Done" } as const
+enum NumericStatus {
+  Pending,
+  Active,
+  Done,
+}
+enum SparseStatus {
+  Pending = 1,
+  Done = 5,
+}
+const sparseStatuses = [
+  Schema.Literals(["Pending", "Done"]).pipe(Borsh.discriminants({ Pending: 1, Done: 5 })),
+  Schema.Enum(SparseStatus).pipe(Borsh.discriminants({ Pending: 1, Done: 5 })),
+] as const
+const Shape = Schema.TaggedUnion({
+  Empty: {},
+  Square: { value: Borsh.U32 },
+  Rect: { width: Borsh.U16, height: Borsh.U16 },
+})
+const u16 = fc.integer({ min: 0, max: 65535 })
 const u128 = fc.bigInt({ min: 0n, max: (1n << 128n) - 1n })
 const entries = [
   spec(
@@ -97,6 +122,59 @@ const entries = [
           : value._tag === "Count"
             ? String(value.value)
             : { label: value.label, enabled: value.enabled },
+    }),
+  ),
+  spec(
+    "status",
+    Status,
+    fc.constantFrom(...Status.literals),
+    (value) => ({ variant: value, value: null }),
+    "status Schema.Literals",
+  ),
+  spec(
+    "status",
+    Schema.Enum(StatusEnum),
+    fc.constantFrom(...Object.values(StatusEnum)),
+    (value) => ({ variant: statusNames[value], value: null }),
+    "status Schema.Enum",
+  ),
+  spec(
+    "status",
+    Schema.Enum(NumericStatus),
+    fc.constantFrom(NumericStatus.Pending, NumericStatus.Active, NumericStatus.Done),
+    (value) => ({ variant: NumericStatus[value], value: null }),
+    "status numeric Schema.Enum",
+  ),
+  spec(
+    "sparse_status",
+    sparseStatuses[0],
+    fc.constantFrom("Pending" as const, "Done" as const),
+    (value) => ({ variant: value, value: null }),
+    "sparse_status Schema.Literals",
+  ),
+  spec(
+    "sparse_status",
+    sparseStatuses[1],
+    fc.constantFrom(SparseStatus.Pending, SparseStatus.Done),
+    (value) => ({ variant: SparseStatus[value], value: null }),
+    "sparse_status Schema.Enum",
+  ),
+  spec(
+    "shape",
+    Shape,
+    fc.oneof(
+      fc.constant({ _tag: "Empty" } as const),
+      fc.record({ _tag: fc.constant("Square" as const), value: fc.nat({ max: 0xffff_ffff }) }),
+      fc.record({ _tag: fc.constant("Rect" as const), width: u16, height: u16 }),
+    ),
+    (value) => ({
+      variant: value._tag,
+      value:
+        value._tag === "Empty"
+          ? null
+          : value._tag === "Square"
+            ? String(value.value)
+            : { width: String(value.width), height: String(value.height) },
     }),
   ),
   spec("option_u128", Schema.Option(Borsh.U128), option(u128), (value) =>
@@ -158,7 +236,7 @@ const entries = [
 ]
 
 for (const entry of entries)
-  describe(`borsh-rs ${entry.id}`, () => {
+  describe(`borsh-rs ${entry.name}`, () => {
     it("generated values agree, reject prefixes and consume the whole frame", async () => {
       await assertProperty(
         entry.arbitrary,
@@ -237,6 +315,18 @@ it("matches Rust zero-sized visitation and malicious vector counts", async () =>
     ["empty", Schema.Struct({}), [{}], [new Uint8Array(), Uint8Array.of(0)]],
     ["tuple_unit", Schema.Tuple([Borsh.Unit]), [[[]]], [new Uint8Array(), Uint8Array.of(0)]],
     ["vec_unit", Schema.Array(Borsh.Unit), [[], [[]]], [Uint8Array.of(0, 0, 0, 0)]],
+    [
+      "only",
+      Schema.Literals(["Only"]),
+      ["Only"],
+      [Uint8Array.of(0), Uint8Array.of(1), new Uint8Array()],
+    ],
+    [
+      "vec_only",
+      Schema.Array(Schema.TaggedUnion({ Only: {} })),
+      [[], [{ _tag: "Only" }]],
+      [Uint8Array.of(0, 0, 0, 0), Uint8Array.of(1, 0, 0, 0, 0)],
+    ],
     ["vec_empty", Schema.Array(Schema.Struct({})), [[], [{}]], [Uint8Array.of(0, 0, 0, 0)]],
     [
       "vec_bytes0",
@@ -261,6 +351,9 @@ it("matches Rust zero-sized visitation and malicious vector counts", async () =>
     for (const value of values) {
       let transport: unknown = value
       if (id === "tuple_unit" || id === "array_unit_1") transport = [null]
+      if (id === "only") transport = { variant: "Only", value: null }
+      if (id === "vec_only" && Array.isArray(value))
+        transport = value.map(() => ({ variant: "Only", value: null }))
       if (id === "vec_unit" || id === "vec_bytes0") {
         assert.ok(Array.isArray(value))
         transport = value.map(() => (id === "vec_unit" ? null : ""))
@@ -280,6 +373,13 @@ it("matches Rust zero-sized visitation and malicious vector counts", async () =>
 
 it("checks every enum discriminant and Option flag against Rust", async () => {
   const enumCodec = Borsh.toCodec(ExplicitEnum)
+  const statusCodecs = [
+    Borsh.toCodec(Status),
+    Borsh.toCodec(Schema.Enum(StatusEnum)),
+    Borsh.toCodec(Schema.Enum(NumericStatus)),
+  ]
+  const sparseCodecs = sparseStatuses.map((schema) => Borsh.toCodec(schema))
+  const shapeCodec = Borsh.toCodec(Shape)
   const optionCodec = Borsh.toCodec(Schema.Option(Borsh.U128))
   const resultCodec = Borsh.toCodec(Schema.Result(Borsh.U16, Schema.String))
   for (let tag = 0; tag < 256; tag++) {
@@ -290,8 +390,17 @@ it("checks every enum discriminant and Option flag against Rust", async () => {
           ? Uint8Array.of(tag, 1, 0, 0, 0, 120, 1)
           : Uint8Array.of(tag)
     const optionRaw = tag === 1 ? Uint8Array.of(tag, ...new Uint8Array(16)) : Uint8Array.of(tag)
+    const shapeRaw =
+      tag === 1
+        ? Uint8Array.of(tag, 5, 0, 0, 0)
+        : tag === 2
+          ? Uint8Array.of(tag, 1, 2, 3, 4)
+          : Uint8Array.of(tag)
     for (const [id, codec, raw] of [
       ["explicit_enum", enumCodec, enumRaw],
+      ...statusCodecs.map((codec) => ["status", codec, Uint8Array.of(tag)] as const),
+      ...sparseCodecs.map((codec) => ["sparse_status", codec, Uint8Array.of(tag)] as const),
+      ["shape", shapeCodec, shapeRaw],
       ["option_u128", optionCodec, optionRaw],
       [
         "result_u16_string",

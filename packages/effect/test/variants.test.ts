@@ -11,8 +11,14 @@ const variants = Schema.TaggedUnion({
   Named: { label: Schema.String, enabled: Schema.Boolean },
 })
 const discriminants = { Idle: 3, Count: 17, Named: 250 }
-const schema = Borsh.enumLayout(variants, { tag: "_tag", discriminants })
+const schema = variants.pipe(Borsh.discriminants(discriminants))
 const codec = Borsh.toCodec(schema)
+/** Bypass the exhaustive map type to reach runtime validation. */
+const unchecked = <S extends Schema.Top>(
+  schema: S,
+  map: Readonly<Record<string, number>>,
+  tag?: string,
+): S["Rebuild"] => Borsh.discriminants(map, { tag })(schema as never)
 
 it("retains native union helpers, checks and discriminant narrowing", () => {
   expectTypeOf(schema).toEqualTypeOf<typeof variants>()
@@ -59,10 +65,9 @@ it("uses exact maps independently of union order, tag key and unsafe labels", ()
     Schema.Struct({ kind: Schema.Literal("__proto__") }),
     Schema.Struct({ kind: Schema.Literal("2") }),
   ])
-  const mapped = Borsh.enumLayout(custom, {
-    tag: "kind",
-    discriminants: { "2": 255, ["__proto__"]: 0, constructor: 7 },
-  })
+  const mapped = custom.pipe(
+    Borsh.discriminants({ "2": 255, ["__proto__"]: 0, constructor: 7 }, { tag: "kind" }),
+  )
   const c = Borsh.toCodec(mapped)
   for (const [value, bytes] of [
     [{ kind: "__proto__" }, [0]],
@@ -72,63 +77,289 @@ it("uses exact maps independently of union order, tag key and unsafe labels", ()
     expect(Schema.encodeSync(c)(value)).toEqual(Uint8Array.from(bytes))
     expect(Schema.decodeSync(c)(Uint8Array.from(bytes))).toEqual(value)
   }
-  const reordered = Borsh.enumLayout(mapped, {
-    tag: "kind",
-    discriminants: { constructor: 7, ["__proto__"]: 0, "2": 255 },
-  })
+  const reordered = mapped.pipe(
+    Borsh.discriminants({ constructor: 7, ["__proto__"]: 0, "2": 255 }, { tag: "kind" }),
+  )
   expect(Schema.encodeSync(Borsh.toCodec(reordered))({ kind: "2" })).toEqual(Uint8Array.of(255))
   const copied = { ...discriminants }
-  const frozen = Borsh.enumLayout(variants, { tag: "_tag", discriminants: copied })
+  const assign = Borsh.discriminants(copied)
   copied.Idle = 9
+  const frozen = variants.pipe(assign)
   expect(Schema.encodeSync(Borsh.toCodec(frozen))({ _tag: "Idle" })).toEqual(Uint8Array.of(3))
   const metadata = Schema.toEncoded(frozen).ast.annotations?.[key]
   expect(Object.isFrozen(metadata)).toBe(true)
   expect(metadata?.kind === "enum" && Object.isFrozen(metadata.discriminants)).toBe(true)
 })
 
+class Created extends Schema.TaggedClass<Created, { readonly brand: unique symbol }>()("Created", {
+  id: Borsh.U8,
+}) {}
+class Closed extends Schema.TaggedClass<Closed, { readonly brand: unique symbol }>()(
+  "Closed",
+  {},
+) {}
+enum Numeric {
+  Up,
+  Down,
+}
+enum Text {
+  Pending = "pending",
+  Done = "done",
+}
+
+it("derives Rust discriminants from native declaration order", () => {
+  for (const [union, value, raw] of [
+    [variants, { _tag: "Named", label: "x", enabled: true }, [2, 1, 0, 0, 0, 120, 1]],
+    [
+      Schema.Union([Schema.TaggedStruct("B", {}), Schema.TaggedStruct("A", { v: Borsh.U8 })]),
+      { _tag: "A", v: 9 },
+      [1, 9],
+    ],
+    [Schema.Literals(["Pending", "Done"]), "Done", [1]],
+    [Schema.Enum(Text), Text.Done, [1]],
+    [Schema.Enum(Numeric), Numeric.Down, [1]],
+  ] as const) {
+    const c = Borsh.toCodec(union as Schema.Codec<unknown>)
+    expect(Schema.encodeSync(c)(value)).toEqual(Uint8Array.from(raw))
+    expect(Schema.decodeSync(c)(Uint8Array.from(raw))).toEqual(value)
+  }
+  const swapped = Borsh.toCodec(Schema.Literals(["Done", "Pending"]))
+  expect(Schema.encodeSync(swapped)("Done")).toEqual(Uint8Array.of(0))
+  const classes = Borsh.toCodec(Schema.Union([Created, Closed]))
+  const created = Schema.decodeSync(classes)(Uint8Array.of(0, 7))
+  expect(created).toBeInstanceOf(Created)
+  expect(created).toEqual(new Created({ id: 7 }))
+  expect(Schema.encodeSync(classes)(new Closed({}))).toEqual(Uint8Array.of(1))
+})
+
+it("checks every tag byte for value enums and rejects unknown values", () => {
+  const literals = Borsh.toCodec(Schema.Literals(["A", "B", "C"]))
+  const numeric = Borsh.toCodec(Schema.Enum(Numeric))
+  for (let tag = 0; tag < 256; tag++) {
+    if (tag < 3) expect(Schema.decodeSync(literals)(Uint8Array.of(tag))).toBe("ABC"[tag])
+    else expect(() => Schema.decodeSync(literals)(Uint8Array.of(tag))).toThrow(/Invalid enum tag/)
+    if (tag < 2) expect(Schema.decodeSync(numeric)(Uint8Array.of(tag))).toBe(tag)
+    else expect(() => Schema.decodeSync(numeric)(Uint8Array.of(tag))).toThrow(/Invalid enum tag/)
+  }
+  expect(() => Schema.decodeSync(literals)(new Uint8Array())).toThrow(/Truncated/)
+  expect(() => Schema.decodeSync(literals)(Uint8Array.of(0, 0))).toThrow(/Trailing/)
+  const layout = compile(Schema.Literals(["A", "B"]).ast)
+  for (const value of ["C", 0, null, Numeric.Up])
+    expect(() => layout.write(new Writer(4), value)).toThrow(/Invalid enum value/)
+  expect(layout.minBytes).toBe(1)
+})
+
+it("supports single-variant enums of every native form", () => {
+  for (const [single, value, raw] of [
+    [Schema.TaggedUnion({ Only: { v: Borsh.U8 } }), { _tag: "Only", v: 4 }, [0, 4]],
+    [Schema.TaggedUnion({ Unit: {} }), { _tag: "Unit" }, [0]],
+    [Schema.Literals(["Only"]), "Only", [0]],
+    [Schema.Enum({ Only: 0 }), 0, [0]],
+  ] as const) {
+    const c = Borsh.toCodec(single as Schema.Codec<unknown>)
+    expect(Schema.encodeSync(c)(value)).toEqual(Uint8Array.from(raw))
+    expect(Schema.decodeSync(c)(Uint8Array.from(raw))).toEqual(value)
+    expect(() => Schema.decodeSync(c)(Uint8Array.of(1, ...raw.slice(1)))).toThrow(
+      /Invalid enum tag 1/,
+    )
+  }
+})
+
+it("treats single dataless default enums as Rust zero-sized types", () => {
+  for (const single of [
+    Schema.Literals(["Only"]),
+    Schema.Enum({ Only: 0 }),
+    Schema.TaggedUnion({ Only: {} }),
+    Schema.TaggedUnion({ Only: { value: Borsh.Unit } }),
+    Schema.Struct({ only: Schema.Literals(["Only"]) }),
+  ]) {
+    const vector = Borsh.toCodec(Schema.Array(single as Schema.Codec<unknown>))
+    expect(() => Schema.encodeSync(vector)([])).toThrow(/zero-sized/)
+    expect(() => Schema.decodeSync(vector)(Uint8Array.of(0, 0, 0, 0))).toThrow(/zero-sized/)
+  }
+  for (const sized of [
+    Schema.Literals(["Only"]).pipe(Borsh.discriminants({ Only: 3 })),
+    Schema.TaggedUnion({ Only: { value: Borsh.U8 } }),
+    Schema.Literals(["A", "B"]),
+  ]) {
+    const vector = Borsh.toCodec(Schema.Array(sized as Schema.Codec<unknown>))
+    expect(Schema.decodeSync(vector)(Uint8Array.of(0, 0, 0, 0))).toEqual([])
+  }
+  const repr = Borsh.toCodec(
+    Schema.Array(Schema.Literals(["Only"]).pipe(Borsh.discriminants({ Only: 3 }))),
+  )
+  expect(Schema.encodeSync(repr)(["Only"])).toEqual(Uint8Array.of(1, 0, 0, 0, 3))
+})
+
+it("requires explicit discriminants for numeric and non-string enums", () => {
+  enum Sparse {
+    A = 1,
+    B = 5,
+  }
+  enum Swapped {
+    A = 1,
+    B = 0,
+  }
+  for (const enums of [Sparse, Swapped])
+    expect(() => Borsh.toCodec(Schema.Enum(enums))).toThrow(
+      /\$: Numeric enum values must be 0..n-1 in declaration order; pass the Rust wire discriminants \(declaration indices unless #\[borsh\(use_discriminant = true\)\]\) to Borsh.discriminants/,
+    )
+  const sparse = Borsh.toCodec(Schema.Enum(Sparse).pipe(Borsh.discriminants({ A: 1, B: 5 })))
+  expect(Schema.encodeSync(sparse)(Sparse.B)).toEqual(Uint8Array.of(5))
+  expect(Schema.decodeSync(sparse)(Uint8Array.of(1))).toBe(Sparse.A)
+  expect(() => Schema.decodeSync(sparse)(Uint8Array.of(0))).toThrow(/Invalid enum tag 0/)
+  const text = Borsh.toCodec(Schema.Enum(Text).pipe(Borsh.discriminants({ Pending: 7, Done: 2 })))
+  expect(Schema.encodeSync(text)(Text.Pending)).toEqual(Uint8Array.of(7))
+  const branded = Schema.Enum(Sparse).pipe(
+    Schema.brand("Sparse"),
+    Borsh.discriminants({ A: 1, B: 5 }),
+  )
+  expect(Schema.encodeSync(Borsh.toCodec(branded))(Sparse.B as typeof branded.Type)).toEqual(
+    Uint8Array.of(5),
+  )
+  const named = Schema.Enum(Text).pipe(
+    Schema.decodeTo(
+      Schema.String,
+      SchemaTransformation.transform({
+        decode: (v) => v.toUpperCase(),
+        encode: (v) => (v === "DONE" ? Text.Done : Text.Pending),
+      }),
+    ),
+    Schema.brand("Named"),
+    Borsh.discriminants({ Pending: 7, Done: 2 }),
+  )
+  expect(Schema.decodeSync(Borsh.toCodec(named))(Uint8Array.of(2))).toBe("DONE")
+  for (const wrapped of [
+    Schema.Enum(Sparse).pipe(Schema.refine((v): v is Sparse => v !== undefined)),
+    Schema.toEncoded(Schema.Enum(Sparse)),
+    Schema.flip(Schema.Enum(Sparse)),
+  ])
+    expect(
+      Schema.encodeSync(Borsh.toCodec(wrapped.pipe(Borsh.discriminants({ A: 1, B: 5 }))))(Sparse.B),
+    ).toEqual(Uint8Array.of(5))
+  const typed = Schema.toType(
+    Schema.String.pipe(
+      Schema.decodeTo(
+        Schema.Enum(Sparse),
+        SchemaTransformation.transform({ decode: () => Sparse.B, encode: String }),
+      ),
+    ),
+  )
+  for (const wrapped of [typed, Schema.flip(typed)])
+    expect(
+      Schema.encodeSync(Borsh.toCodec(wrapped.pipe(Borsh.discriminants({ A: 1, B: 5 }))))(Sparse.B),
+    ).toEqual(Uint8Array.of(5))
+  const integerKeys = Schema.Enum({ 0: "zero", 1: "one" } as const)
+  expect(
+    Schema.encodeSync(Borsh.toCodec(integerKeys.pipe(Borsh.discriminants({ 0: 1, 1: 5 }))))("one"),
+  ).toEqual(Uint8Array.of(5))
+  enum Mixed {
+    A = 0,
+    B = "b",
+  }
+  expect(() => Borsh.toCodec(Schema.Enum(Mixed))).toThrow(
+    /Mixed string and numeric enums are unsupported/,
+  )
+  expect(() => Schema.Enum(Mixed).pipe(Borsh.discriminants({ A: 0, B: 1 }))).toThrow(/Mixed/)
+  expect(() => Borsh.toCodec(Schema.Enum({ A: 0, B: 0 }))).toThrow(
+    /Duplicate enum values have no Borsh layout/,
+  )
+  for (const literals of [
+    Schema.Literals([1, 5]),
+    Schema.Literals(["A", true]),
+    Schema.Literals([2n]),
+  ])
+    expect(() => Borsh.toCodec(literals)).toThrow(
+      /Non-string literal enums have no Rust variant order; pass the Rust wire discriminants/,
+    )
+  const numbers = Borsh.toCodec(Schema.Literals([1, 5]).pipe(Borsh.discriminants({ 1: 4, 5: 9 })))
+  expect(Schema.encodeSync(numbers)(5)).toEqual(Uint8Array.of(9))
+  expect(Schema.decodeSync(numbers)(Uint8Array.of(4))).toBe(1)
+  const mixed = Schema.Literals(["A", true, 2n]).pipe(Borsh.discriminants({ A: 0, true: 1, 2: 2 }))
+  expect(Schema.decodeSync(Borsh.toCodec(mixed))(Uint8Array.of(2))).toBe(2n)
+})
+
+it("validates explicit maps eagerly and keeps tag keys for object variants", () => {
+  expect(() => Borsh.discriminants({ A: 0, B: 0 })).toThrow(/unique integers/)
+  const assign = Borsh.discriminants({ Pending: 0, Done: 1 })
+  expect(() => unchecked(Schema.Literals(["Pending"]), { Pending: 0, Done: 1 })).toThrow(
+    /Unknown enum discriminants Done/,
+  )
+  expect(Schema.Literals(["Done", "Pending"]).pipe(assign)).toBeDefined()
+  for (const [value, map] of [
+    [Schema.Literals(["A"]), { A: 0 }],
+    [Schema.Enum(Text), { Pending: 0, Done: 1 }],
+  ] as const)
+    expect(() => unchecked(value, map, "kind")).toThrow(/Only object enum variants have a tag key/)
+  const kinds = Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("A") }),
+    Schema.Struct({ kind: Schema.Literal("B"), v: Borsh.U8 }),
+  ])
+  expect(() => Borsh.toCodec(kinds)).toThrow(/Enum tag "_tag"/)
+  const tagged = kinds.pipe(
+    Borsh.discriminants({ A: 0, B: 1 }, { tag: "kind" }),
+    Schema.toTaggedUnion("kind"),
+  )
+  expect(tagged.match({ kind: "B", v: 1 }, { A: () => 0, B: (b) => b.v })).toBe(1)
+  expect(Schema.encodeSync(Borsh.toCodec(tagged))({ kind: "B", v: 3 })).toEqual(Uint8Array.of(1, 3))
+})
+
+it("treats variant reordering as a wire change, as in Rust", () => {
+  const before = Borsh.toCodec(Schema.TaggedUnion({ Idle: {}, Count: { value: Borsh.U8 } }))
+  const after = Borsh.toCodec(Schema.TaggedUnion({ Count: { value: Borsh.U8 }, Idle: {} }))
+  expect(Schema.encodeSync(before)({ _tag: "Idle" })).toEqual(Uint8Array.of(0))
+  expect(Schema.encodeSync(after)({ _tag: "Idle" })).toEqual(Uint8Array.of(1))
+  const pinned = Schema.TaggedUnion({ Count: { value: Borsh.U8 }, Idle: {} }).pipe(
+    Borsh.discriminants({ Idle: 0, Count: 1 }),
+  )
+  expect(Schema.encodeSync(Borsh.toCodec(pinned))({ _tag: "Idle" })).toEqual(Uint8Array.of(0))
+})
+
 it("rejects malformed enums and descriptors", () => {
   for (const invalidMap of [
-    { Idle: 3, Count: 17 },
-    { ...discriminants, Extra: 9 },
     { ...discriminants, Count: 3 },
     { ...discriminants, Count: -1 },
     { ...discriminants, Count: 256 },
     { ...discriminants, Count: 1.5 },
     { ...discriminants, Count: NaN },
+    { ...discriminants, Count: "17" },
   ])
+    expect(() => Borsh.discriminants(invalidMap as never)).toThrow(
+      /discriminants must be unique integers from 0 to 255/,
+    )
+  for (const [map, message] of [
+    [{ Idle: 3, Count: 17 }, /Missing enum discriminant for Named/],
+    [{ ...discriminants, Extra: 9, Other: 8 }, /Unknown enum discriminants Extra, Other/],
+  ] as const) {
+    expect(() => unchecked(variants, map)).toThrow(message)
     expect(() =>
-      Borsh.toCodec(Borsh.enumLayout(variants, { tag: "_tag", discriminants: invalidMap })),
-    ).toThrow(/enum/i)
+      Borsh.toCodec(
+        variants.annotate({ [key]: { version: 1, kind: "enum", tag: "_tag", discriminants: map } }),
+      ),
+    ).toThrow(message)
+  }
+  expect(() => Borsh.discriminants(discriminants, { tag: 7 as never })).toThrow(/Invalid Borsh/)
   for (const raw of [
     { version: 1, kind: "enum" },
     { version: 1, kind: "enum", tag: "_tag", discriminants: [] },
     { version: 1, kind: "enum", tag: "_tag", discriminants: { Idle: "3" } },
   ])
     expect(() => Borsh.toCodec(variants.annotate({ [key]: raw } as never))).toThrow(/Borsh/)
-  expect(() => Borsh.toCodec(variants)).toThrow(/Unsupported encoded schema Union/)
-  expect(() => Borsh.toCodec(Schema.NullOr(Borsh.U8))).toThrow(/Union/)
+  expect(() => unchecked(Borsh.Bytes, { Idle: 0 })).toThrow(/Enum layout requires/)
   expect(() =>
     Borsh.toCodec(
       Borsh.Bytes.annotate({ [key]: { version: 1, kind: "enum", tag: "_tag", discriminants } }),
     ),
-  ).toThrow(/Enum layout/)
+  ).toThrow(/Enum layout requires a tagged union, literal union or Schema.Enum/)
 })
 
 it("keeps enum metadata fixed when options have extra structural keys", () => {
   for (const version of [1, 99]) {
-    const options = {
-      tag: "_tag",
-      discriminants,
-      version,
-      kind: "integer",
-      bits: 8,
-      signed: false,
-      unrelated: true,
-    }
-    expect(() => Borsh.toCodec(Borsh.enumLayout(Schema.Finite, options))).toThrow(
-      /Enum layout requires a union of 2..256 object variants/,
+    const options = { tag: "_tag", version, kind: "integer", bits: 8, signed: false } as const
+    expect(() => Borsh.discriminants(discriminants, options)(Schema.Finite as never)).toThrow(
+      /Enum layout requires/,
     )
-    const mapped = Borsh.enumLayout(variants, options)
+    const mapped = variants.pipe(Borsh.discriminants(discriminants, options))
     expect(Schema.toEncoded(mapped).ast.annotations?.[key]).toEqual({
       version: 1,
       kind: "enum",
@@ -141,25 +372,15 @@ it("keeps enum metadata fixed when options have extra structural keys", () => {
   }
 })
 
-it("rejects a single enum variant independently of map coverage", () => {
-  expect(() =>
-    Borsh.toCodec(
-      Borsh.enumLayout(Schema.TaggedUnion({ Idle: {} }), {
-        tag: "_tag",
-        discriminants: { Idle: 0 },
-      }),
-    ),
-  ).toThrow(/Enum layout requires a union of 2..256 object variants/)
-})
-
 it("rejects duplicate enum labels independently of map coverage", () => {
   const duplicate = Schema.Union([
     Schema.TaggedStruct("Idle", { value: Borsh.U8 }),
     Schema.TaggedStruct("Idle", {}),
   ])
-  expect(() =>
-    Borsh.toCodec(Borsh.enumLayout(duplicate, { tag: "_tag", discriminants: { Idle: 0 } })),
-  ).toThrow(/Duplicate enum label Idle/)
+  expect(() => Borsh.toCodec(duplicate)).toThrow(/Duplicate enum label Idle/)
+  expect(() => unchecked(duplicate, { Idle: 0 })).toThrow(/Duplicate enum label Idle/)
+  for (const literals of [Schema.Literals(["A", "A"]), Schema.Literals([1, "1"])])
+    expect(() => unchecked(literals, { A: 0, "1": 1 })).toThrow(/Duplicate enum label/)
 })
 
 it("rejects optional enum tags independently of map coverage", () => {
@@ -167,40 +388,56 @@ it("rejects optional enum tags independently of map coverage", () => {
     Schema.Struct({ _tag: Schema.optionalKey(Schema.Literal("Count")) }),
     Schema.TaggedStruct("Idle", {}),
   ])
-  expect(() =>
-    Borsh.toCodec(
-      Borsh.enumLayout(optional, { tag: "_tag", discriminants: { Count: 1, Idle: 0 } }),
-    ),
-  ).toThrow(/Enum tag must be a required string literal/)
+  expect(() => Borsh.toCodec(optional)).toThrow(/Enum tag "_tag" must be a required string literal/)
+  expect(() => unchecked(optional, { Count: 1, Idle: 0 })).toThrow(
+    /Enum tag "_tag" must be a required string literal/,
+  )
 })
 
-it("requires unannotated, required object enum members", () => {
+it("requires unannotated, required enum members and rejects mixed unions", () => {
   for (const member of [
-    Schema.String,
     Schema.optionalKey(Schema.TaggedStruct("Count", {})),
     Schema.TaggedStruct("Count", {}).annotate({
       [key]: { version: 1, kind: "fixedBytes", length: 0 },
     }),
   ]) {
     const invalid = Schema.Union([member, Schema.TaggedStruct("Idle", {})])
-    expect(() =>
-      Borsh.toCodec(
-        Borsh.enumLayout(invalid, { tag: "_tag", discriminants: { Count: 1, Idle: 0 } }),
-      ),
-    ).toThrow(/Enum variants must be required objects without layout annotations/)
+    expect(() => Borsh.toCodec(invalid)).toThrow(
+      /Enum variants must be required and have no layout annotations/,
+    )
   }
+  const annotated = Schema.Literal("A").annotate({
+    [key]: { version: 1, kind: "fixedBytes", length: 0 },
+  })
+  expect(() => Borsh.toCodec(Schema.Union([annotated, Schema.Literal("B")]))).toThrow(
+    /Enum variants must be required/,
+  )
+  const mixed = Schema.Union([Schema.String, Schema.TaggedStruct("Idle", {})])
+  expect(() => unchecked(mixed, { Idle: 0 })).toThrow(/Enum layout requires/)
+  for (const union of [
+    mixed,
+    Schema.NullOr(Borsh.U8),
+    Schema.UndefinedOr(Borsh.U8),
+    Schema.Union([Schema.Literal("A"), Schema.TaggedStruct("B", {})]),
+  ])
+    expect(() => Borsh.toCodec(union)).toThrow(
+      /\$: Union has no Borsh layout; use Schema.Option for nullable values, or a tagged union, Schema.Literals or Schema.Enum for Rust enums/,
+    )
+  expect(() => Borsh.toCodec(Schema.Struct({ value: Schema.NullOr(Borsh.U8) }))).toThrow(
+    /\$\["value"\]: Union has no Borsh layout/,
+  )
 })
 
-it("requires a single string literal enum tag", () => {
+it("requires a single string literal enum tag and points to custom tag keys", () => {
   for (const member of [
     Schema.Struct({}),
     Schema.Struct({ _tag: Schema.String }),
     Schema.Struct({ _tag: Schema.Literal(7) }),
   ]) {
     const invalid = Schema.Union([member, Schema.TaggedStruct("Idle", {})])
-    expect(() =>
-      Borsh.toCodec(Borsh.enumLayout(invalid, { tag: "_tag", discriminants: { "7": 1, Idle: 0 } })),
-    ).toThrow(/Enum tag must be a required string literal/)
+    expect(() => unchecked(invalid, { "7": 1, Idle: 0 })).toThrow(
+      /Enum tag "_tag" must be a required string literal; set another key with Borsh.discriminants\(map, \{ tag \}\)/,
+    )
   }
 })
 
@@ -226,9 +463,9 @@ it("finds enum metadata in final checks and nested groups and rejects conflicts"
     check.and(Schema.makeFilter(() => true)).and(Schema.makeFilter(() => true)),
   )
   expect(Schema.encodeSync(Borsh.toCodec(checked))({ _tag: "Idle" })).toEqual(Uint8Array.of(3))
-  expect(() =>
-    Borsh.enumLayout(checked, { tag: "_tag", discriminants: { ...discriminants, Idle: 4 } }),
-  ).toThrow(/Conflicting/)
+  expect(() => checked.pipe(Borsh.discriminants({ ...discriminants, Idle: 4 }))).toThrow(
+    /Conflicting/,
+  )
   expect(() =>
     Borsh.toCodec(
       schema.check(
@@ -245,10 +482,9 @@ it("does not force visible suspensions while adding enum metadata", () => {
     return Borsh.U8
   })
   expect(() =>
-    Borsh.enumLayout(Schema.TaggedUnion({ Idle: {}, Count: { value: suspended } }), {
-      tag: "_tag",
-      discriminants: { Idle: 0, Count: 1 },
-    }),
+    Schema.TaggedUnion({ Idle: {}, Count: { value: suspended } }).pipe(
+      Borsh.discriminants({ Idle: 0, Count: 1 }),
+    ),
   ).toThrow(/Suspend/)
   expect(forced).toBe(false)
 })
@@ -317,10 +553,7 @@ it("keeps encoded payload transforms, brands and directional services", () => {
       }),
     ),
   )
-  const action = Borsh.enumLayout(
-    Schema.TaggedUnion({ Idle: {}, Set: { value: Schema.Option(text) } }),
-    { tag: "_tag", discriminants: { Idle: 0, Set: 1 } },
-  )
+  const action = Schema.TaggedUnion({ Idle: {}, Set: { value: Schema.Option(text) } })
   const c = Borsh.toCodec(action)
   expectTypeOf(c).toEqualTypeOf<Schema.Codec<typeof action.Type, Uint8Array, Decode, Encode>>()
   const raw = Uint8Array.of(1, 1, 7)
@@ -347,7 +580,9 @@ it("does not share struct layouts that omit an enum tag", () => {
     { action: schema, plain: schema.cases.Count },
     { plain: schema.cases.Count, action: schema },
   ])
-    expect(() => Borsh.toCodec(Schema.Struct(fields))).toThrow(/Unsupported encoded schema Literal/)
+    expect(() => Borsh.toCodec(Schema.Struct(fields))).toThrow(
+      /Unsupported encoded schema Literal; use Schema.Literals or a tagged union for a Rust enum/,
+    )
   const shared = Borsh.toCodec(Schema.Struct({ first: schema, second: schema }))
   expect(() => Schema.decodeSync(shared)(Uint8Array.of(3, 250, 0, 0, 0, 0, 2))).toThrow(
     /\$\["second"\]\["enabled"\]/,
@@ -383,13 +618,13 @@ it("maps literal wire tags before native application tag transformations", () =>
     Schema.Struct({ kind: tag, value: Borsh.U8 }),
     Schema.Struct({ kind: Schema.Literal("Idle") }),
   ])
-  const mapped = Borsh.enumLayout(union, { tag: "kind", discriminants: { WireCount: 17, Idle: 3 } })
+  const mapped = union.pipe(Borsh.discriminants({ WireCount: 17, Idle: 3 }, { tag: "kind" }))
   const c = Borsh.toCodec(mapped)
   expect(Schema.encodeSync(c)({ kind: "Count", value: 7 })).toEqual(Uint8Array.of(17, 7))
   expect(Schema.decodeSync(c)(Uint8Array.of(17, 7))).toEqual({ kind: "Count", value: 7 })
-  expect(() =>
-    Borsh.toCodec(Borsh.enumLayout(union, { tag: "kind", discriminants: { Count: 17, Idle: 3 } })),
-  ).toThrow(/Missing enum discriminant for WireCount/)
+  expect(() => unchecked(union, { Count: 17, Idle: 3 }, "kind")).toThrow(
+    /Unknown enum discriminants Count/,
+  )
   const numeric = Schema.Union([
     Schema.Struct({
       kind: Borsh.U8.pipe(
@@ -401,58 +636,62 @@ it("maps literal wire tags before native application tag transformations", () =>
     }),
     Schema.Struct({ kind: Schema.Literal("Idle") }),
   ])
-  expect(() =>
-    Borsh.toCodec(
-      Borsh.enumLayout(numeric, { tag: "kind", discriminants: { Count: 17, Idle: 3 } }),
-    ),
-  ).toThrow(/required string literal/)
+  expect(() => unchecked(numeric, { Count: 17, Idle: 3 }, "kind")).toThrow(
+    /Enum tag "kind" must be a required string literal/,
+  )
 })
 
 it("handles all 256 variants and rejects larger enums", () => {
-  const members = Array.from({ length: 256 }, (_, i) => Schema.TaggedStruct(String(i), {}))
-  const discriminants = Object.fromEntries(members.map((_, i) => [String(i), 255 - i]))
-  const c = Borsh.toCodec(Borsh.enumLayout(Schema.Union(members), { tag: "_tag", discriminants }))
+  const members = Array.from({ length: 256 }, (_, i) => Schema.TaggedStruct(`V${i}`, {}))
+  const reversed = Object.fromEntries(members.map((_, i) => [`V${i}`, 255 - i]))
+  const positional = Borsh.toCodec(Schema.Union(members))
+  const mapped = Borsh.toCodec(unchecked(Schema.Union(members), reversed))
   for (let i = 0; i < 256; i++) {
-    expect(Schema.encodeSync(c)({ _tag: String(i) })).toEqual(Uint8Array.of(255 - i))
-    expect(Schema.decodeSync(c)(Uint8Array.of(255 - i))).toEqual({ _tag: String(i) })
+    expect(Schema.encodeSync(positional)({ _tag: `V${i}` })).toEqual(Uint8Array.of(i))
+    expect(Schema.decodeSync(positional)(Uint8Array.of(i))).toEqual({ _tag: `V${i}` })
+    expect(Schema.encodeSync(mapped)({ _tag: `V${i}` })).toEqual(Uint8Array.of(255 - i))
+    expect(Schema.decodeSync(mapped)(Uint8Array.of(255 - i))).toEqual({ _tag: `V${i}` })
   }
-  expect(() =>
-    Borsh.toCodec(
-      Borsh.enumLayout(Schema.Union([...members, Schema.TaggedStruct("extra", {})]), {
-        tag: "_tag",
-        discriminants,
-      }),
-    ),
-  ).toThrow(/2..256/)
+  const labels = members.map((_, i) => `V${i}`)
+  const literals = Borsh.toCodec(Schema.Literals(labels))
+  for (let i = 0; i < 256; i++)
+    expect(Schema.decodeSync(literals)(Schema.encodeSync(literals)(`V${i}`))).toBe(`V${i}`)
+  for (const larger of [
+    Schema.Union([...members, Schema.TaggedStruct("extra", {})]),
+    Schema.Literals([...labels, "extra"]),
+    Schema.Enum(Object.fromEntries([...labels, "extra"].map((label) => [label, label]))),
+  ])
+    expect(() => Borsh.toCodec(larger)).toThrow(/Enums require 1 through 256 variants/)
+  for (const empty of [Schema.Literals([]), Schema.Enum({})])
+    expect(() => Borsh.toCodec(empty)).toThrow(/Enums require 1 through 256 variants/)
 })
 
 it("runs the README enum and Option examples", () => {
-  const Status = Borsh.enumLayout(
-    Schema.TaggedUnion({ Pending: {}, Complete: { receiptId: Borsh.U64 } }),
-    { tag: "_tag", discriminants: { Pending: 0, Complete: 1 } },
-  )
-  const status = Schema.encodeSync(Borsh.toCodec(Status))({ _tag: "Pending" })
-  expect(status).toEqual(Uint8Array.of(0))
+  const Shape = Schema.TaggedUnion({
+    Empty: {},
+    Square: { value: Borsh.U32 },
+    Rect: { width: Borsh.U16, height: Borsh.U16 },
+  })
+  const shape = Schema.encodeSync(Borsh.toCodec(Shape))({ _tag: "Square", value: 5 })
+  expect(shape).toEqual(Uint8Array.of(1, 5, 0, 0, 0))
+  const Status = Schema.Literals(["Pending", "Done"])
+  expect(Schema.encodeSync(Borsh.toCodec(Status))("Done")).toEqual(Uint8Array.of(1))
+  const Flag = Schema.TaggedUnion({ Off: {}, On: {} }).pipe(Borsh.discriminants({ Off: 1, On: 5 }))
+  expect(Schema.encodeSync(Borsh.toCodec(Flag))({ _tag: "On" })).toEqual(Uint8Array.of(5))
   const Deposit = Schema.Option(Borsh.U128)
   const deposit = Schema.encodeSync(Borsh.toCodec(Deposit))(Option.some(1_000_000n))
   expect(deposit).toEqual(Uint8Array.of(1, 64, 66, 15, ...new Uint8Array(13)))
 })
 
 it("supports unsafe tag property names and nested enum payloads", () => {
-  const inner = Borsh.enumLayout(
-    Schema.Union([
-      Schema.Struct({ ["__proto__"]: Schema.Literal("A"), constructor: Borsh.U8 }),
-      Schema.Struct({ ["__proto__"]: Schema.Literal("B") }),
-    ]),
-    { tag: "__proto__", discriminants: { A: 9, B: 10 } },
-  )
-  const outer = Borsh.enumLayout(Schema.TaggedUnion({ Wrap: { action: inner }, Skip: {} }), {
-    tag: "_tag",
-    discriminants: { Wrap: 1, Skip: 0 },
-  })
+  const inner = Schema.Union([
+    Schema.Struct({ ["__proto__"]: Schema.Literal("A"), constructor: Borsh.U8 }),
+    Schema.Struct({ ["__proto__"]: Schema.Literal("B") }),
+  ]).pipe(Borsh.discriminants({ A: 9, B: 10 }, { tag: "__proto__" }))
+  const outer = Schema.TaggedUnion({ Wrap: { action: inner }, Skip: {} })
   const c = Borsh.toCodec(outer)
   const value = { _tag: "Wrap", action: { ["__proto__"]: "A", constructor: 7 } } as const
-  const raw = Uint8Array.of(1, 9, 7)
+  const raw = Uint8Array.of(0, 9, 7)
   expect(Schema.encodeSync(c)(value)).toEqual(raw)
   const decoded = Schema.decodeSync(c)(raw)
   expect(decoded).toEqual(value)
@@ -480,7 +719,7 @@ it("preserves application transformations over a whole encoded enum", () => {
       }),
     ),
   )
-  const mapped = Borsh.enumLayout(transformed, { tag: "_tag", discriminants })
+  const mapped = transformed.pipe(Borsh.discriminants(discriminants))
   const c = Borsh.toCodec(mapped)
   expectTypeOf(c).toEqualTypeOf<Schema.Codec<string, Uint8Array>>()
   expect(Schema.encodeSync(c)("513")).toEqual(Uint8Array.of(17, 1, 2))
@@ -488,20 +727,14 @@ it("preserves application transformations over a whole encoded enum", () => {
 })
 
 it("uses enum payload minimums without treating unit variants as zero sized", () => {
-  const value = Borsh.enumLayout(
-    Schema.TaggedUnion({ Small: { value: Borsh.U16 }, Large: { value: Borsh.U32 } }),
-    { tag: "_tag", discriminants: { Small: 0, Large: 1 } },
-  )
+  const value = Schema.TaggedUnion({ Small: { value: Borsh.U16 }, Large: { value: Borsh.U32 } })
   expect(compile(Schema.toEncoded(value).ast).minBytes).toBe(3)
   const c = Borsh.toCodec(Schema.Array(value))
   expect(Schema.decodeSync(c)(Uint8Array.of(1, 0, 0, 0, 0, 1, 2))).toEqual([
     { _tag: "Small", value: 513 },
   ])
   expect(() => Schema.decodeSync(c)(Uint8Array.of(2, 0, 0, 0, 0, 1, 2))).toThrow(/Truncated vector/)
-  const units = Borsh.enumLayout(Schema.TaggedUnion({ A: {}, B: {} }), {
-    tag: "_tag",
-    discriminants: { A: 0, B: 1 },
-  })
+  const units = Schema.TaggedUnion({ A: {}, B: {} })
   expect(
     Schema.encodeSync(Borsh.toCodec(Schema.Array(units)))([{ _tag: "A" }, { _tag: "B" }]),
   ).toEqual(Uint8Array.of(2, 0, 0, 0, 0, 1))
