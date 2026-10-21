@@ -7,7 +7,8 @@ import { expect, test } from "vite-plus/test"
 const require = createRequire(import.meta.url)
 const { Borsh }: typeof import("../src/index.js") = require("../dist/index.js")
 const { b }: typeof import("../../zorsh/src/index.js") = require("../../zorsh/dist/src/index.js")
-expect(Schema.isSchema(Borsh.U8)).toBe(true)
+// The dist must share this file's Effect instance.
+expect(require("effect").Schema).toBe(Schema)
 
 // The README complex example, with 100 actions cycling through every variant.
 const Asset = Schema.Struct({ contractId: Schema.String })
@@ -154,6 +155,7 @@ for (const c of [
 
   test(`${c.name}: decode`, async ({ bench }) => {
     expect(decode(bytes)).toEqual(c.value)
+    expect(c.zorsh.deserialize(bytes)).toEqual(zorshValue)
     await bench.compare(
       bench("@zorsh/effect", () => decode(bytes)),
       bench("@zorsh/zorsh", () => c.zorsh.deserialize(bytes)),
