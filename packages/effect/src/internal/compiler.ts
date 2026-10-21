@@ -605,7 +605,8 @@ function compileObject(
       if (typeof field.name === "symbol")
         throw new Error(`${path}: Symbol keys have no Borsh struct layout`)
       const name = field.name
-      // Assignment would hit an inherited setter or a frozen inherited property.
+      // Assignment would hit an inherited setter or a frozen inherited property. Checked once at
+      // compile time: Effect's schema pass, which runs next, assigns plainly too.
       const define = name in Object.prototype
       return { name, define, layout: compile(field.type, `${path}[${JSON.stringify(name)}]`) }
     })
