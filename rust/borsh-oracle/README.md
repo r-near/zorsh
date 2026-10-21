@@ -33,7 +33,7 @@ Frames are limited to 1 MiB excluding LF; CR in CRLF counts. Raw Borsh data and 
 - Options use `{ "tag": "None" }` or `{ "tag": "Some", "value": ... }`. Sequences/tuples use arrays; structs use exact named fields in declaration wire order.
 - Results use `{ "tag": "Ok", "value": ... }` or `{ "tag": "Err", "value": ... }`.
 - Enum transport is `{ "variant": "Count", "value": "513" }`; Idle carries null, Named carries `{ "label": "x", "enabled": true }`.
-- Maps use key/value pair arrays and sets use value arrays. Duplicate keys/items are transport errors. Results sort by Rust value order. `de_strict_order` rejects unsorted/duplicate wire entries; this differs from permissive Borsh builds.
+- Maps use key/value pair arrays and sets use value arrays. Duplicate keys/items are transport errors. Map and set entries sort by Rust value order. `de_strict_order` rejects unsorted/duplicate wire entries; this differs from permissive Borsh builds.
 
 ## Registry
 

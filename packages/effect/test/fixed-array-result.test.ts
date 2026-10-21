@@ -238,3 +238,39 @@ it("keeps native array checks and fixed-item error paths", () => {
   const layout = compile(Schema.toEncoded(shared).ast)
   expect(() => layout.write(new Writer(8), [2])).toThrow(/\$\[0\] at byte 0: Expected boolean/)
 })
+
+it("accepts vectors and fixed arrays of Results with zero-byte payloads", () => {
+  const item = Schema.Result(Borsh.Unit, Schema.String)
+  const unit = Borsh.Unit.make([])
+  const values = [Result.succeed(unit), Result.succeed(unit)]
+  const vector = Borsh.toCodec(Schema.Array(item))
+  const raw = Uint8Array.of(2, 0, 0, 0, 1, 1)
+  expect(Schema.encodeSync(vector)(values)).toEqual(raw)
+  expect(Schema.decodeSync(vector)(raw)).toEqual(values)
+  const units = Borsh.toCodec(Schema.Array(Schema.Result(Borsh.Unit, Borsh.Unit)))
+  const mixed = [Result.fail(unit), Result.succeed(unit)]
+  const mixedRaw = Uint8Array.of(2, 0, 0, 0, 0, 1)
+  expect(Schema.encodeSync(units)(mixed)).toEqual(mixedRaw)
+  expect(Schema.decodeSync(units)(mixedRaw)).toEqual(mixed)
+  const fixed = Borsh.toCodec(Schema.Array(item).pipe(Borsh.fixedArray(2)))
+  expect(Schema.encodeSync(fixed)(values)).toEqual(Uint8Array.of(1, 1))
+  expect(Schema.decodeSync(fixed)(Uint8Array.of(1, 1))).toEqual(values)
+})
+
+it("rejects truncated Result vectors before visiting their payloads", () => {
+  const codec = Borsh.toCodec(Schema.Array(Schema.Result(Borsh.U16, Borsh.U64)))
+  for (const raw of [Uint8Array.of(1, 0, 0, 0, 255, 0), Uint8Array.of(2, 0, 0, 0, 255, 0, 0, 0, 0)])
+    expect(() => Schema.decodeSync(codec)(raw)).toThrow(/\$ at byte 4: Truncated vector payload/)
+})
+
+it("rejects fixed-array Suspend at helper construction without evaluating its thunk", () => {
+  let calls = 0
+  const item = Schema.suspend(() => {
+    calls++
+    return Borsh.U8
+  })
+  expect(() => Schema.Array(item).pipe(Borsh.fixedArray(2))).toThrow(
+    /\$\.rest\[0\]: Suspend\/recursive schemas are unsupported/,
+  )
+  expect(calls).toBe(0)
+})

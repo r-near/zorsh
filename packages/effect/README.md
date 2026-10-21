@@ -69,7 +69,7 @@ const RecipientAmount = Schema.Tuple([Schema.String, Borsh.U128])
 const recipientAmount = Schema.encodeSync(Borsh.toCodec(RecipientAmount))(["alice.near", 123n])
 ```
 
-An array writes a u32 item count followed by its items, like Rust `Vec<T>`. For a nonempty vector, use `Schema.Array(item).check(Schema.isMinLength(1))`. `Borsh.fixedArray(3)` gives a homogeneous native encoded array Rust `[T; 3]`'s layout: the codec requires exactly three items and writes no count prefix. An exact-length native check alone still describes a vector. The helper preserves the schema, including array-to-application transformations; it does not add a check to the decoded application value. A tuple writes its elements in order without a prefix. `Borsh.Unit` is `Schema.Tuple([])`, representing Rust `()` with no bytes.
+An array writes a u32 item count followed by its items, like Rust `Vec<T>`. For a nonempty vector, use `Schema.Array(item).check(Schema.isMinLength(1))`. `Borsh.fixedArray(3)` applies the Rust `[T; 3]` layout to a homogeneous native encoded array. The codec requires exactly three items and writes no count prefix. The helper rejects other schema shapes at construction. An exact-length native check alone still describes a vector. The helper preserves the schema, including array-to-application transformations; it does not add a check to the decoded application value. A tuple writes its elements in order without a prefix. `Borsh.Unit` is `Schema.Tuple([])`, representing Rust `()` with no bytes.
 
 ### Structs
 
