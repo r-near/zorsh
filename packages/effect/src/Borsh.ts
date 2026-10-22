@@ -711,6 +711,10 @@ function prefixReader(schema: Schema.Constraint, options: Options | undefined): 
     if (!(bytes instanceof Uint8Array)) {
       throw new TypeError("Prefix decoding requires a Uint8Array")
     }
+    // Schema.decodeSync takes parse options second, so this is an easy slip.
+    if (typeof offset !== "number") {
+      throw new TypeError("Prefix offset must be a number; parse options are the third argument")
+    }
     const isValidOffset = Number.isSafeInteger(offset) && offset >= 0 && offset <= bytes.byteLength
     if (!isValidOffset) {
       throw new RangeError(
@@ -744,11 +748,12 @@ function binarySchemaError(error: unknown): Schema.SchemaError {
  * that was never read has no end to return as `offset`.
  *
  * `offset` defaults to 0 and must be an integer from 0 through
- * `bytes.byteLength`; any other offset is a defect (a `RangeError`), not a
- * `SchemaError`, and so is a `bytes` that is not a `Uint8Array`. A schema that always encodes to zero bytes, such as
- * `Borsh.Unit`, an empty struct or `fixedArray(0)`, throws at construction,
- * because a loop decoding it would never advance. Every other schema reads at
- * least one byte per value.
+ * `bytes.byteLength`. Any other offset is a defect, not a `SchemaError`: a
+ * `TypeError` if it is not a number and a `RangeError` otherwise. A `bytes`
+ * that is not a `Uint8Array` is a `TypeError` defect too. A schema that always
+ * encodes to zero bytes, such as `Borsh.Unit`, an empty struct or
+ * `fixedArray(0)`, throws at construction, because a loop decoding it would
+ * never advance. Every other schema reads at least one byte per value.
  *
  * **Example** (Concatenated frames)
  *
@@ -796,7 +801,8 @@ export function decodePrefixEffect<S extends Schema.Constraint>(
 
 /**
  * Like {@link decodePrefixEffect}, but synchronous; it throws
- * `Schema.SchemaError`, or a `RangeError` for an invalid offset. Like
+ * `Schema.SchemaError`, or a `TypeError` or `RangeError` for invalid
+ * arguments. Like
  * `Schema.decodeSync`, it accepts only schemas without decoding services.
  *
  * **Example** (A message inside an envelope)

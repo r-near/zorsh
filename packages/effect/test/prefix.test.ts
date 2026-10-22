@@ -236,18 +236,24 @@ describe("decodePrefixSync", () => {
   it("throws a RangeError, not a SchemaError, for an offset outside the buffer", () => {
     const decode = Borsh.decodePrefixSync(Borsh.U8)
     const buffer = Uint8Array.of(1, 2)
-    for (const offset of [-1, 3, 0.5, Number.NaN, Infinity, 2 ** 53, "1" as never]) {
+    for (const offset of [-1, 3, 0.5, Number.NaN, Infinity, 2 ** 53]) {
       expect(() => decode(buffer, offset)).toThrow(
         new RangeError(`Prefix offset must be an integer from 0 through 2, got ${offset}`),
       )
     }
   })
 
-  it("throws a TypeError for bytes that are not a Uint8Array", () => {
+  it("throws a TypeError for bytes that are not a Uint8Array, or an offset that is not a number", () => {
     const decode = Borsh.decodePrefixSync(Borsh.U8)
     expect(() => decode([1, 2] as never)).toThrow(
       new TypeError("Prefix decoding requires a Uint8Array"),
     )
+    // Parse options go third, unlike with Schema.decodeSync.
+    for (const offset of [{ errors: "all" }, "1", null]) {
+      expect(() => decode(Uint8Array.of(1), offset as never)).toThrow(
+        new TypeError("Prefix offset must be a number; parse options are the third argument"),
+      )
+    }
   })
 
   it("accepts the end of the buffer as an offset, where any value is truncated", () => {
@@ -343,6 +349,16 @@ describe("decodePrefixEffect", () => {
     const exit = Effect.runSyncExit(effect)
     expect(exit).toEqual(
       Exit.die(new RangeError("Prefix offset must be an integer from 0 through 1, got 2")),
+    )
+  })
+
+  it("caps the value with maxBytes at an offset, and reports absolute error offsets", () => {
+    const decode = Borsh.decodePrefixEffect(Frame, { maxBytes: 9 })
+    const buffer = Uint8Array.of(0xff, ...frame(5, "a"), ...frame(6, "ab"))
+    expect(Effect.runSync(decode(buffer, 1))).toEqual({ value: { id: 5, body: "a" }, offset: 10 })
+    const exit = Effect.runSyncExit(decode(buffer, 10))
+    expect(Exit.isFailure(exit) && String(Cause.squash(exit.cause))).toBe(
+      'SchemaError(Value exceeds maxBytes (9) at byte 18\n  at ["body"])',
     )
   })
 

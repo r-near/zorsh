@@ -74,8 +74,8 @@ export class Reader {
   }
 
   /**
-   * The failure for a read of at least length bytes at offset that passes end: detail when the input
-   * ran out first, so more input might complete the value.
+   * The error for a read of at least length bytes at offset that runs past end. It reports maxBytes
+   * when the value can never fit, and detail otherwise, since more input might complete it.
    */
   pastEnd(offset: number, length: number, detail: string): BinaryError {
     // A value that needs more than maxBytes can never fit, however much input follows.
