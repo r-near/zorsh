@@ -305,7 +305,7 @@ it("treats maps as nonzero-sized and only visits present value layouts", () => {
   expect(Schema.encodeSync(vectors)(new Map())).toEqual(new Uint8Array(4))
   expect(() => Schema.encodeSync(vectors)(new Map([[1, []]]))).toThrow(/zero-sized/)
   const fixed = Borsh.toCodec(
-    Schema.ReadonlyMap(Borsh.U16, Schema.Array(Schema.Array(Borsh.Unit)).pipe(Borsh.fixedArray(0))),
+    Schema.ReadonlyMap(Borsh.U16, Borsh.fixedArray(Schema.Array(Borsh.Unit), 0)),
   )
   expect(Schema.decodeSync(fixed)(Schema.encodeSync(fixed)(new Map([[1, []]])))).toEqual(
     new Map([[1, []]]),
@@ -341,7 +341,7 @@ it("checks encoded iterator duplicates and invalid primitive comparison inputs",
 })
 
 it("encodes empty native maps when a shared value layout overflows its minimum size", () => {
-  let value: Schema.Codec<unknown> = Schema.Array(Borsh.U8).pipe(Borsh.fixedArray(0xffff_ffff))
+  let value: Schema.Codec<unknown> = Borsh.fixedArray(Borsh.U8, 0xffff_ffff)
   for (let i = 0; i < 500; i++) {
     value = Schema.Struct({ a: value, b: value, c: value, d: value })
   }

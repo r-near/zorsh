@@ -16,7 +16,7 @@ describe("Borsh primitives", () => {
       name: "fixedBytes(2)",
       schema: Borsh.fixedBytes(2),
       value: Uint8Array.of(1),
-      expected: "Expected exactly 2 bytes",
+      expected: "Expected a value with a length of 2",
     },
   ])("describes primitive validation failures for $name", ({ schema, value, expected }) => {
     expect(() => Schema.decodeSync(schema)(value)).toThrow(expected)

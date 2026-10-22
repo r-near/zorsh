@@ -79,7 +79,7 @@ const u128 = fc.bigInt({ min: 0n, max: (1n << 128n) - 1n })
 const entries = [
   spec(
     "array_u16_3",
-    Schema.Array(Borsh.U16).pipe(Borsh.fixedArray(3)),
+    Borsh.fixedArray(Borsh.U16, 3),
     fc.array(fc.integer({ min: 0, max: 65535 }), { minLength: 3, maxLength: 3 }),
     (values) => values.map(String),
   ),
@@ -322,27 +322,17 @@ for (const entry of entries) {
 
 it("matches Rust zero-sized visitation and malicious vector counts", async () => {
   for (const [id, schema, values, raws] of [
-    [
-      "array_unit_0",
-      Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(0)),
-      [[]],
-      [new Uint8Array(), Uint8Array.of(0)],
-    ],
-    [
-      "array_unit_1",
-      Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(1)),
-      [[[]]],
-      [new Uint8Array(), Uint8Array.of(0)],
-    ],
+    ["array_unit_0", Borsh.fixedArray(Borsh.Unit, 0), [[]], [new Uint8Array(), Uint8Array.of(0)]],
+    ["array_unit_1", Borsh.fixedArray(Borsh.Unit, 1), [[[]]], [new Uint8Array(), Uint8Array.of(0)]],
     [
       "array_vec_unit_0",
-      Schema.Array(Schema.Array(Borsh.Unit)).pipe(Borsh.fixedArray(0)),
+      Borsh.fixedArray(Schema.Array(Borsh.Unit), 0),
       [[]],
       [new Uint8Array(), Uint8Array.of(0)],
     ],
     [
       "array_vec_unit_1",
-      Schema.Array(Schema.Array(Borsh.Unit)).pipe(Borsh.fixedArray(1)),
+      Borsh.fixedArray(Schema.Array(Borsh.Unit), 1),
       [[[]]],
       [new Uint8Array(), Uint8Array.of(0, 0, 0, 0)],
     ],

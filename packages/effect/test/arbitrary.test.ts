@@ -1,4 +1,4 @@
-import { Arbitrary, Effect, Option, Schema, type SchemaAST, SchemaTransformation } from "effect"
+import { Arbitrary, Effect, Option, Schema, SchemaTransformation } from "effect"
 import { expect, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 
@@ -51,7 +51,7 @@ it("samples every Borsh constructor as encodable values", () => {
     Borsh.F64,
     Borsh.Bytes,
     Borsh.Unit,
-    Schema.Array(Borsh.U16).pipe(Borsh.fixedArray(3)),
+    Borsh.fixedArray(Borsh.U16, 3),
     Schema.TaggedUnion({ Off: {}, On: { level: Borsh.U8 } }).pipe(
       Borsh.discriminants({ Off: 1, On: 5 }),
     ),
@@ -85,22 +85,25 @@ it("samples F32 as exact binary32 integers", () => {
   ).toThrow()
 })
 
-it("samples fixed arrays at their length unless transformed", () => {
+it("samples fixed arrays at their length", () => {
   const item = Borsh.U16.check(Schema.isGreaterThan(0))
   for (const schema of [
-    Schema.Array(item).pipe(Borsh.fixedArray(3)),
-    Schema.Array(item).check(Schema.isMaxLength(5)).pipe(Borsh.fixedArray(3)),
-    Schema.Array(item).pipe(Schema.brand("Triple"), Borsh.fixedArray(3)),
-    Schema.mutable(Schema.Array(item)).pipe(Borsh.fixedArray(3)),
-    Schema.Array(Schema.FiniteFromString).pipe(Borsh.fixedArray(3)),
+    Borsh.fixedArray(item, 3),
+    Borsh.fixedArray(item, 3).check(Schema.isMaxLength(5)),
+    Borsh.fixedArray(item, 3).pipe(Schema.brand("Triple")),
+    Schema.mutable(Borsh.fixedArray(item, 3)),
+    Borsh.fixedArray(Schema.FiniteFromString, 3),
   ]) {
     for (const value of expectRoundTrips(schema)) {
       expect(value).toHaveLength(3)
     }
   }
-  expectRoundTrips(Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(2)))
-  expectRoundTrips(Schema.Array(Borsh.U8).pipe(Borsh.fixedArray(0)))
-  const codec = Borsh.toCodec(Schema.Struct({ a: Schema.Array(item).pipe(Borsh.fixedArray(3)) }))
+  for (const value of expectRoundTrips(Borsh.fixedArray(Borsh.U8, 4096), 3)) {
+    expect(value).toHaveLength(4096)
+  }
+  expectRoundTrips(Borsh.fixedArray(Borsh.Unit, 2))
+  expectRoundTrips(Borsh.fixedArray(Borsh.U8, 0))
+  const codec = Borsh.toCodec(Schema.Struct({ a: Borsh.fixedArray(item, 3) }))
   for (const a of [
     [1, 2],
     [1, 2, 3, 4],
@@ -112,7 +115,7 @@ it("samples fixed arrays at their length unless transformed", () => {
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(1, 0))).toThrow(
     /^Truncated fixed array payload at byte 0\n {2}at \["a"\]$/,
   )
-  const unchecked = Schema.Array(item).pipe(
+  const transformed = Borsh.fixedArray(item, 3).pipe(
     Schema.decodeTo(
       Schema.Struct({ values: Schema.Array(item) }),
       SchemaTransformation.transform({
@@ -120,15 +123,30 @@ it("samples fixed arrays at their length unless transformed", () => {
         encode: ({ values }) => values,
       }),
     ),
-    Borsh.fixedArray(3),
   )
-  expect(() => Schema.encodeSync(Borsh.toCodec(unchecked))({ values: [1] })).toThrow(
-    /^Expected fixed array of length 3 at byte 0$/,
+  expect(() => Schema.encodeSync(Borsh.toCodec(transformed))({ values: [1] })).toThrow(
+    /^Expected a value with a length of 3$/,
   )
+  // A transformation to a fixed shape keeps samples at the encoded length.
+  const Range = Borsh.fixedArray(Borsh.U32, 2).pipe(
+    Schema.decodeTo(
+      Schema.Struct({ start: Borsh.U32, end: Borsh.U32 }),
+      SchemaTransformation.transform({
+        decode: ([start = 0, end = 0]) => ({ start, end }),
+        encode: ({ start, end }) => [start, end],
+      }),
+    ),
+  )
+  const range = Borsh.toCodec(Range)
+  expect(Schema.encodeSync(range)({ start: 1, end: 2 })).toEqual(
+    Uint8Array.of(1, 0, 0, 0, 2, 0, 0, 0),
+  )
+  expectRoundTrips(Range)
+  expect(() => Schema.decodeSync(range)(Uint8Array.of(1, 0, 0, 0))).toThrow(Schema.SchemaError)
 })
 
-it("keeps schema annotations when fixedArray adds its length check", () => {
-  const schema = Schema.Array(Borsh.U8).pipe(
+it("keeps annotations, brands and checks added after fixedArray", () => {
+  const schema = Borsh.fixedArray(Borsh.U8, 3).pipe(
     Schema.overrideToFormatter(() => () => "<redacted>"),
     Schema.overrideToEquivalence(() => (a, b) => a.length === b.length),
     Schema.annotate({
@@ -138,7 +156,6 @@ it("keeps schema annotations when fixedArray adds its length check", () => {
       examples: [[1, 2, 3]],
       default: [0, 0, 0],
     }),
-    Borsh.fixedArray(3),
   )
   expect(Schema.resolveAnnotations(schema)).toMatchObject({
     identifier: "Triple",
@@ -146,10 +163,11 @@ it("keeps schema annotations when fixedArray adds its length check", () => {
     description: "Three bytes",
     examples: [[1, 2, 3]],
     default: [0, 0, 0],
-    expected: "a value with a length of 3",
   })
   expect(Schema.toFormatter(schema)([1, 2, 3])).toBe("<redacted>")
   expect(Schema.toEquivalence(schema)([1, 2, 3], [4, 5, 6])).toBe(true)
+  expect(Schema.is(schema)([1, 2])).toBe(false)
+  expect(Schema.is(schema)([1, 2, 3])).toBe(true)
   expect(Schema.toJsonSchemaDocument(Schema.Struct({ a: schema })).definitions).toEqual({
     Triple: {
       type: "array",
@@ -162,69 +180,18 @@ it("keeps schema annotations when fixedArray adds its length check", () => {
       maxItems: 3,
     },
   })
-  // An earlier check's annotations move to the length check too.
-  const checked = Schema.Array(Borsh.U8)
-    .check(Schema.isMinLength(1, { description: "Non-empty", format: "bytes" }))
-    .pipe(Borsh.fixedArray(3))
-  expect(Schema.resolveAnnotations(checked)).toMatchObject({
-    description: "Non-empty",
-    format: "bytes",
-  })
-  expect(Schema.toJsonSchemaDocument(checked).schema).toEqual({
-    type: "array",
-    items: { type: "integer", minimum: 0, maximum: 255 },
-    minItems: 1,
-    allOf: [{ minItems: 3, maxItems: 3, description: "Non-empty", format: "bytes" }],
-  })
   const codec = Borsh.toCodec(schema)
-  expect(() => Schema.encodeUnknownSync(codec)("x")).toThrow(/^Expected Triple$/)
+  expect(Schema.encodeSync(codec)([7, 8, 9])).toEqual(Uint8Array.of(7, 8, 9))
+  // As on any checked Effect schema, later annotations attach to the length check, not the array.
+  expect(() => Schema.encodeUnknownSync(codec)("x")).toThrow(/^Expected array$/)
   expect(() => Schema.encodeSync(codec)([1])).toThrow(/^Expected a value with a length of 3$/)
-  const lengthChecks = (schema: Schema.Top) =>
-    schema
-      .pipe(Borsh.fixedArray(3))
-      .ast.checks?.filter(
-        (check) => check.annotations?.representation?.id === "effect/schema/isBetweenLength",
-      ).length
-  const array = Schema.Array(Borsh.U8)
-  expect(lengthChecks(array)).toBe(1)
-  expect(lengthChecks(array.pipe(Borsh.fixedArray(3)))).toBe(1)
-  expect(lengthChecks(array.check(Schema.isBetweenLength(3, 3)))).toBe(1)
-  expect(lengthChecks(array.check(Schema.makeFilterGroup([Schema.isBetweenLength(3, 3)])))).toBe(0)
-  expect(
-    lengthChecks(
-      array.check(
-        Schema.isMinLength(3),
-        Schema.makeFilter(() => true),
-      ),
-    ),
-  ).toBe(1)
-  expect(lengthChecks(array.check(Schema.isBetweenLength(2, 3)))).toBe(2)
-  // A generation hint alone does not enforce the length.
-  const hinted = array.check(
-    Schema.isMaxLength(5, { arbitraryConstraint: { minLength: 3, maxLength: 3 } }),
+  const Pair = Borsh.fixedArray(Borsh.U8, 2).pipe(Schema.brand("Pair"))
+  expect(Schema.encodeSync(Borsh.toCodec(Pair))(Pair.make([1, 2]))).toEqual(Uint8Array.of(1, 2))
+  expect(() => Pair.make([1])).toThrow(/Schema validation failed/)
+  const custom = Borsh.fixedArray(Borsh.U8, 3).check(
+    Schema.makeFilter((values) => values[0] === 1, { message: "need a leading one" }),
   )
-  expect(Schema.is(hinted.pipe(Borsh.fixedArray(3)))([1])).toBe(false)
-  // Spreading a list that turns out empty leaves `checks` as `[]`.
-  const none = [] as unknown as [SchemaAST.Check<ReadonlyArray<number>>]
-  const unchecked = Schema.Array(Borsh.U8)
-    .annotate({ identifier: "Pair", description: "Two bytes" })
-    .check(...none)
-    .pipe(Borsh.fixedArray(2))
-  expect(Schema.toJsonSchemaDocument(unchecked).definitions).toEqual({
-    Pair: {
-      type: "array",
-      items: { type: "integer", minimum: 0, maximum: 255 },
-      description: "Two bytes",
-      minItems: 2,
-      maxItems: 2,
-    },
-  })
-  expect(Schema.encodeSync(Borsh.toCodec(unchecked))([1, 2])).toEqual(Uint8Array.of(1, 2))
-  expect(() => Schema.encodeUnknownSync(Borsh.toCodec(unchecked))("x")).toThrow(/^Expected Pair$/)
-  const custom = Schema.Array(Borsh.U8).check(Schema.isMinLength(1, { message: "need one" }))
-  expect(() => Schema.encodeSync(Borsh.toCodec(custom.pipe(Borsh.fixedArray(3))))([])).toThrow(
-    /^need one$/,
-  )
+  expect(() => Schema.encodeSync(Borsh.toCodec(custom))([2, 2, 2])).toThrow(/^need a leading one$/)
 })
 
 it("samples native composites as encodable values", () => {
@@ -236,7 +203,7 @@ it("samples native composites as encodable values", () => {
     Schema.Struct({ receiver: WellFormed, amount: Borsh.U128, memo: Schema.Option(WellFormed) }),
     Schema.Tuple([Borsh.U8, Schema.Boolean, Borsh.I64]),
     Schema.Array(Borsh.U32),
-    Schema.Array(Schema.Array(Borsh.U8).pipe(Borsh.fixedArray(2))),
+    Schema.Array(Borsh.fixedArray(Borsh.U8, 2)),
     Schema.Option(Schema.Option(Borsh.U8)),
     Schema.Result(Borsh.U8, WellFormed),
     Schema.ReadonlyMap(WellFormed, Borsh.U8),
@@ -295,20 +262,4 @@ it("runs the package README fixture examples", () => {
   ).map((request) => Schema.encodeSync(requestCodec)(request))
   expect(fixtures).toHaveLength(100)
   expect(() => Borsh.toCodec(Schema.Literal("sign"))).toThrow(/Unsupported encoded schema Literal/)
-  const Range = Schema.Array(Borsh.U32).pipe(
-    Borsh.fixedArray(2),
-    Schema.decodeTo(
-      Schema.Struct({ start: Borsh.U32, end: Borsh.U32 }),
-      SchemaTransformation.transform({
-        decode: ([start = 0, end = 0]) => ({ start, end }),
-        encode: ({ start, end }) => [start, end],
-      }),
-    ),
-  )
-  const range = Borsh.toCodec(Range)
-  expect(Schema.encodeSync(range)({ start: 1, end: 2 })).toEqual(
-    Uint8Array.of(1, 0, 0, 0, 2, 0, 0, 0),
-  )
-  expectRoundTrips(Range)
-  expect(() => Schema.decodeSync(range)(Uint8Array.of(1, 0, 0, 0))).toThrow(Schema.SchemaError)
 })

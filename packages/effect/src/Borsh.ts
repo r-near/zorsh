@@ -20,7 +20,6 @@ import {
 } from "effect"
 import { isU32Length, parseDescriptor, withLayout } from "./internal/annotations.js"
 import { compile, type Layout, prepare } from "./internal/compiler.js"
-import { homogeneousItem } from "./internal/containers.js"
 import { enumVariants } from "./internal/enums.js"
 import { BinaryError, Reader, type ReaderOptions, Writer } from "./internal/io.js"
 import type { DeferredChecks } from "./internal/limits.js"
@@ -205,100 +204,27 @@ export function fixedBytes(length: number): Schema.Uint8Array {
     version: 1,
     kind: "fixedBytes",
     length,
-  }).check(
-    Schema.makeFilter((bytes) => bytes.byteLength === length, {
-      expected: `exactly ${length} bytes`,
-      arbitraryConstraint: { minLength: length, maxLength: length },
-    }),
-  )
-}
-
-/** Annotations describing a check itself, which the length check keeps as its own. */
-const checkKeys = new Set([
-  "expected",
-  "message",
-  "representation",
-  "toJsonSchema",
-  "toCode",
-  "arbitraryConstraint",
-  "~structural",
-])
-
-/** Annotations JSON Schema emits from the schema and again from every check that carries them. */
-const jsonSchemaKeys = [
-  "title",
-  "description",
-  "default",
-  "examples",
-  "readOnly",
-  "writeOnly",
-  "format",
-  "contentEncoding",
-  "contentMediaType",
-  "contentSchema",
-]
-
-/**
- * Appends an exact-length check. Effect resolves annotations from the last
- * check, so the schema's annotations move onto the new one. JSON Schema
- * keywords are cleared where they were, so they are emitted once.
- */
-function withExactLength<S extends Schema.Top>(schema: S, length: number): S["Rebuild"] {
-  const checks = schema.ast.checks
-  // `.check()` with no checks leaves an empty array, which `resolve` and `annotate` do not handle.
-  const emptyChecks = checks !== undefined && checks.length === 0
-  const annotations = (emptyChecks ? schema.ast.annotations : SchemaAST.resolve(schema.ast)) ?? {}
-  if (emptyChecks) {
-    // The schema's own annotations cannot be cleared here, so JSON Schema keywords stay on it.
-    // Effect could not resolve this schema's annotations before the check was added either.
-    const kept = Object.entries(annotations).filter(
-      ([key]) => !checkKeys.has(key) && !jsonSchemaKeys.includes(key),
-    )
-    const lengthCheck = Schema.isBetweenLength(length, length, Object.fromEntries(kept))
-    return schema.check(lengthCheck as SchemaAST.Check<S["Type"]>)
-  }
-  const moved = Object.entries(annotations).filter(([key]) => !checkKeys.has(key))
-  const lengthCheck = Schema.isBetweenLength(length, length, Object.fromEntries(moved))
-  const cleared = jsonSchemaKeys.filter((key) => key in annotations).map((key) => [key, undefined])
-  return schema
-    .annotate(Object.fromEntries(cleared))
-    .check(lengthCheck as SchemaAST.Check<S["Type"]>) as S["Rebuild"]
-}
-
-/** Whether a check, such as an earlier `fixedArray`, already enforces exactly `length` items. */
-function pinsLength(check: SchemaAST.Check<never>, length: number): boolean {
-  if (check._tag === "FilterGroup") {
-    return check.checks.some((inner) => pinsLength(inner, length))
-  }
-  const representation = check.annotations?.representation
-  return (
-    representation?.id === "effect/schema/isBetweenLength" &&
-    JSON.stringify(representation.payload) === JSON.stringify({ minimum: length, maximum: length })
-  )
+  }).check(Schema.isBetweenLength(length, length))
 }
 
 /**
- * Rust `[T; N]`: gives a native array schema a fixed-length layout with no
- * count prefix.
+ * Rust `[T; N]`: exactly `length` items of `item` with no count prefix.
  *
  * **Details**
  *
- * The schema's encoded side must be a homogeneous array, such as
- * `Schema.Array(item)`; other shapes throw when the combinator is applied. The
- * codec requires exactly `length` items. A schema without a transformation,
- * such as a checked or branded `Schema.Array(item)`, also gets a native
- * exact-length check. A transformed schema is otherwise unchanged, so its
- * application type is kept and no check is added to the decoded value; apply
- * `fixedArray` before the transformation instead. `length` must be an integer
- * from 0 through 2^32 - 1.
+ * The schema is a native `Schema.Array(item)` with an exact-length check, so
+ * other lengths fail Schema validation, samples have `length` items and JSON
+ * Schema gets `minItems` and `maxItems`. Annotate, brand or transform the
+ * result like any other array schema. `length` must be an integer from 0
+ * through 2^32 - 1.
  *
- * **Example** (Three u16 values)
+ * **Example** (Rust `[u16; 3]`)
  *
  * ```ts
  * import { Borsh } from "@zorsh/effect"
  * import { Schema } from "effect"
  *
- * const Amounts = Schema.Array(Borsh.U16).pipe(Borsh.fixedArray(3))
+ * const Amounts = Borsh.fixedArray(Borsh.U16, 3)
  * const bytes = Schema.encodeSync(Borsh.toCodec(Amounts))([7, 513, 0])
  * // Uint8Array [7, 0, 1, 2, 0, 0]
  * ```
@@ -306,21 +232,13 @@ function pinsLength(check: SchemaAST.Check<never>, length: number): boolean {
  * @category containers
  * @since 0.1.0
  */
-export function fixedArray(length: number): <S extends Schema.Top>(schema: S) => S["Rebuild"] {
+export function fixedArray<S extends Schema.Constraint>(item: S, length: number): Schema.$Array<S> {
   if (!isU32Length(length)) {
     throw new Error("$: fixedArray length must be a safe integer between 0 and 2^32 - 1")
   }
-  return (schema) => {
-    if (homogeneousItem(encodedAST(schema)) === undefined) {
-      throw new Error("$: fixedArray requires a homogeneous encoded array")
-    }
-    const fixed = withLayout(schema, { version: 1, kind: "fixedArray", length })
-    // Without a transformation the decoded value is the encoded array, so it can carry the length.
-    return schema.ast.encoding === undefined &&
-      !schema.ast.checks?.some((check) => pinsLength(check, length))
-      ? withExactLength(fixed, length)
-      : fixed
-  }
+  return withLayout(Schema.Array(item), { version: 1, kind: "fixedArray", length }).check(
+    Schema.isBetweenLength(length, length),
+  )
 }
 
 /**
@@ -902,8 +820,8 @@ function binarySchemaError(error: unknown): Schema.SchemaError {
  * `TypeError` if it is not a number and a `RangeError` otherwise. A `bytes`
  * that is not a `Uint8Array` is a `TypeError` defect too. A schema that always
  * encodes to zero bytes, such as `Borsh.Unit`, an empty struct or
- * `fixedArray(0)`, throws at construction, because a loop decoding it would
- * never advance. Every other schema reads at least one byte per value.
+ * `fixedArray(item, 0)`, throws at construction, because a loop decoding it
+ * would never advance. Every other schema reads at least one byte per value.
  *
  * **Example** (Concatenated frames)
  *

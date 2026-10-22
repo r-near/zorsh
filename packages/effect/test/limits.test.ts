@@ -383,7 +383,7 @@ describe("checks the binary layer leaves to the schema pass", () => {
     expect(decodeFailure(tuple, [1]).message).toBe(
       "Truncated input: need 1 bytes at byte 1\n  at [1]",
     )
-    const fixed = Schema.Array(Borsh.U8).check(Schema.isMaxLength(1)).pipe(Borsh.fixedArray(2))
+    const fixed = Borsh.fixedArray(Borsh.U8, 2).check(Schema.isMaxLength(1))
     expect(decodeFailure(fixed, [1]).message).toBe("Truncated fixed array payload at byte 0")
     const fixedBytes = Borsh.fixedBytes(2).check(Schema.isMaxLength(1))
     expect(decodeFailure(fixedBytes, [1]).message).toBe("Truncated input: need 2 bytes at byte 0")
@@ -485,7 +485,7 @@ describe("maxItems", () => {
       ),
     )
     expect(mapError.message).toBe("Output exceeds maxItems (1) at byte 0")
-    const fixed = Schema.Array(Borsh.U8).pipe(Borsh.fixedArray(3))
+    const fixed = Borsh.fixedArray(Borsh.U8, 3)
     const fixedError = failure(() =>
       Schema.encodeSync(Borsh.toCodec(fixed, { maxItems: 2 }))([1, 2, 3]),
     )
@@ -513,7 +513,7 @@ describe("maxItems", () => {
       text: Schema.String,
       map: Schema.HashMap(Borsh.U8, Borsh.U8),
       set: Schema.ReadonlySet(Borsh.U8),
-      fixed: Schema.Array(Borsh.U8).pipe(Borsh.fixedArray(2)),
+      fixed: Borsh.fixedArray(Borsh.U8, 2),
     })
     const value = {
       bytes: new Uint8Array(100),
@@ -534,7 +534,7 @@ describe("maxItems", () => {
   it("bounds fixed arrays of zero-sized items, which no byte count bounds", () => {
     // Vec<{ a: u8, b: [(); 1000] }> visits 1000 units per input byte.
     const schema = Schema.Array(
-      Schema.Struct({ a: Borsh.U8, b: Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(1000)) }),
+      Schema.Struct({ a: Borsh.U8, b: Borsh.fixedArray(Borsh.Unit, 1000) }),
     )
     const bytes = [...u32(3), 1, 2, 3]
     expect(decodes(schema, bytes, { maxItems: 3003 })).toHaveLength(3)
@@ -823,7 +823,7 @@ const { shape } = fc.letrec<{ shape: Shape }>((tie) => ({
       transformed: value.transformed,
     })),
     fc.tuple(tie("shape"), fc.integer({ min: 0, max: 3 })).map(([item, length]) => ({
-      schema: Schema.Array(item.schema).pipe(Borsh.fixedArray(length)),
+      schema: Borsh.fixedArray(item.schema, length),
       frame: sequence(Array.from({ length }, () => item.frame)),
       items: (raw) => {
         const array = raw as ReadonlyArray<unknown>

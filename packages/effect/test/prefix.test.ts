@@ -124,7 +124,7 @@ describe("decodePrefixSync", () => {
       [Schema.String, [...u32(50), 97, 98], 7],
       [Borsh.Bytes, [...u32(1000)], 7],
       [Schema.Array(Borsh.U16), [...u32(10), 1, 0], 7],
-      [Schema.Array(Borsh.U32).pipe(Borsh.fixedArray(3)), [1, 0, 0, 0], 3],
+      [Borsh.fixedArray(Borsh.U32, 3), [1, 0, 0, 0], 3],
       [Schema.ReadonlyMap(Borsh.U8, Borsh.U8), [...u32(5), 1, 1], 7],
     ] as const
     for (const [schema, value, at] of cases) {
@@ -163,7 +163,7 @@ describe("decodePrefixSync", () => {
     const schemas = [
       Frame,
       Schema.Array(Borsh.U16),
-      Schema.Array(Borsh.U8).pipe(Borsh.fixedArray(4)),
+      Borsh.fixedArray(Borsh.U8, 4),
       Schema.ReadonlyMap(Borsh.U8, Borsh.U8),
     ] as const
     const inputs = [
@@ -403,8 +403,8 @@ describe("zero-sized schemas", () => {
     Borsh.Unit,
     Schema.Struct({}),
     Borsh.fixedBytes(0),
-    Schema.Array(Borsh.U32).pipe(Borsh.fixedArray(0)),
-    Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(3)),
+    Borsh.fixedArray(Borsh.U32, 0),
+    Borsh.fixedArray(Borsh.Unit, 3),
     Schema.Tuple([Borsh.Unit, Schema.Struct({ empty: Schema.Struct({}) })]),
     Borsh.Unit.pipe(
       Schema.decodeTo(Schema.Literal("unit"), {
@@ -467,9 +467,7 @@ describe("zero-sized schemas", () => {
           Schema.Struct(Object.fromEntries(fields.map((field, i) => [`f${i}`, field]))),
         ),
       fc.array(tie("schema"), { maxLength: 3 }).map((items) => Schema.Tuple(items)),
-      fc
-        .tuple(tie("schema"), fc.nat(2))
-        .map(([item, length]) => Schema.Array(item).pipe(Borsh.fixedArray(length))),
+      fc.tuple(tie("schema"), fc.nat(2)).map(([item, length]) => Borsh.fixedArray(item, length)),
       tie("schema").map((item) => Schema.Option(item)),
       tie("schema").map((item) => Schema.TaggedUnion({ Only: { item } })),
       tie("schema").map((item) => Schema.TaggedUnion({ Empty: {}, Full: { item } })),
