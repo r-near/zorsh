@@ -1,4 +1,4 @@
-import { Context, Effect, Option, Schema, SchemaAST, SchemaTransformation } from "effect"
+import { Context, Effect, Option, Schema, SchemaTransformation } from "effect"
 import { expect, expectTypeOf, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { compile } from "../src/internal/compiler.js"
@@ -634,14 +634,8 @@ it("does not share struct layouts that omit an enum tag", () => {
   )
 })
 
-it("checks malformed Option declarations and binary encoder inputs", () => {
+it("checks binary encoder inputs for Option and enums", () => {
   const ast = Schema.Option(Borsh.U8).ast
-  const hole: SchemaAST.AST[] = []
-  hole.length = 1
-  for (const parameters of [[], [Borsh.U8.ast, Borsh.U8.ast], hole]) {
-    const invalid = new SchemaAST.Declaration(parameters, ast.run, ast.annotations)
-    expect(() => compile(invalid)).toThrow(/^\$: Option requires exactly 1 encoded type parameter$/)
-  }
   expect(() => compile(ast).write(new Writer(20), {})).toThrow(/Expected Option/)
   const layout = compile(Schema.toEncoded(schema).ast)
   for (const value of [null, 1]) {

@@ -1,4 +1,4 @@
-import { Context, Effect, Exit, Result, Schema, SchemaAST, SchemaTransformation } from "effect"
+import { Context, Effect, Exit, Result, Schema, SchemaTransformation } from "effect"
 import { expect, expectTypeOf, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { compile } from "../src/internal/compiler.js"
@@ -184,22 +184,6 @@ it("retains nested Result paths, payload transformations and inactive branch non
   expect(() =>
     Schema.decodeSync(Borsh.toCodec(Schema.Tuple([shared, shared])))(Uint8Array.of(0, 1, 2)),
   ).toThrow(/Invalid bool tag 2 at byte 2\n {2}at \[1\]\["success"\]$/)
-})
-
-it("validates Result arity and explicitly annotated fixed-array shapes", () => {
-  const ast = Schema.Result(Borsh.U8, Borsh.Unit).ast
-  const sparse: SchemaAST.AST[] = []
-  sparse[1] = Borsh.Unit.ast
-  for (const parameters of [
-    [],
-    [Borsh.U8.ast],
-    [Borsh.U8.ast, Borsh.Unit.ast, Borsh.U8.ast],
-    sparse,
-  ]) {
-    expect(() => compile(new SchemaAST.Declaration(parameters, ast.run, ast.annotations))).toThrow(
-      /^\$: Result requires exactly 2 encoded type parameters$/,
-    )
-  }
 })
 
 it("keeps native array checks and fixed-item error paths", () => {

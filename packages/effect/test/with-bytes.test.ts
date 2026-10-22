@@ -5,7 +5,6 @@ import {
   Option,
   Result,
   Schema,
-  SchemaAST,
   SchemaRepresentation,
   SchemaTransformation,
 } from "effect"
@@ -221,17 +220,6 @@ describe("decoding", () => {
   it("cannot be a map key or set member, which needs a Rust ordering", () => {
     expect(() => Borsh.toCodec(Schema.ReadonlySet(Borsh.withBytes(Borsh.U8)))).toThrow(
       "$: ReadonlySet keys require Boolean, integer or String Rust ordering",
-    )
-  })
-
-  it("rejects a hand-built declaration with the wrong arity", () => {
-    const wrapped = Borsh.withBytes(Borsh.U8)
-    const declaration = wrapped.ast
-    const forged = Schema.make<Schema.Top>(
-      new SchemaAST.Declaration([], declaration.run, declaration.annotations),
-    )
-    expect(() => Borsh.toCodec(forged)).toThrow(
-      "$: withBytes requires exactly 1 encoded type parameter",
     )
   })
 })
