@@ -84,6 +84,21 @@ const entries = [
     (values) => values.map(String),
   ),
   spec(
+    "array_array_u8_2_2",
+    Borsh.fixedArray(Borsh.fixedArray(Borsh.U8, 2), 2),
+    fc.array(fc.array(fc.integer({ min: 0, max: 255 }), { minLength: 2, maxLength: 2 }), {
+      minLength: 2,
+      maxLength: 2,
+    }),
+    (rows) => rows.map((row) => row.map(String)),
+  ),
+  spec(
+    "vec_array_u16_2",
+    Schema.Array(Borsh.fixedArray(Borsh.U16, 2)),
+    fc.array(fc.array(u16, { minLength: 2, maxLength: 2 }), { maxLength: 4 }),
+    (rows) => rows.map((row) => row.map(String)),
+  ),
+  spec(
     "result_u16_string",
     Schema.Result(Borsh.U16, Schema.String),
     fc.oneof(

@@ -30,7 +30,7 @@ it("writes fixed arrays without a prefix and enforces their binary length", () =
   expect(Schema.encodeSync(Borsh.toCodec(vector))([7])).toEqual(Uint8Array.of(1, 0, 0, 0, 7))
 })
 
-it("rejects invalid fixed-array schemas and conflicting metadata at construction", () => {
+it("rejects invalid fixed-array lengths and conflicting layout metadata", () => {
   for (const length of [-1, 0.5, NaN, Infinity, 0x1_0000_0000]) {
     expect(() => Borsh.fixedArray(Borsh.U8, length)).toThrow(
       /fixedArray length must be a safe integer/,
