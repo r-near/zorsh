@@ -10,7 +10,7 @@ import {
 } from "effect"
 import { describe, expect, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
-import { compile } from "../src/internal/compiler.js"
+import { compile } from "../src/internal/compile.js"
 import { Writer } from "../src/internal/io.js"
 
 function failure(run: () => unknown): Schema.SchemaError {

@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { expect, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
-import { compile } from "../src/internal/compiler.js"
+import { compile } from "../src/internal/compile.js"
 import { Writer } from "../src/internal/io.js"
 
 function write(schema: Schema.Constraint, value: unknown) {

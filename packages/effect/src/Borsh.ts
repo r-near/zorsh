@@ -20,12 +20,21 @@ import {
   SchemaParser,
   SchemaTransformation,
 } from "effect"
-import { isU32Length, maxLengthId, parseDiscriminants, withLayout } from "./internal/annotations.js"
-import { compile, type Layout } from "./internal/compiler.js"
-import { enumVariants } from "./internal/enums.js"
+import { compile, enumVariants, maxLengthId, withBytesId, withLayout } from "./internal/compile.js"
 import { BinaryError, Reader, type ReaderOptions, utf8Length, Writer } from "./internal/io.js"
-import { isValueWithBytes, type ValueWithBytes, withBytesId } from "./internal/natives.js"
-import { integerRange } from "./internal/primitives.js"
+import {
+  integerRange,
+  isValueWithBytes,
+  type Layout,
+  type ValueWithBytes,
+} from "./internal/layout.js"
+
+/** Rust collection and array lengths: a safe integer that fits in a u32. */
+function isU32Length(value: unknown): value is number {
+  return (
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 0xffff_ffff
+  )
+}
 
 function integer(bits: 8 | 16 | 32, signed: boolean) {
   const { minimum, maximum } = integerRange(bits, signed)
@@ -394,6 +403,23 @@ export function discriminants(
     enumVariants(Schema.toEncoded(schema).ast, layout, "$")
     return withLayout(schema, layout)
   }
+}
+
+/** A frozen copy of a user's discriminant map, which must assign unique u8 values. */
+function parseDiscriminants(
+  map: Readonly<Record<string, number>>,
+): Readonly<Record<string, number>> {
+  // Read the map once, so a getter cannot pass validation and then store something else.
+  const entries = Object.entries(map)
+  const seen = new Set<number>()
+  for (const [, discriminant] of entries) {
+    const isU8 = Number.isInteger(discriminant) && discriminant >= 0 && discriminant <= 255
+    if (!isU8 || seen.has(discriminant)) {
+      throw new Error("$: Borsh enum discriminants must be unique integers from 0 to 255")
+    }
+    seen.add(discriminant)
+  }
+  return Object.freeze(Object.fromEntries(entries))
 }
 
 /** What a Borsh length prefix can count. */
