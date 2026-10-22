@@ -150,10 +150,10 @@ for (const c of [
     zorsh: b.vec(b.string()),
     zorshValue: undefined,
   }),
-  // The early-check and maxItems paths, so their cost shows next to the plain cases above.
+  // The maxLength and maxItems paths, so their cost shows next to the plain cases above.
   defineCase({
-    name: "Array(U32) with isMaxLength, 1000 items",
-    schema: Schema.Array(Borsh.U32).check(Schema.isMaxLength(100_000)),
+    name: "Array(U32) with Borsh.maxLength, 1000 items",
+    schema: Schema.Array(Borsh.U32).check(Borsh.maxLength(100_000)),
     value: Array.from({ length: 1000 }, (_, i) => i * 7919),
     zorsh: b.vec(b.u32()),
     zorshValue: undefined,

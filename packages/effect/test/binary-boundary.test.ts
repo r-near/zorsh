@@ -22,6 +22,7 @@ it("rejects malformed values at the binary writer boundary", () => {
     [Schema.Boolean, 1, "Expected boolean at byte 0"],
     [Borsh.Bytes, [], "Expected Uint8Array at byte 0"],
     [Borsh.Bytes, oversizedBytes, "Byte array exceeds u32 length at byte 0"],
+    [Borsh.fixedBytes(2), [1, 2], "Expected Uint8Array at byte 0"],
     [Borsh.fixedBytes(2), Uint8Array.of(1), "Expected 2 bytes at byte 0"],
     [Schema.Struct({ value: Borsh.U8 }), null, "Expected object at byte 0"],
     [Schema.Struct({ value: Borsh.U8 }), {}, "Missing required field at byte 0", ["value"]],

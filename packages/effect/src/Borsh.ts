@@ -10,6 +10,8 @@
 import {
   Effect,
   Formatter,
+  HashMap,
+  HashSet,
   Order,
   Schema,
   SchemaAST,
@@ -18,10 +20,10 @@ import {
   SchemaParser,
   SchemaTransformation,
 } from "effect"
-import { isU32Length, parseDescriptor, withLayout } from "./internal/annotations.js"
+import { isU32Length, maxLengthId, parseDescriptor, withLayout } from "./internal/annotations.js"
 import { compile, type Layout, prepare } from "./internal/compiler.js"
 import { enumVariants } from "./internal/enums.js"
-import { BinaryError, Reader, type ReaderOptions, Writer } from "./internal/io.js"
+import { BinaryError, Reader, type ReaderOptions, utf8Length, Writer } from "./internal/io.js"
 import { isValueWithBytes, type ValueWithBytes, withBytesId } from "./internal/natives.js"
 import { integerRange } from "./internal/primitives.js"
 
@@ -492,16 +494,131 @@ export function discriminants<
   }
 }
 
+/** What a Borsh length prefix can count. */
+type LengthPrefixed =
+  | string
+  | Uint8Array
+  | ReadonlyArray<unknown>
+  | ReadonlyMap<unknown, unknown>
+  | ReadonlySet<unknown>
+  | HashMap.HashMap<unknown, unknown>
+  | HashSet.HashSet<unknown>
+
+/**
+ * Bounds a Borsh length prefix, whatever it counts: vector items, the UTF-8
+ * bytes of a string, the bytes of `Borsh.Bytes`, map entries or set members.
+ *
+ * **Details**
+ *
+ * Put it on the encoded side, before any transformation, as in
+ * `Schema.String.check(Borsh.maxLength(1024))`. Decoding fails as soon as it
+ * reads a larger length, before reading anything after it, and encoding fails
+ * before writing the length, with `Length 2000 exceeds maxLength (1024)`, the
+ * path and the byte offset. Like `maxBytes`, it is part of the codec, so it
+ * also applies under `disableChecks`, and decoding middleware nested in the
+ * schema, such as a field's `Schema.catchDecoding`, cannot recover from it. As
+ * with truncated input, only middleware on the schema's root can.
+ *
+ * Effect also runs it as an ordinary check, so `Schema.is`, `make`, Arbitrary
+ * samples and encoding agree with the wire. A string with a lone UTF-16
+ * surrogate has no UTF-8 length and fails with "Lone UTF-16 surrogate".
+ * `annotations` shape that schema-pass failure, not the wire one. After a
+ * transformation, `maxLength` is only an ordinary check. On a layout without a
+ * length prefix, such as `fixedBytes`, `fixedArray`, a tuple, a struct or an
+ * enum, {@link toCodec} throws. The smallest of several bounds applies. It
+ * bounds the count on the wire, so a map or set whose keys merge as they decode
+ * can fail it while holding fewer entries. `n` must be an integer from 0
+ * through 2^32 - 1.
+ *
+ * **Example** (Bounded strings and vectors)
+ *
+ * ```ts
+ * import { Borsh } from "@zorsh/effect"
+ * import { Schema } from "effect"
+ *
+ * const Log = Schema.Struct({
+ *   message: Schema.String.check(Borsh.maxLength(1024)),
+ *   tags: Schema.Array(Schema.String).check(Borsh.maxLength(16)),
+ * })
+ * const codec = Borsh.toCodec(Log, { maxItems: 1_000 })
+ * ```
+ *
+ * @category limits
+ * @since 0.1.0
+ */
+export function maxLength(
+  n: number,
+  annotations?: Schema.Annotations.Filter,
+): SchemaAST.Filter<LengthPrefixed> {
+  if (!isU32Length(n)) {
+    throw new Error("$: maxLength must be a safe integer between 0 and 2^32 - 1")
+  }
+  return Schema.makeFilter<LengthPrefixed>(
+    (value) => {
+      const length = prefixedLength(value, n)
+      if (length < 0) {
+        return "Lone UTF-16 surrogate"
+      }
+      return length <= n
+    },
+    {
+      expected: `a Borsh length of at most ${n}`,
+      ...annotations,
+      // Last, so user annotations cannot remove the bound the compiler reads or the sampling hint.
+      representation: { id: maxLengthId, payload: { maxLength: n } },
+      // Strings sample in UTF-16 units; the predicate discards the few that overshoot in UTF-8.
+      arbitraryConstraint: { maxLength: n, maxSize: n },
+      // Effect drops non-structural checks from the encoded side of a container whose items
+      // transform, and the compiler only sees the encoded side.
+      "~structural": true,
+    },
+  )
+}
+
+/**
+ * The count value's length prefix holds, -1 for a string with a lone surrogate, or Infinity for
+ * a value without one. A string's count stops once it passes stop.
+ */
+function prefixedLength(value: unknown, stop: number): number {
+  if (typeof value === "string") {
+    return utf8Length(value, stop)
+  }
+  if (HashMap.isHashMap(value)) {
+    return HashMap.size(value)
+  }
+  if (HashSet.isHashSet(value)) {
+    return HashSet.size(value)
+  }
+  // Count bytes as the writer does, whatever a subclass reports as its length.
+  if (value instanceof Uint8Array) {
+    return value.byteLength
+  }
+  if (Array.isArray(value)) {
+    return value.length
+  }
+  if (value instanceof Map || value instanceof Set) {
+    return value.size
+  }
+  return Infinity
+}
+
 /**
  * Options for {@link toCodec}, {@link decodePrefixEffect} and {@link decodePrefixSync}.
  *
  * **Untrusted input**
  *
  * The binary layer checks every length prefix against the bytes that remain,
- * but small items, such as unit enum variants or `Option.none()`, let one input
- * byte become one decoded value. Set `maxBytes` and `maxItems` to the largest
- * message you expect, and put `Schema.isMaxLength` or `Schema.isMaxSize` on the
- * encoded side of each collection. Both are enforced before any item is read.
+ * so no string or byte array allocates past the input, but small items, such
+ * as unit enum variants or `Option.none()`, let one input byte become one
+ * decoded value. Set `maxBytes` and `maxItems` to the largest message you
+ * expect, and bound single length prefixes with {@link maxLength}: vector
+ * items, string UTF-8 bytes, `Borsh.Bytes` length, map entries and set
+ * members. With both options set, decoding the binary layout of a schema does
+ * work and allocates memory in proportion to `maxBytes` plus `maxItems`,
+ * whatever the input claims. That bound covers only the binary layer: checks,
+ * filters and transformations in the schema pass are the schema's own code
+ * and can do any amount of work. Effect's own checks, such as
+ * `Schema.isMaxLength`, run there, after the binary layer has read the value.
  *
  * @category models
  * @since 0.1.0
@@ -562,20 +679,11 @@ const optionsCacheSize = 8
  * issue names the path and byte offset. Codecs are memoized by schema identity,
  * `maxBytes` and `maxItems`, keeping up to 8 option combinations per schema.
  *
- * The binary layer enforces the schema's own length and size checks,
- * `Schema.isMinLength`, `isMaxLength`, `isBetweenLength` (and `isNonEmpty`) on
- * vectors and `Borsh.Bytes`, and `Schema.isMinSize`, `isMaxSize` and
- * `isBetweenSize` on maps and sets, as soon as it reads the length prefix,
- * before reading any item. They must be on the encoded side of the schema,
- * before any transformation. Effect still runs them in the schema pass, so this
- * only makes oversized input fail sooner, with a `Filter` issue for the failing
- * check plus the count and byte offset. `disableChecks` skips them. Checks on
- * strings, in custom filters and after a transformation run only in the
- * schema pass, as does a maximum size on a map or set whose key schema has a
- * transformation, because decoding can merge its keys, and any check beneath
- * decoding middleware such as `Schema.catchDecoding`, or in a union containing
- * it, since the middleware can recover from the failure. See {@link Options}
- * for `maxItems`.
+ * The only limits on the wire are the ones you write: `maxBytes` and
+ * `maxItems` in {@link Options}, and {@link maxLength} on a length prefix.
+ * Every other check, including Effect's own `Schema.isMaxLength` and
+ * `isMaxSize`, runs in the schema pass after the binary layer has read the
+ * value.
  *
  * **Example** (Encoding contract arguments)
  *
@@ -598,12 +706,12 @@ const optionsCacheSize = 8
  * import { Schema } from "effect"
  *
  * const Receipt = Schema.Struct({
- *   logs: Schema.Array(Schema.String).check(Schema.isMaxLength(100)),
- *   payload: Borsh.Bytes.check(Schema.isMaxLength(64 * 1024)),
+ *   logs: Schema.Array(Schema.String).check(Borsh.maxLength(100)),
+ *   payload: Borsh.Bytes.check(Borsh.maxLength(64 * 1024)),
  * })
  * const codec = Borsh.toCodec(Receipt, { maxBytes: 256 * 1024, maxItems: 10_000 })
  * // A `logs` count of 2^32 - 1 fails right after its 4-byte prefix:
- * // Expected a value with a length of at most 100, got 4294967295 items at byte 0
+ * // Length 4294967295 exceeds maxLength (100) at byte 0
  * ```
  *
  * @category constructors

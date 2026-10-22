@@ -204,8 +204,18 @@ describe("decodePrefixSync", () => {
     expect(Borsh.decodePrefixSync(Text)(Uint8Array.of(3, 0))).toEqual({ value: "3", offset: 1 })
   })
 
-  it("enforces maxItems inside the value, at absolute offsets", () => {
+  it("enforces Borsh.maxLength and maxItems inside the value, at absolute offsets", () => {
+    const Bounded = Schema.Struct({
+      tag: Borsh.U8,
+      items: Schema.Array(Borsh.U8).check(Borsh.maxLength(2)),
+    })
     const buffer = Uint8Array.of(0, 0, 0, 7, ...u32(3), 1, 2, 3)
+    const decodeBounded = Borsh.decodePrefixSync(Bounded)
+    for (const options of [undefined, { disableChecks: true }]) {
+      expect(failure(() => decodeBounded(buffer, 3, options)).message).toBe(
+        'Length 3 exceeds maxLength (2) at byte 4\n  at ["items"]',
+      )
+    }
     const decodeBudgeted = Borsh.decodePrefixSync(Schema.Array(Borsh.U8), { maxItems: 2 })
     expect(failure(() => decodeBudgeted(buffer, 4)).message).toBe(
       "Input exceeds maxItems (2) at byte 4",

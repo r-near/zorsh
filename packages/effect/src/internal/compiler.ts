@@ -1,10 +1,10 @@
 import type { SchemaAST } from "effect"
-import { descriptor, type LayoutDescriptor } from "./annotations.js"
-import { compileArrays, compileObject, fixedArray } from "./containers.js"
+import { descriptor, type LayoutDescriptor, maxLengthOf, rejectMaxLength } from "./annotations.js"
+import { compileArrays, compileObject, fixedArray, homogeneousItem } from "./containers.js"
 import { compileEnum } from "./enums.js"
 import type { Reader, Writer } from "./io.js"
-import { compileDeclaration, isUint8Array } from "./natives.js"
-import { boolean, bytes, float, integer, string } from "./primitives.js"
+import { compileDeclaration, isLengthPrefixed, isUint8Array } from "./natives.js"
+import { boolean, fixedBytes, float, integer, string } from "./primitives.js"
 
 export interface Layout {
   readonly minBytes: number
@@ -15,6 +15,9 @@ export interface Layout {
 }
 
 export type Compile = (ast: SchemaAST.AST, path: string) => Layout
+
+/** Every u32 length fits, so a layout without Borsh.maxLength never fails its comparison. */
+const unbounded = 0xffff_ffff
 
 /**
  * Walks the original schema, before `toEncoded` drops its type side. Recursive schemas are
@@ -98,23 +101,27 @@ function compileNode(ast: SchemaAST.AST, path: string, compile: Compile): Layout
     )
   }
   const layout = descriptor(ast, path)
+  if (layout !== undefined || !hasLengthPrefix(ast)) {
+    rejectMaxLength(ast, path)
+  }
   if (layout !== undefined) {
     return compileDescriptor(ast, layout, path, compile)
   }
+  const bound = maxLengthOf(ast) ?? unbounded
   switch (ast._tag) {
     case "Declaration":
-      return compileDeclaration(ast, path, compile)
+      return compileDeclaration(ast, path, compile, bound)
     case "Union":
     case "Enum":
       return compileEnum(ast, undefined, path, compile)
     case "String":
-      return string()
+      return string(bound)
     case "Boolean":
       return boolean()
     case "Objects":
       return compileObject(ast, path, compile)
     case "Arrays":
-      return compileArrays(ast, path, compile)
+      return compileArrays(ast, path, compile, bound)
     case "Number":
     case "BigInt":
       throw new Error(
@@ -152,10 +159,23 @@ function compileDescriptor(
       if (!isUint8Array(ast)) {
         throw new Error(`${path}: Fixed bytes layout requires an encoded Uint8Array`)
       }
-      return bytes(layout.length)
+      return fixedBytes(layout.length)
     case "fixedArray":
       return fixedArray(ast, layout.length, path, compile)
     case "enum":
       return compileEnum(ast, layout, path, compile)
   }
+}
+
+/** Whether ast's layout starts with a u32 length that Borsh.maxLength can bound. */
+function hasLengthPrefix(ast: SchemaAST.AST): boolean {
+  switch (ast._tag) {
+    case "String":
+      return true
+    case "Arrays":
+      return homogeneousItem(ast) !== undefined
+    case "Declaration":
+      return isLengthPrefixed(ast)
+  }
+  return false
 }

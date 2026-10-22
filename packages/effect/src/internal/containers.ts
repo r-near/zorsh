@@ -1,6 +1,6 @@
 import type { SchemaAST } from "effect"
 import type { Compile, Layout } from "./compiler.js"
-import { BinaryError, prepend, type Reader, type Writer } from "./io.js"
+import { BinaryError, checkMaxLength, prepend, type Reader, type Writer } from "./io.js"
 
 /** A Rust struct: fields in declaration order. `omit` skips an enum variant's tag field. */
 export function compileObject(
@@ -83,14 +83,19 @@ export function defineField(target: object, name: PropertyKey, value: unknown): 
 }
 
 /** The item of a plain `ReadonlyArray<T>`, with no leading or trailing elements. */
-function homogeneousItem(ast: SchemaAST.AST): SchemaAST.AST | undefined {
+export function homogeneousItem(ast: SchemaAST.AST): SchemaAST.AST | undefined {
   if (ast._tag === "Arrays" && ast.elements.length === 0 && ast.rest.length === 1) {
     return ast.rest[0]
   }
   return undefined
 }
 
-export function compileArrays(ast: SchemaAST.Arrays, path: string, compile: Compile): Layout {
+export function compileArrays(
+  ast: SchemaAST.Arrays,
+  path: string,
+  compile: Compile,
+  maxLength: number,
+): Layout {
   if (ast.rest.length === 0) {
     return tuple(ast.elements.map((item, i) => compile(item, `${path}[${i}]`)))
   }
@@ -100,7 +105,7 @@ export function compileArrays(ast: SchemaAST.Arrays, path: string, compile: Comp
       `${path}: Mixed tuple rests have no Borsh layout; move the rest into its own Schema.Array element, or use Schema.Array with Schema.isMinLength`,
     )
   }
-  return vector(compile(rest, `${path}[]`))
+  return vector(compile(rest, `${path}[]`), maxLength)
 }
 
 function tuple(items: ReadonlyArray<Layout>): Layout {
@@ -138,7 +143,7 @@ function tuple(items: ReadonlyArray<Layout>): Layout {
 }
 
 /** Rust Vec<T>. Zero-sized items are rejected when visited, as borsh-rs does. */
-function vector(item: Layout): Layout {
+function vector(item: Layout, maxLength: number): Layout {
   const rejectZeroSizedItem = (offset: number) => {
     if (item.isZeroSized) {
       throw new BinaryError(offset, "Borsh forbids vectors of zero-sized values")
@@ -151,6 +156,7 @@ function vector(item: Layout): Layout {
       rejectZeroSizedItem(r.offset)
       const offset = r.offset
       const count = r.u32()
+      checkMaxLength(count, maxLength, offset)
       r.charge(count, offset)
       // Each item needs at least minBytes, so reject an impossible count before allocating.
       if (count > Math.floor((r.end - r.offset) / item.minBytes)) {
@@ -163,6 +169,7 @@ function vector(item: Layout): Layout {
       if (!Array.isArray(value) || value.length > 0xffff_ffff) {
         throw new BinaryError(w.offset, "Expected array with u32 length")
       }
+      checkMaxLength(value.length, maxLength, w.offset)
       w.charge(value.length, w.offset)
       w.u32(value.length)
       writeItems(w, item, value)

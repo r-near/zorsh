@@ -1,16 +1,22 @@
 import { HashMap, HashSet, Option, Result, type SchemaAST } from "effect"
 import type { Compile, Layout } from "./compiler.js"
-import { BinaryError, prepend, type Reader, type Writer } from "./io.js"
+import { BinaryError, checkMaxLength, prepend, type Reader, type Writer } from "./io.js"
 import { bytes } from "./primitives.js"
 
 const uint8ArrayId = "effect/schema/Uint8Array"
 
-type Native = (ast: SchemaAST.Declaration, path: string, compile: Compile) => Layout
+type Native = (
+  ast: SchemaAST.Declaration,
+  path: string,
+  compile: Compile,
+  maxLength: number,
+) => Layout
 
 export function compileDeclaration(
   ast: SchemaAST.Declaration,
   path: string,
   compile: Compile,
+  maxLength: number,
 ): Layout {
   const id = representationId(ast)
   // Own keys only, so an id such as "constructor" cannot select an Object.prototype member.
@@ -21,7 +27,13 @@ export function compileDeclaration(
       `${path}: ${subject} has no Borsh layout; decode it from a Borsh-encodable schema with Schema.decodeTo`,
     )
   }
-  return native(ast, path, compile)
+  return native(ast, path, compile, maxLength)
+}
+
+/** Declarations whose layout starts with a u32 length, which Borsh.maxLength can bound. */
+export function isLengthPrefixed(ast: SchemaAST.Declaration): boolean {
+  const id = representationId(ast)
+  return id !== undefined && lengthPrefixedIds.has(id)
 }
 
 /** The declaration fixedBytes may annotate. */
@@ -202,7 +214,12 @@ interface CollectionAdapter {
  * Rust BTreeMap/BTreeSet, also for Hash collections: a u32 count, then strictly increasing keys.
  */
 function collectionLayout(adapter: CollectionAdapter) {
-  return (ast: SchemaAST.Declaration, path: string, compile: Compile): Layout => {
+  return (
+    ast: SchemaAST.Declaration,
+    path: string,
+    compile: Compile,
+    maxLength: number,
+  ): Layout => {
     const [key, value] = parameters(ast, adapter.arity, adapter.name, path)
     const keyLayout = compile(key, `${path}["key"]`)
     const compare = keyLayout.compare
@@ -273,6 +290,7 @@ function collectionLayout(adapter: CollectionAdapter) {
       read: (r) => {
         const offset = r.offset
         const count = r.u32()
+        checkMaxLength(count, maxLength, offset)
         r.charge(count, offset)
         return readEntries(r, count)
       },
@@ -281,6 +299,7 @@ function collectionLayout(adapter: CollectionAdapter) {
         if (collection === undefined || collection.size > 0xffff_ffff) {
           throw new BinaryError(w.offset, "Expected native collection with u32 length")
         }
+        checkMaxLength(collection.size, maxLength, w.offset)
         w.charge(collection.size, w.offset)
         writeEntries(w, collection)
       },
@@ -321,6 +340,14 @@ const hashSet = collectionLayout({
   make: (entries) => HashSet.fromIterable(entries.map(([key]) => key)),
 })
 
+const lengthPrefixedIds: ReadonlySet<string> = new Set([
+  uint8ArrayId,
+  "effect/schema/ReadonlyMap",
+  "effect/schema/ReadonlySet",
+  "effect/schema/HashMap",
+  "effect/schema/HashSet",
+])
+
 /** Set members as [key, key] entries, the shape Set.prototype.entries yields. */
 function* keyPairs<K>(keys: Iterable<K>): Generator<readonly [K, K]> {
   for (const key of keys) {
@@ -330,7 +357,7 @@ function* keyPairs<K>(keys: Iterable<K>): Generator<readonly [K, K]> {
 
 /** Effect declarations with a Borsh layout, keyed by their representation id. */
 const natives: Readonly<Record<string, Native>> = {
-  [uint8ArrayId]: () => bytes(),
+  [uint8ArrayId]: (_ast, _path, _compile, maxLength) => bytes(maxLength),
   "effect/schema/Option": option,
   "effect/schema/Result": result,
   "effect/schema/ReadonlyMap": readonlyMap,
