@@ -150,12 +150,7 @@ export function string(maxLength: number): Layout {
     compare: compareString,
     minBytes: 4,
     isZeroSized: false,
-    read: (r) => {
-      const offset = r.offset
-      const length = r.u32()
-      checkMaxLength(length, maxLength, offset)
-      return r.string(length)
-    },
+    read: (r) => r.string(r.length(maxLength)),
     write: (w, value) => {
       if (typeof value !== "string") {
         throw new BinaryError(w.offset, "Expected string")
@@ -178,12 +173,7 @@ export function bytes(maxLength: number): Layout {
   return {
     minBytes: 4,
     isZeroSized: false,
-    read: (r) => {
-      const offset = r.offset
-      const length = r.u32()
-      checkMaxLength(length, maxLength, offset)
-      return r.take(length).slice()
-    },
+    read: (r) => r.take(r.length(maxLength)).slice(),
     write: (w, value) => {
       if (!(value instanceof Uint8Array)) {
         throw new BinaryError(w.offset, "Expected Uint8Array")
@@ -361,15 +351,7 @@ export function vector(item: Layout, maxLength: number): Layout {
     isZeroSized: false,
     read: (r) => {
       rejectZeroSizedItem(r.offset)
-      const offset = r.offset
-      const count = r.u32()
-      checkMaxLength(count, maxLength, offset)
-      r.charge(count, offset)
-      // Each item needs at least minBytes, so reject an impossible count before allocating.
-      if (count > Math.floor((r.end - r.offset) / item.minBytes)) {
-        throw r.pastEnd(r.offset, count * item.minBytes, "Truncated vector payload")
-      }
-      return readItems(r, item, count)
+      return readItems(r, item, r.count(maxLength, item.minBytes, "Truncated vector payload"))
     },
     write: (w, value) => {
       rejectZeroSizedItem(w.offset)
@@ -611,71 +593,36 @@ export function collection(
   value: Layout | undefined,
   maxLength: number,
 ): Layout {
-  const compare = key.compare
-  const minEntryBytes = key.minBytes + (value?.minBytes ?? 0)
+  const minEntryBytes = key.minBytes + (value === undefined ? 0 : value.minBytes)
   const assertIncreasing = (previous: unknown, next: unknown, offset: number) => {
-    if (compare(previous, next) >= 0) {
+    if (key.compare(previous, next) >= 0) {
       throw new BinaryError(offset, "Collection keys must be strictly increasing")
-    }
-  }
-  const readEntries = (r: Reader, count: number) => {
-    // Each entry needs at least minEntryBytes, so reject an impossible count before allocating.
-    if (count > Math.floor((r.end - r.offset) / minEntryBytes)) {
-      throw r.pastEnd(r.offset, count * minEntryBytes, "Truncated collection payload")
-    }
-    const entries: Entry[] = []
-    // The entry index and part locate a failure, as in [3]["value"].
-    let i = 0
-    let part = "key"
-    try {
-      for (; i < count; i++) {
-        const offset = r.offset
-        part = "key"
-        const item = key.read(r)
-        if (i > 0) {
-          assertIncreasing(entries[i - 1]?.[0], item, offset)
-        }
-        part = "value"
-        entries.push([item, value === undefined ? undefined : value.read(r)])
-      }
-    } catch (error) {
-      throw prepend(prepend(error, part), i)
-    }
-    return kind.make(entries)
-  }
-  const writeEntries = (w: Writer, size: number, items: Iterable<Entry>) => {
-    w.ensure(4 + (size === 0 ? 0 : size * minEntryBytes))
-    // Sorted into Rust order, so the increasing check below only rejects keys Rust deems equal.
-    const entries = Array.from(items).sort(([a], [b]) => compare(a, b))
-    w.u32(entries.length)
-    let i = 0
-    let part = "key"
-    try {
-      for (const [item, itemValue] of entries) {
-        part = "key"
-        if (i > 0) {
-          assertIncreasing(entries[i - 1]?.[0], item, w.offset)
-        }
-        key.write(w, item)
-        part = "value"
-        if (value !== undefined) {
-          value.write(w, itemValue)
-        }
-        i++
-      }
-    } catch (error) {
-      throw prepend(prepend(error, part), i)
     }
   }
   return {
     minBytes: 4,
     isZeroSized: false,
     read: (r) => {
-      const offset = r.offset
-      const count = r.u32()
-      checkMaxLength(count, maxLength, offset)
-      r.charge(count, offset)
-      return readEntries(r, count)
+      const count = r.count(maxLength, minEntryBytes, "Truncated collection payload")
+      const entries: Entry[] = []
+      // The entry index and part locate a failure, as in [3]["value"].
+      let i = 0
+      let part = "key"
+      try {
+        for (; i < count; i++) {
+          const offset = r.offset
+          part = "key"
+          const item = key.read(r)
+          if (i > 0) {
+            assertIncreasing(entries[i - 1]?.[0], item, offset)
+          }
+          part = "value"
+          entries.push([item, value === undefined ? undefined : value.read(r)])
+        }
+      } catch (error) {
+        throw prepend(prepend(error, part), i)
+      }
+      return kind.make(entries)
     },
     write: (w, input) => {
       const native = kind.get(input)
@@ -684,7 +631,27 @@ export function collection(
       }
       checkMaxLength(native.size, maxLength, w.offset)
       w.charge(native.size, w.offset)
-      writeEntries(w, native.size, native.entries)
+      // Summed minBytes can reach Infinity, and 0 * Infinity is NaN.
+      w.ensure(4 + (native.size === 0 ? 0 : native.size * minEntryBytes))
+      // Sorted into Rust order, so the increasing check below only rejects keys Rust deems equal.
+      const entries = Array.from(native.entries).sort(([a], [b]) => key.compare(a, b))
+      w.u32(entries.length)
+      let i = 0
+      let part = "key"
+      try {
+        for (const [item, itemValue] of entries) {
+          part = "key"
+          if (i > 0) {
+            assertIncreasing(entries[i - 1]?.[0], item, w.offset)
+          }
+          key.write(w, item)
+          part = "value"
+          value?.write(w, itemValue)
+          i++
+        }
+      } catch (error) {
+        throw prepend(prepend(error, part), i)
+      }
     },
   }
 }

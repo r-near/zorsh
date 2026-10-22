@@ -89,6 +89,28 @@ export class Reader {
     return offset
   }
 
+  /** A u32 length prefix, failing at it when it exceeds maxLength. */
+  length(maxLength: number): number {
+    const offset = this.offset
+    const length = this.u32()
+    checkMaxLength(length, maxLength, offset)
+    return length
+  }
+
+  /**
+   * A u32 item count, also charged to maxItems at its prefix. Items need at least minBytes each,
+   * so an impossible count fails before anything is allocated.
+   */
+  count(maxLength: number, minBytes: number, detail: string): number {
+    const offset = this.offset
+    const count = this.length(maxLength)
+    this.charge(count, offset)
+    if (count > Math.floor((this.end - this.offset) / minBytes)) {
+      throw this.pastEnd(this.offset, count * minBytes, detail)
+    }
+    return count
+  }
+
   take(length: number): Uint8Array {
     const offset = this.advance(length)
     return this.input.subarray(offset, offset + length)

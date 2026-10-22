@@ -1,29 +1,5 @@
 import { Schema, SchemaAST } from "effect"
-import {
-  array,
-  boolean,
-  bytes,
-  type Collection,
-  collection,
-  enumOf,
-  fixedBytes,
-  float,
-  hashMap,
-  hashSet,
-  integer,
-  type Key,
-  type Layout,
-  option,
-  readonlyMap,
-  readonlySet,
-  result,
-  string,
-  struct,
-  tuple,
-  type Variant,
-  vector,
-  withBytes,
-} from "./layout.js"
+import * as L from "./layout.js"
 
 /** The representation id of `Borsh.maxLength`. */
 export const maxLengthId = "@zorsh/effect/maxLength"
@@ -34,7 +10,7 @@ export const withBytesId = "@zorsh/effect/withBytes"
 /** Private: only this package's constructors write it, through withLayout. */
 const layoutKey = "@zorsh/effect/borsh/layout"
 
-export type LayoutAnnotation =
+type LayoutAnnotation =
   | { readonly kind: "integer"; readonly bits: 8 | 16 | 32 | 64 | 128; readonly signed: boolean }
   | { readonly kind: "float"; readonly bits: 32 | 64 }
   | { readonly kind: "fixedBytes" | "fixedArray"; readonly length: number }
@@ -46,15 +22,15 @@ export type LayoutAnnotation =
 
 type EnumAnnotation = Extract<LayoutAnnotation, { readonly kind: "enum" }>
 
-type Compile = (ast: SchemaAST.AST, path: string) => Layout
+type Compile = (ast: SchemaAST.AST, path: string) => L.Layout
 
 /** Every u32 length fits, so a layout without Borsh.maxLength never fails its comparison. */
 const unbounded = 0xffff_ffff
 
 /** The layout of an encoded AST. Every unsupported schema throws here, naming its path. */
-export function compile(root: SchemaAST.AST): Layout {
+export function compile(root: SchemaAST.AST): L.Layout {
   // A node reused across the schema compiles once.
-  const memo = new Map<SchemaAST.AST, Layout>()
+  const memo = new Map<SchemaAST.AST, L.Layout>()
   const compileCached: Compile = (ast, path) => {
     const cached = memo.get(ast)
     if (cached !== undefined) {
@@ -68,7 +44,7 @@ export function compile(root: SchemaAST.AST): Layout {
 }
 
 /** An explicit layout annotation owns its node; natives and AST tags apply only without one. */
-function compileNode(ast: SchemaAST.AST, path: string, compile: Compile): Layout {
+function compileNode(ast: SchemaAST.AST, path: string, compile: Compile): L.Layout {
   if (ast.context?.isOptional) {
     throw new Error(
       `${path}: Optional properties and elements have no Borsh layout on the encoded side; use Schema.Option for a Rust Option`,
@@ -89,9 +65,9 @@ function compileNode(ast: SchemaAST.AST, path: string, compile: Compile): Layout
     case "Enum":
       return compileEnum(ast, undefined, path, compile)
     case "String":
-      return string(maxLength)
+      return L.string(maxLength)
     case "Boolean":
-      return boolean
+      return L.boolean
     case "Objects":
       return compileObject(ast, path, compile)
     case "Arrays":
@@ -118,18 +94,18 @@ function compileAnnotated(
   annotation: LayoutAnnotation,
   path: string,
   compile: Compile,
-): Layout {
+): L.Layout {
   switch (annotation.kind) {
     case "integer":
-      return integer(annotation.bits, annotation.signed)
+      return L.integer(annotation.bits, annotation.signed)
     case "float":
-      return float(annotation.bits)
+      return L.float(annotation.bits)
     case "fixedBytes":
-      return fixedBytes(annotation.length)
+      return L.fixedBytes(annotation.length)
     case "fixedArray": {
       // Borsh.fixedArray builds Schema.Array(item), so rest holds exactly the item.
       const [item] = (ast as SchemaAST.Arrays).rest as [SchemaAST.AST]
-      return array(compile(item, `${path}[]`), annotation.length)
+      return L.array(compile(item, `${path}[]`), annotation.length)
     }
     case "enum":
       return compileEnum(ast, annotation, path, compile)
@@ -157,7 +133,7 @@ function compileObject(
   path: string,
   compile: Compile,
   omit?: string,
-): Layout {
+): L.Layout {
   if (ast.indexSignatures.length > 0) {
     throw new Error(
       `${path}: Index signatures have no Borsh layout; use Schema.ReadonlyMap or Schema.HashMap for a Rust map`,
@@ -176,7 +152,7 @@ function compileObject(
         layout: compile(field.type, `${path}[${JSON.stringify(field.name)}]`),
       }
     })
-  return struct(fields)
+  return L.struct(fields)
 }
 
 /** The item of a plain `ReadonlyArray<T>`, with no leading or trailing elements. */
@@ -192,9 +168,9 @@ function compileArrays(
   path: string,
   compile: Compile,
   maxLength: number,
-): Layout {
+): L.Layout {
   if (ast.rest.length === 0) {
-    return tuple(ast.elements.map((item, i) => compile(item, `${path}[${i}]`)))
+    return L.tuple(ast.elements.map((item, i) => compile(item, `${path}[${i}]`)))
   }
   const item = homogeneousItem(ast)
   if (item === undefined) {
@@ -202,26 +178,26 @@ function compileArrays(
       `${path}: Mixed tuple rests have no Borsh layout; move the rest into its own Schema.Array element, or use Schema.Array with Schema.isMinLength`,
     )
   }
-  return vector(compile(item, `${path}[]`), maxLength)
+  return L.vector(compile(item, `${path}[]`), maxLength)
 }
 
 /** A declaration's compiled context: its path, its length bound and its type parameters. */
 interface Declared {
   readonly path: string
   readonly maxLength: number
-  readonly child: (index: number, segment: string) => Layout
+  readonly child: (index: number, segment: string) => L.Layout
 }
 
 /** Effect declarations with a Borsh layout, keyed by their representation id. */
-const natives: Readonly<Record<string, (node: Declared) => Layout>> = {
-  "effect/schema/Uint8Array": ({ maxLength }) => bytes(maxLength),
-  "effect/schema/Option": ({ child }) => option(child(0, "value")),
-  "effect/schema/Result": ({ child }) => result(child(0, "success"), child(1, "failure")),
-  "effect/schema/ReadonlyMap": map("ReadonlyMap", readonlyMap),
-  "effect/schema/ReadonlySet": set("ReadonlySet", readonlySet),
-  "effect/schema/HashMap": map("HashMap", hashMap),
-  "effect/schema/HashSet": set("HashSet", hashSet),
-  [withBytesId]: ({ child }) => withBytes(child(0, "value")),
+const declarations: Readonly<Record<string, (node: Declared) => L.Layout>> = {
+  "effect/schema/Uint8Array": ({ maxLength }) => L.bytes(maxLength),
+  "effect/schema/Option": ({ child }) => L.option(child(0, "value")),
+  "effect/schema/Result": ({ child }) => L.result(child(0, "success"), child(1, "failure")),
+  "effect/schema/ReadonlyMap": map("ReadonlyMap", L.readonlyMap),
+  "effect/schema/ReadonlySet": set("ReadonlySet", L.readonlySet),
+  "effect/schema/HashMap": map("HashMap", L.hashMap),
+  "effect/schema/HashSet": set("HashSet", L.hashSet),
+  [withBytesId]: ({ child }) => L.withBytes(child(0, "value")),
 }
 
 /** Declarations whose layout starts with a u32 length, which Borsh.maxLength can bound. */
@@ -233,16 +209,16 @@ const lengthPrefixedIds: ReadonlySet<string> = new Set([
   "effect/schema/HashSet",
 ])
 
-function map(name: string, kind: Collection) {
+function map(name: string, kind: L.Collection) {
   return (node: Declared) =>
-    collection(kind, orderedKey(node, name), node.child(1, "value"), node.maxLength)
+    L.collection(kind, orderedKey(node, name), node.child(1, "value"), node.maxLength)
 }
 
-function set(name: string, kind: Collection) {
-  return (node: Declared) => collection(kind, orderedKey(node, name), undefined, node.maxLength)
+function set(name: string, kind: L.Collection) {
+  return (node: Declared) => L.collection(kind, orderedKey(node, name), undefined, node.maxLength)
 }
 
-function orderedKey(node: Declared, name: string): Key {
+function orderedKey(node: Declared, name: string): L.Key {
   const key = node.child(0, "key")
   if (!isKey(key)) {
     throw new Error(`${node.path}: ${name} keys require Boolean, integer or String Rust ordering`)
@@ -250,7 +226,7 @@ function orderedKey(node: Declared, name: string): Key {
   return key
 }
 
-function isKey(layout: Layout): layout is Key {
+function isKey(layout: L.Layout): layout is L.Key {
   return layout.compare !== undefined
 }
 
@@ -259,17 +235,18 @@ function compileDeclaration(
   path: string,
   compile: Compile,
   maxLength: number,
-): Layout {
+): L.Layout {
   const id = representationId(ast)
   // Own keys only, so an id such as "constructor" cannot select an Object.prototype member.
-  const native = id !== undefined && Object.hasOwn(natives, id) ? natives[id] : undefined
-  if (native === undefined) {
+  const declared =
+    id !== undefined && Object.hasOwn(declarations, id) ? declarations[id] : undefined
+  if (declared === undefined) {
     const subject = id === undefined ? "Declaration" : `Declaration ${id}`
     throw new Error(
       `${path}: ${subject} has no Borsh layout; decode it from a Borsh-encodable schema with Schema.decodeTo`,
     )
   }
-  return native({
+  return declared({
     path,
     maxLength,
     // The constructors behind these representation ids fix each declaration's type parameters.
@@ -302,9 +279,9 @@ function compileEnum(
   annotation: EnumAnnotation | undefined,
   path: string,
   compile: Compile,
-): Layout {
+): L.Layout {
   const tag = annotation === undefined ? "_tag" : annotation.tag
-  const variants = enumVariants(ast, annotation, path).map(({ member, ...variant }): Variant =>
+  const variants = enumVariants(ast, annotation, path).map(({ member, ...variant }): L.Variant =>
     member === undefined
       ? variant
       : { ...variant, payload: compileObject(member, path, compile, tag) },
@@ -315,7 +292,7 @@ function compileEnum(
     annotation === undefined &&
     variants.length === 1 &&
     variants.every(({ payload }) => payload === undefined || payload.isZeroSized)
-  return enumOf(variants, tag, isZeroSized)
+  return L.enumOf(variants, tag, isZeroSized)
 }
 
 /** Read Rust enum variants with declaration-order or explicit discriminants. */
@@ -354,11 +331,7 @@ export function enumVariants(
   if (!isTaggedUnion && tag !== "_tag") {
     throw new Error(`${path}: Only object enum variants have a tag key`)
   }
-  const labels = uniqueLabels(variants, path)
-  if (annotation === undefined) {
-    return variants.map((variant, discriminant) => ({ ...variant, discriminant }))
-  }
-  return withDiscriminants(variants, labels, annotation.discriminants, path)
+  return numbered(variants, annotation, path)
 }
 
 function taggedVariants(
@@ -433,7 +406,12 @@ function assertPlainVariant(member: SchemaAST.AST, path: string): void {
   rejectMaxLength(member, path)
 }
 
-function uniqueLabels(variants: ReadonlyArray<UnnumberedVariant>, path: string): Set<string> {
+/** Number variants by declaration index, or by an explicit map that must match them exactly. */
+function numbered(
+  variants: ReadonlyArray<UnnumberedVariant>,
+  annotation: EnumAnnotation | undefined,
+  path: string,
+): ReadonlyArray<EnumVariant> {
   const labels = new Set<string>()
   for (const { label } of variants) {
     if (labels.has(label)) {
@@ -441,17 +419,10 @@ function uniqueLabels(variants: ReadonlyArray<UnnumberedVariant>, path: string):
     }
     labels.add(label)
   }
-  return labels
-}
-
-/** Pair each variant with its entry in an explicit discriminant map, which must match exactly. */
-function withDiscriminants(
-  variants: ReadonlyArray<UnnumberedVariant>,
-  labels: ReadonlySet<string>,
-  discriminantMap: Readonly<Record<string, number>>,
-  path: string,
-): ReadonlyArray<EnumVariant> {
-  const discriminants = new Map(Object.entries(discriminantMap))
+  if (annotation === undefined) {
+    return variants.map((variant, discriminant) => ({ ...variant, discriminant }))
+  }
+  const discriminants = new Map(Object.entries(annotation.discriminants))
   const unknownLabels = [...discriminants.keys()].filter((label) => !labels.has(label))
   if (unknownLabels.length > 0) {
     throw new Error(`${path}: Unknown enum discriminants ${unknownLabels.join(", ")}`)
