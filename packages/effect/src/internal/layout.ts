@@ -129,14 +129,7 @@ export const boolean: Layout = {
   compare: comparePrimitive,
   minBytes: 1,
   isZeroSized: false,
-  read: (r) => {
-    const offset = r.offset
-    const value = r.u8()
-    if (value > 1) {
-      throw new BinaryError(offset, `Invalid bool tag ${value}`)
-    }
-    return value === 1
-  },
+  read: (r) => r.flag("bool"),
   write: (w, value) => {
     if (typeof value !== "boolean") {
       throw new BinaryError(w.offset, "Expected boolean")
@@ -428,12 +421,7 @@ export function option(item: Layout): Layout {
     minBytes: 1,
     isZeroSized: false,
     read: (r) => {
-      const offset = r.offset
-      const tag = r.u8()
-      if (tag > 1) {
-        throw new BinaryError(offset, `Invalid Option tag ${tag}`)
-      }
-      if (tag === 0) {
+      if (!r.flag("Option")) {
         return Option.none()
       }
       try {
@@ -465,15 +453,11 @@ export function result(ok: Layout, err: Layout): Layout {
     minBytes: 1 + Math.min(ok.minBytes, err.minBytes),
     isZeroSized: false,
     read: (r) => {
-      const offset = r.offset
-      const tag = r.u8()
-      if (tag > 1) {
-        throw new BinaryError(offset, `Invalid Result tag ${tag}`)
-      }
+      const success = r.flag("Result")
       try {
-        return tag === 1 ? Result.succeed(ok.read(r)) : Result.fail(err.read(r))
+        return success ? Result.succeed(ok.read(r)) : Result.fail(err.read(r))
       } catch (error) {
-        throw prepend(error, tag === 1 ? "success" : "failure")
+        throw prepend(error, success ? "success" : "failure")
       }
     },
     write: (w, value) => {

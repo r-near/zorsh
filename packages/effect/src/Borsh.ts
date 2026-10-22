@@ -16,7 +16,7 @@ import {
   SchemaTransformation,
 } from "effect"
 import { compile, enumVariants, maxLengthId, withBytesId, withLayout } from "./internal/compile.js"
-import { BinaryError, Reader, type ReaderOptions, utf8Length, Writer } from "./internal/io.js"
+import { BinaryError, Reader, type Limits, utf8Length, Writer } from "./internal/io.js"
 import {
   integerRange,
   isValueWithBytes,
@@ -430,10 +430,11 @@ export function toCodec<S extends Schema.Constraint>(
   schema: S,
   options?: Options,
 ): Schema.Codec<S["Type"], Uint8Array, S["DecodingServices"], S["EncodingServices"]> {
-  const { maxBytes, maxItems } = validLimits(options)
+  const limits = validLimits(options)
   const entry = cacheEntry(schema)
   // Without maxItems the key stays a number, so the common lookup builds no string.
-  const key = maxItems === undefined ? maxBytes : `${maxBytes}/${maxItems}`
+  const key =
+    limits.maxItems === Infinity ? limits.maxBytes : `${limits.maxBytes}/${limits.maxItems}`
   const cached = entry.codecs.get(key)
   if (cached !== undefined) {
     return cached as Schema.Codec<
@@ -443,7 +444,7 @@ export function toCodec<S extends Schema.Constraint>(
       S["EncodingServices"]
     >
   }
-  const codec = binaryCodec(entry.layout, maxBytes, maxItems).pipe(Schema.decodeTo(schema))
+  const codec = binaryCodec(entry.layout, limits).pipe(Schema.decodeTo(schema))
   // Maps iterate in insertion order, so this evicts the oldest options.
   if (entry.codecs.size >= optionsCacheSize) {
     entry.codecs.delete(entry.codecs.keys().next().value as number | string)
@@ -453,10 +454,7 @@ export function toCodec<S extends Schema.Constraint>(
 }
 
 /** Validate options at construction. Only an absent option takes the default; null is rejected. */
-function validLimits(options: Options | undefined): {
-  readonly maxBytes: number
-  readonly maxItems: number | undefined
-} {
+function validLimits(options: Options | undefined): Limits {
   const maxBytes = options?.maxBytes === undefined ? defaultMaxBytes : options.maxBytes
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
     throw new Error("$: maxBytes must be a positive safe integer")
@@ -467,7 +465,7 @@ function validLimits(options: Options | undefined): {
   if (!isValidMaxItems) {
     throw new Error("$: maxItems must be a non-negative safe integer")
   }
-  return { maxBytes, maxItems }
+  return { maxBytes, maxItems: maxItems ?? Infinity }
 }
 
 function cacheEntry(schema: Schema.Constraint): CodecCacheEntry {
@@ -484,8 +482,7 @@ function cacheEntry(schema: Schema.Constraint): CodecCacheEntry {
 }
 
 /** Bytes to the schema's encoded value and back; toCodec layers the schema itself on top. */
-function binaryCodec(layout: Layout, maxBytes: number, maxItems = Infinity) {
-  const readerOptions: ReaderOptions = { maxBytes, maxItems }
+function binaryCodec(layout: Layout, limits: Limits) {
   return Schema.Uint8Array.pipe(
     Schema.decodeTo(
       Schema.Unknown,
@@ -493,7 +490,7 @@ function binaryCodec(layout: Layout, maxBytes: number, maxItems = Infinity) {
         decode: (bytes) =>
           Effect.try({
             try: () => {
-              const reader = new Reader(bytes, readerOptions)
+              const reader = new Reader(bytes, limits)
               const value = layout.read(reader)
               if (reader.offset !== bytes.byteLength) {
                 throw new BinaryError(reader.offset, "Trailing bytes")
@@ -505,7 +502,7 @@ function binaryCodec(layout: Layout, maxBytes: number, maxItems = Infinity) {
         encode: (value) =>
           Effect.try({
             try: () => {
-              const writer = new Writer(maxBytes, maxItems)
+              const writer = new Writer(limits.maxBytes, limits.maxItems)
               layout.write(writer, value)
               return writer.finish()
             },
@@ -527,7 +524,7 @@ export interface Prefix<A> {
 type PrefixReader = (bytes: Uint8Array, offset: number) => Prefix<unknown>
 
 function prefixReader(schema: Schema.Constraint, options: Options | undefined): PrefixReader {
-  const { maxBytes, maxItems } = validLimits(options)
+  const limits = validLimits(options)
   const layout = cacheEntry(schema).layout
   // Every layout whose length can vary starts with a length prefix or a tag, so a minimum of zero
   // bytes means the value always encodes to none, and a loop decoding it would never advance.
@@ -536,7 +533,6 @@ function prefixReader(schema: Schema.Constraint, options: Options | undefined): 
       "$: Prefix decoding requires a schema that encodes to at least one byte; this one always encodes to zero bytes, so a decoding loop would never advance",
     )
   }
-  const readerOptions: ReaderOptions = { maxBytes, maxItems: maxItems ?? Infinity }
   return (bytes, offset) => {
     // Not a BinaryError: an offset outside the input is a caller bug, so it is a defect.
     const isValidOffset = Number.isSafeInteger(offset) && offset >= 0 && offset <= bytes.byteLength
@@ -545,7 +541,7 @@ function prefixReader(schema: Schema.Constraint, options: Options | undefined): 
         `Prefix offset must be an integer from 0 through ${bytes.byteLength}, got ${offset}`,
       )
     }
-    const reader = new Reader(bytes, readerOptions, offset)
+    const reader = new Reader(bytes, limits, offset)
     return { value: layout.read(reader), offset: reader.offset }
   }
 }

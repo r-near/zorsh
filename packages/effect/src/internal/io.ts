@@ -22,7 +22,7 @@ const shortString = 32
 const empty = new Uint8Array(0)
 const emptyView = new DataView(empty.buffer)
 
-export interface ReaderOptions {
+export interface Limits {
   readonly maxBytes: number
   /** Infinity when the codec has no maxItems. */
   readonly maxItems: number
@@ -44,19 +44,19 @@ export class Reader {
    * Without start, the whole input must fit maxBytes. With start, this is a prefix read: it begins
    * there, may stop before the input ends, and maxBytes caps the value rather than the input.
    */
-  constructor(input: Uint8Array, options: ReaderOptions, start?: number) {
+  constructor(input: Uint8Array, limits: Limits, start?: number) {
     const length = input.byteLength
-    if (start === undefined && length > options.maxBytes) {
-      throw new BinaryError(0, `Input exceeds maxBytes (${options.maxBytes})`)
+    if (start === undefined && length > limits.maxBytes) {
+      throw new BinaryError(0, `Input exceeds maxBytes (${limits.maxBytes})`)
     }
     this.offset = start ?? 0
     this.input = length === 0 ? empty : new Uint8Array(input.buffer, input.byteOffset, length)
     this.view = length === 0 ? emptyView : new DataView(input.buffer, input.byteOffset, length)
-    this.limit = start === undefined ? Infinity : start + options.maxBytes
+    this.limit = start === undefined ? Infinity : start + limits.maxBytes
     this.end = Math.min(length, this.limit)
-    this.maxBytes = options.maxBytes
-    this.maxItems = options.maxItems
-    this.items = options.maxItems
+    this.maxBytes = limits.maxBytes
+    this.maxItems = limits.maxItems
+    this.items = limits.maxItems
   }
 
   /**
@@ -87,6 +87,16 @@ export class Reader {
     }
     this.offset = offset + length
     return offset
+  }
+
+  /** The one-byte 0 or 1 tag of a bool, Option or Result, failing at it otherwise. */
+  flag(name: string): boolean {
+    const offset = this.offset
+    const tag = this.u8()
+    if (tag > 1) {
+      throw new BinaryError(offset, `Invalid ${name} tag ${tag}`)
+    }
+    return tag === 1
   }
 
   /** A u32 length prefix, failing at it when it exceeds maxLength. */
