@@ -1,7 +1,17 @@
+import type { SchemaAST } from "effect"
+
 /** Expected binary failures only. User schema defects never cross this catch boundary. */
 export class BinaryError extends Error {
   readonly path: PropertyKey[] = []
-  constructor(offset: number, detail: string) {
+  /**
+   * @param check The schema's own check, when the binary layer enforced it early, so the issue
+   * names the same filter the schema pass would.
+   */
+  constructor(
+    offset: number,
+    detail: string,
+    readonly check?: SchemaAST.Filter<unknown>,
+  ) {
     super(`${detail} at byte ${offset}`)
   }
 }
@@ -22,18 +32,40 @@ const shortString = 32
 const empty = new Uint8Array(0)
 const emptyView = new DataView(empty.buffer)
 
+export interface ReaderOptions {
+  readonly maxBytes: number
+  /** Infinity when the codec has no maxItems. */
+  readonly maxItems: number
+  /** Whether layouts enforce the schema's own length checks; false under `disableChecks`. */
+  readonly checks: boolean
+}
+
 export class Reader {
   offset = 0
   /** A plain view, so slices copy even when the input is a Buffer. */
   readonly input: Uint8Array
   readonly view: DataView
-  constructor(input: Uint8Array, maxBytes: number) {
-    if (input.byteLength > maxBytes) {
-      throw new BinaryError(0, `Input exceeds maxBytes (${maxBytes})`)
+  readonly checks: boolean
+  readonly maxItems: number
+  private items: number
+  constructor(input: Uint8Array, options: ReaderOptions) {
+    if (input.byteLength > options.maxBytes) {
+      throw new BinaryError(0, `Input exceeds maxBytes (${options.maxBytes})`)
     }
     const length = input.byteLength
     this.input = length === 0 ? empty : new Uint8Array(input.buffer, input.byteOffset, length)
     this.view = length === 0 ? emptyView : new DataView(input.buffer, input.byteOffset, length)
+    this.checks = options.checks
+    this.maxItems = options.maxItems
+    this.items = options.maxItems
+  }
+
+  /** Spend count items of the maxItems budget, failing at the length prefix that overran it. */
+  charge(count: number, offset: number): void {
+    this.items -= count
+    if (this.items < 0) {
+      throw new BinaryError(offset, `Input exceeds maxItems (${this.maxItems})`)
+    }
   }
 
   /** Reserve length bytes and return their start offset. */
@@ -114,9 +146,24 @@ export class Writer {
   view: DataView
   offset = 0
 
-  constructor(readonly maxBytes: number) {
+  private items: number
+
+  /** maxItems is Infinity when the codec has none. */
+  constructor(
+    readonly maxBytes: number,
+    readonly maxItems = Infinity,
+  ) {
     this.buffer = new Uint8Array(Math.min(64, maxBytes))
     this.view = new DataView(this.buffer.buffer)
+    this.items = maxItems
+  }
+
+  /** The encode side of Reader.charge, so a codec never writes what it cannot read back. */
+  charge(count: number, offset: number): void {
+    this.items -= count
+    if (this.items < 0) {
+      throw new BinaryError(offset, `Output exceeds maxItems (${this.maxItems})`)
+    }
   }
 
   ensure(length: number): void {

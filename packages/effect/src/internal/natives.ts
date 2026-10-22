@@ -1,16 +1,18 @@
-import { HashMap, HashSet, Option, Result, type SchemaAST } from "effect"
+import { HashMap, HashSet, Option, Result, SchemaAST } from "effect"
 import type { Compile, Layout } from "./compiler.js"
-import { BinaryError, prepend } from "./io.js"
+import { BinaryError, prepend, type Reader, type Writer } from "./io.js"
+import { countGuard, filters, guardedRead, type Limits } from "./limits.js"
 import { bytes } from "./primitives.js"
 
 const uint8ArrayId = "effect/schema/Uint8Array"
 
-type Native = (ast: SchemaAST.Declaration, path: string, compile: Compile) => Layout
+type Native = (ast: SchemaAST.Declaration, path: string, compile: Compile, limits: Limits) => Layout
 
 export function compileDeclaration(
   ast: SchemaAST.Declaration,
   path: string,
   compile: Compile,
+  limits: Limits,
 ): Layout {
   const id = representationId(ast)
   // Own keys only, so an id such as "constructor" cannot select an Object.prototype member.
@@ -21,12 +23,28 @@ export function compileDeclaration(
       `${path}: ${subject} has no Borsh layout; decode it from a Borsh-encodable schema with Schema.decodeTo`,
     )
   }
-  return native(ast, path, compile)
+  return native(ast, path, compile, limits)
 }
 
 /** The declaration fixedBytes may annotate. */
 export function isUint8Array(ast: SchemaAST.AST): boolean {
   return ast._tag === "Declaration" && representationId(ast) === uint8ArrayId
+}
+
+/**
+ * The checks of a map or set whose key schema has a transformation, which can merge distinct wire
+ * keys into one decoded key. Untransformed keys keep their identity through `toEncoded`.
+ */
+export function mergingKeyChecks(
+  ast: SchemaAST.Declaration,
+): ReadonlyArray<SchemaAST.Filter<unknown>> {
+  const id = representationId(ast)
+  const key = ast.typeParameters[0]
+  const isCollection = id !== undefined && collectionIds.has(id)
+  if (!isCollection || key === undefined || SchemaAST.toEncoded(key) === key) {
+    return []
+  }
+  return filters(ast.checks ?? [])
 }
 
 function representationId(ast: SchemaAST.Declaration): string | undefined {
@@ -139,9 +157,8 @@ function result(ast: SchemaAST.Declaration, path: string, compile: Compile): Lay
 interface CollectionAdapter {
   readonly name: string
   readonly arity: 1 | 2
-  get(
-    value: unknown,
-  ): { readonly size: number; readonly entries: Iterable<readonly [unknown, unknown]> } | undefined
+  readonly unit: "entries" | "members"
+  get(value: unknown): Collection | undefined
   make(entries: [unknown, unknown][]): unknown
 }
 
@@ -149,7 +166,7 @@ interface CollectionAdapter {
  * Rust BTreeMap/BTreeSet, also for Hash collections: a u32 count, then strictly increasing keys.
  */
 function collectionLayout(adapter: CollectionAdapter) {
-  return (ast: SchemaAST.Declaration, path: string, compile: Compile): Layout => {
+  return (ast: SchemaAST.Declaration, path: string, compile: Compile, limits: Limits): Layout => {
     const [key, value] = parameters(ast, adapter.arity, adapter.name, path)
     const keyLayout = compile(key, `${path}["key"]`)
     const compare = keyLayout.compare
@@ -165,76 +182,97 @@ function collectionLayout(adapter: CollectionAdapter) {
         throw new BinaryError(offset, "Collection keys must be strictly increasing")
       }
     }
+    const readEntries = (r: Reader, count: number) => {
+      // Each entry needs at least minEntryBytes, so reject an impossible count before allocating.
+      if (count > Math.floor((r.input.byteLength - r.offset) / minEntryBytes)) {
+        throw new BinaryError(r.offset, "Truncated collection payload")
+      }
+      const entries: [unknown, unknown][] = []
+      // The entry index and part locate a failure, as in [3]["value"].
+      let i = 0
+      let part = "key"
+      try {
+        for (; i < count; i++) {
+          const offset = r.offset
+          part = "key"
+          const key = keyLayout.read(r)
+          if (i > 0) {
+            assertIncreasing(entries[i - 1]?.[0], key, offset)
+          }
+          part = "value"
+          entries.push([key, valueLayout === undefined ? undefined : valueLayout.read(r)])
+        }
+      } catch (error) {
+        throw prepend(prepend(error, part), i)
+      }
+      return adapter.make(entries)
+    }
+    const expectCollection = (w: Writer, value: unknown) => {
+      const collection = adapter.get(value)
+      if (collection === undefined || collection.size > 0xffff_ffff) {
+        throw new BinaryError(w.offset, "Expected native collection with u32 length")
+      }
+      return collection
+    }
+    const writeEntries = (w: Writer, collection: Collection) => {
+      w.ensure(4 + (collection.size === 0 ? 0 : collection.size * minEntryBytes))
+      // Sorted into Rust order, so the increasing check below only rejects keys Rust deems equal.
+      const entries = Array.from(collection.entries).sort(([a], [b]) => compare(a, b))
+      w.u32(entries.length)
+      let i = 0
+      let part = "key"
+      try {
+        for (const [key, value] of entries) {
+          part = "key"
+          if (i > 0) {
+            assertIncreasing(entries[i - 1]?.[0], key, w.offset)
+          }
+          keyLayout.write(w, key)
+          part = "value"
+          if (valueLayout !== undefined) {
+            valueLayout.write(w, value)
+          }
+          i++
+        }
+      } catch (error) {
+        throw prepend(prepend(error, part), i)
+      }
+    }
+    const write = (w: Writer, value: unknown) => writeEntries(w, expectCollection(w, value))
+    const guard = countGuard(ast.checks, adapter.unit, limits)
+    if (guard === undefined) {
+      return { minBytes: 4, isZeroSized: false, read: (r) => readEntries(r, r.u32()), write }
+    }
+    const chargedWrite = (w: Writer, value: unknown) => {
+      const collection = expectCollection(w, value)
+      w.charge(collection.size, w.offset)
+      writeEntries(w, collection)
+    }
     return {
       minBytes: 4,
       isZeroSized: false,
-      read: (r) => {
-        const count = r.u32()
-        // Each entry needs at least minEntryBytes, so reject an impossible count before allocating.
-        if (count > Math.floor((r.input.byteLength - r.offset) / minEntryBytes)) {
-          throw new BinaryError(r.offset, "Truncated collection payload")
-        }
-        const entries: [unknown, unknown][] = []
-        // The entry index and part locate a failure, as in [3]["value"].
-        let i = 0
-        let part = "key"
-        try {
-          for (; i < count; i++) {
-            const offset = r.offset
-            part = "key"
-            const key = keyLayout.read(r)
-            if (i > 0) {
-              assertIncreasing(entries[i - 1]?.[0], key, offset)
-            }
-            part = "value"
-            entries.push([key, valueLayout === undefined ? undefined : valueLayout.read(r)])
-          }
-        } catch (error) {
-          throw prepend(prepend(error, part), i)
-        }
-        return adapter.make(entries)
-      },
-      write: (w, value) => {
-        const collection = adapter.get(value)
-        if (collection === undefined || collection.size > 0xffff_ffff) {
-          throw new BinaryError(w.offset, "Expected native collection with u32 length")
-        }
-        w.ensure(4 + (collection.size === 0 ? 0 : collection.size * minEntryBytes))
-        // Sorted into Rust order, so the increasing check below only rejects keys Rust deems equal.
-        const entries = Array.from(collection.entries).sort(([a], [b]) => compare(a, b))
-        w.u32(entries.length)
-        let i = 0
-        let part = "key"
-        try {
-          for (const [key, value] of entries) {
-            part = "key"
-            if (i > 0) {
-              assertIncreasing(entries[i - 1]?.[0], key, w.offset)
-            }
-            keyLayout.write(w, key)
-            part = "value"
-            if (valueLayout !== undefined) {
-              valueLayout.write(w, value)
-            }
-            i++
-          }
-        } catch (error) {
-          throw prepend(prepend(error, part), i)
-        }
-      },
+      read: guardedRead(guard, readEntries),
+      write: guard.countItems ? chargedWrite : write,
     }
   }
+}
+
+interface Collection {
+  readonly size: number
+  readonly entries: Iterable<readonly [unknown, unknown]>
 }
 
 const readonlyMap = collectionLayout({
   name: "ReadonlyMap",
   arity: 2,
+  unit: "entries",
   get: (value) => (value instanceof Map ? { size: value.size, entries: value } : undefined),
   make: (entries) => new Map(entries),
 })
 const readonlySet = collectionLayout({
   name: "ReadonlySet",
   arity: 1,
+  unit: "members",
   get: (value) =>
     value instanceof Set ? { size: value.size, entries: value.entries() } : undefined,
   make: (entries) => new Set(entries.map(([key]) => key)),
@@ -242,6 +280,7 @@ const readonlySet = collectionLayout({
 const hashMap = collectionLayout({
   name: "HashMap",
   arity: 2,
+  unit: "entries",
   get: (value) =>
     HashMap.isHashMap(value) ? { size: HashMap.size(value), entries: value } : undefined,
   make: HashMap.fromIterable,
@@ -249,10 +288,18 @@ const hashMap = collectionLayout({
 const hashSet = collectionLayout({
   name: "HashSet",
   arity: 1,
+  unit: "members",
   get: (value) =>
     HashSet.isHashSet(value) ? { size: HashSet.size(value), entries: keyPairs(value) } : undefined,
   make: (entries) => HashSet.fromIterable(entries.map(([key]) => key)),
 })
+
+const collectionIds: ReadonlySet<string> = new Set([
+  "effect/schema/ReadonlyMap",
+  "effect/schema/ReadonlySet",
+  "effect/schema/HashMap",
+  "effect/schema/HashSet",
+])
 
 /** Set members as [key, key] entries, the shape Set.prototype.entries yields. */
 function* keyPairs<K>(keys: Iterable<K>): Generator<readonly [K, K]> {
@@ -263,7 +310,8 @@ function* keyPairs<K>(keys: Iterable<K>): Generator<readonly [K, K]> {
 
 /** Effect declarations with a Borsh layout, keyed by their representation id. */
 const natives: Readonly<Record<string, Native>> = {
-  [uint8ArrayId]: () => bytes(),
+  [uint8ArrayId]: (ast, _path, _compile, limits) =>
+    bytes(undefined, countGuard(ast.checks, "bytes", limits)),
   "effect/schema/Option": option,
   "effect/schema/Result": result,
   "effect/schema/ReadonlyMap": readonlyMap,

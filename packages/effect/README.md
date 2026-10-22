@@ -297,13 +297,37 @@ const Range = Schema.Array(Borsh.U32).pipe(
 
 The encoded check governs validation; the decoded type governs generation.
 
+## Untrusted input
+
+A length prefix can claim up to 2^32 - 1 items, and small items, such as unit enum variants or `Option.none()`, cost one byte each, so a 16 MiB message can describe 16 million values. No default limit protects against that without breaking legitimate large payloads, so bound decoding in two ways.
+
+First, put Effect's own length checks on each collection, before any transformation:
+
+```ts
+const Receipt = Schema.Struct({
+  logs: Schema.Array(Schema.String).check(Schema.isMaxLength(100)),
+  payload: Borsh.Bytes.check(Schema.isMaxLength(64 * 1024)),
+  validators: Schema.ReadonlyMap(Schema.String, Borsh.U128).check(Schema.isMaxSize(512)),
+})
+```
+
+The binary layer enforces `Schema.isMinLength`, `isMaxLength`, `isBetweenLength` and `isNonEmpty` on vectors and `Borsh.Bytes`, and `Schema.isMinSize`, `isMaxSize` and `isBetweenSize` on maps and sets, right after reading the length prefix. The failure is a native `Filter` issue for the failing check, as the schema pass would report it, with the count and byte offset: `Expected a value with a length of at most 100, got 4294967295 items at byte 0`. Effect still runs these checks in the schema pass, so this never changes what is accepted, and `disableChecks` skips both. Checks after a transformation, on string lengths and in custom filters still run, but only in the schema pass, after decoding. Maximum sizes on maps or sets whose key schema has a transformation also run only in the schema pass, because the transformation can merge entries. So do checks beneath decoding middleware such as `Schema.catchDecoding`, which can recover from their failure, and every check in a union that contains such middleware, because Effect may try the recovering member in place of the one that failed.
+
+Second, set a budget for the whole message:
+
+```ts
+const codec = Borsh.toCodec(Receipt, { maxBytes: 256 * 1024, maxItems: 10_000 })
+```
+
+`maxItems` is one budget for everything the message contains, however deeply nested, not a limit per collection. Each collection is charged as soon as its length is read, so `Input exceeds maxItems (10000) at byte 812` names the length prefix that overran it. It is a codec limit rather than a schema check, so it also applies under `disableChecks`. Like truncated input or `maxBytes`, it fails in the binary layer, so only decoding middleware on the root schema, such as `Schema.catchDecoding`, can recover from it.
+
 ## Binary format and limits
 
 Integers and floats are little endian. Booleans use one byte, 0 or 1. Strings use a u32 UTF-8 byte length followed by UTF-8; lone UTF-16 surrogates and malformed UTF-8 are rejected, and a leading U+FEFF is preserved. Structs and tuples have no prefix; variable arrays and byte vectors use u32 lengths; fixed arrays have no prefix. Enums, Options and Results use one-byte tags.
 
 Decoded input must be consumed completely: truncated data and trailing bytes fail. Encoded output and decoded byte arrays own their storage; the binary layer respects subarray offsets and does not mutate inputs.
 
-`Borsh.toCodec(schema, { maxBytes })` limits input and output bytes per operation, defaulting to **16 MiB**. Overrides must be positive safe integers; `fixedBytes` and `fixedArray` accept lengths from 0 through 2^32 - 1. Vector and collection counts are checked against remaining bytes before items are allocated. The cap bounds binary buffers, not the work or heap needed for zero-byte fixed arrays; native schema parsing and application validators or transformations can do their own work independently.
+`Borsh.toCodec(schema, { maxBytes, maxItems })` limits each operation. `maxBytes` caps input and output bytes and defaults to **16 MiB**; overrides must be positive safe integers. `maxItems` caps the total number of collection items: every vector or fixed-array item, map entry and set member, nested ones included. It has no default limit; overrides must be non-negative safe integers. Byte arrays and strings count toward `maxBytes`, not `maxItems`. Both limits apply to encoding as well, so a codec can decode anything it encodes. `fixedBytes` and `fixedArray` accept lengths from 0 through 2^32 - 1. Vector and collection counts are checked against the schema's own length and size checks, against `maxItems` and against the remaining bytes before any item is read. Only `maxItems` bounds the work and heap needed for fixed arrays of zero-sized items, which use no bytes. Native schema parsing and application validators or transformations can do their own work independently.
 
 Vectors of Rust zero-sized values, including empty tuples, empty structs, `fixedBytes(0)` and enums with one dataless variant and default discriminants, fail when visited, even for an empty array. An empty outer `Schema.Array(Schema.Array(Borsh.Unit))` succeeds because it visits no inner array. `Option.none()` also skips its inner value; `Option.some([])` visits and rejects an inner vector of unit. Fixed arrays may contain zero-sized items: `[(); 1]` uses no bytes, while `Vec<[(); 1]>` fails when visited. A zero-length fixed array skips its items, so `[Vec<()>; 0]` succeeds and `[Vec<()>; 1]` fails. Results also visit only their selected payload. Encoded struct keys and tuple positions must be required. Non-enum unions, recursion and optional properties are unsupported.
 

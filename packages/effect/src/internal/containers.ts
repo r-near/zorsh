@@ -1,6 +1,7 @@
 import type { SchemaAST } from "effect"
 import type { Compile, Layout } from "./compiler.js"
 import { BinaryError, prepend, type Reader, type Writer } from "./io.js"
+import { type CountGuard, countGuard, guardedRead, type Limits } from "./limits.js"
 
 /** A Rust struct: fields in declaration order. `omit` skips an enum variant's tag field. */
 export function compileObject(
@@ -90,7 +91,12 @@ export function homogeneousItem(ast: SchemaAST.AST): SchemaAST.AST | undefined {
   return undefined
 }
 
-export function compileArrays(ast: SchemaAST.Arrays, path: string, compile: Compile): Layout {
+export function compileArrays(
+  ast: SchemaAST.Arrays,
+  path: string,
+  compile: Compile,
+  limits: Limits,
+): Layout {
   if (ast.rest.length === 0) {
     return tuple(ast.elements.map((item, i) => compile(item, `${path}[${i}]`)))
   }
@@ -100,7 +106,7 @@ export function compileArrays(ast: SchemaAST.Arrays, path: string, compile: Comp
       `${path}: Mixed tuple rests have no Borsh layout; move the rest into its own Schema.Array element, or use Schema.Array with Schema.isMinLength`,
     )
   }
-  return vector(compile(rest, `${path}[]`))
+  return vector(compile(rest, `${path}[]`), countGuard(ast.checks, "items", limits))
 }
 
 function tuple(items: ReadonlyArray<Layout>): Layout {
@@ -138,28 +144,56 @@ function tuple(items: ReadonlyArray<Layout>): Layout {
 }
 
 /** Rust Vec<T>. Zero-sized items are rejected when visited, as borsh-rs does. */
-function vector(item: Layout): Layout {
+function vector(item: Layout, guard: CountGuard | undefined): Layout {
   const rejectZeroSizedItem = (offset: number) => {
     if (item.isZeroSized) {
       throw new BinaryError(offset, "Borsh forbids vectors of zero-sized values")
     }
   }
+  // Without a guard these are the hot-path closures, so the limit helpers below stay out of them.
+  if (guard === undefined) {
+    return {
+      minBytes: 4,
+      isZeroSized: false,
+      read: (r) => {
+        rejectZeroSizedItem(r.offset)
+        const count = r.u32()
+        // Each item needs at least minBytes, so reject an impossible count before allocating.
+        if (count > Math.floor((r.input.byteLength - r.offset) / item.minBytes)) {
+          throw new BinaryError(r.offset, "Truncated vector payload")
+        }
+        return readItems(r, item, count)
+      },
+      write: (w, value) => {
+        rejectZeroSizedItem(w.offset)
+        if (!Array.isArray(value) || value.length > 0xffff_ffff) {
+          throw new BinaryError(w.offset, "Expected array with u32 length")
+        }
+        w.u32(value.length)
+        writeItems(w, item, value)
+      },
+    }
+  }
+  const readGuarded = guardedRead(guard, (r, count) => {
+    if (count > Math.floor((r.input.byteLength - r.offset) / item.minBytes)) {
+      throw new BinaryError(r.offset, "Truncated vector payload")
+    }
+    return readItems(r, item, count)
+  })
   return {
     minBytes: 4,
     isZeroSized: false,
     read: (r) => {
       rejectZeroSizedItem(r.offset)
-      const count = r.u32()
-      // Each item needs at least minBytes, so reject an impossible count before allocating.
-      if (count > Math.floor((r.input.byteLength - r.offset) / item.minBytes)) {
-        throw new BinaryError(r.offset, "Truncated vector payload")
-      }
-      return readItems(r, item, count)
+      return readGuarded(r)
     },
     write: (w, value) => {
       rejectZeroSizedItem(w.offset)
       if (!Array.isArray(value) || value.length > 0xffff_ffff) {
         throw new BinaryError(w.offset, "Expected array with u32 length")
+      }
+      if (guard.countItems) {
+        w.charge(value.length, w.offset)
       }
       w.u32(value.length)
       writeItems(w, item, value)
@@ -167,12 +201,13 @@ function vector(item: Layout): Layout {
   }
 }
 
-/** Rust [T; N], without a count prefix. */
+/** Rust [T; N], without a count prefix. With maxItems, every read and write charges all N items. */
 export function fixedArray(
   ast: SchemaAST.AST,
   length: number,
   path: string,
   compile: Compile,
+  limits: Limits,
 ): Layout {
   const rest = homogeneousItem(ast)
   if (rest === undefined) {
@@ -181,28 +216,46 @@ export function fixedArray(
   const item = compile(rest, `${path}[]`)
   // Nested fixed arrays can multiply past 2^53, so clamp to stay a safe integer.
   const minBytes = length === 0 ? 0 : Math.min(Number.MAX_SAFE_INTEGER, length * item.minBytes)
+  const read = (r: Reader) => {
+    if (minBytes > r.input.byteLength - r.offset) {
+      throw new BinaryError(r.offset, "Truncated fixed array payload")
+    }
+    return readItems(r, item, length)
+  }
+  const isFixedArray = (value: unknown): value is readonly unknown[] =>
+    Array.isArray(value) && value.length === length
+  const write = (w: Writer, value: unknown) => {
+    if (!isFixedArray(value)) {
+      throw new BinaryError(w.offset, `Expected fixed array of length ${length}`)
+    }
+    w.ensure(minBytes)
+    let i = 0
+    try {
+      for (; i < length; i++) {
+        item.write(w, value[i])
+      }
+    } catch (error) {
+      throw prepend(error, i)
+    }
+  }
+  const isZeroSized = length === 0 || item.isZeroSized
+  if (!limits.countItems) {
+    return { minBytes, isZeroSized, read, write }
+  }
+  // Zero-sized items cost no bytes, so maxItems is the only bound on how many a read visits.
   return {
     minBytes,
-    isZeroSized: length === 0 || item.isZeroSized,
+    isZeroSized,
     read: (r) => {
-      if (minBytes > r.input.byteLength - r.offset) {
-        throw new BinaryError(r.offset, "Truncated fixed array payload")
-      }
-      return readItems(r, item, length)
+      r.charge(length, r.offset)
+      return read(r)
     },
     write: (w, value) => {
-      if (!Array.isArray(value) || value.length !== length) {
-        throw new BinaryError(w.offset, `Expected fixed array of length ${length}`)
+      // A value of the wrong shape fails in write with its own message, before any charge.
+      if (isFixedArray(value)) {
+        w.charge(length, w.offset)
       }
-      w.ensure(minBytes)
-      let i = 0
-      try {
-        for (; i < length; i++) {
-          item.write(w, value[i])
-        }
-      } catch (error) {
-        throw prepend(error, i)
-      }
+      write(w, value)
     },
   }
 }

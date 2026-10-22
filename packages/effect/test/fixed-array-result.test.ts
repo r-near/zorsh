@@ -3,6 +3,7 @@ import { expect, expectTypeOf, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { compile } from "../src/internal/compiler.js"
 import { Writer } from "../src/internal/io.js"
+import { noLimits } from "../src/internal/limits.js"
 
 it("writes fixed arrays without a prefix and enforces their binary length", () => {
   const schema = Schema.Array(Borsh.U16).pipe(Borsh.fixedArray(3))
@@ -17,7 +18,7 @@ it("writes fixed arrays without a prefix and enforces their binary length", () =
   for (const value of [[], [1, 2], [1, 2, 3, 4], {}, null]) {
     expect(() => Schema.encodeUnknownSync(codec)(value)).toThrow(Schema.SchemaError)
   }
-  const layout = compile(Schema.toEncoded(schema).ast)
+  const layout = compile(Schema.toEncoded(schema).ast, noLimits)
   for (const value of [[], [1, 2, 3, 4], {}]) {
     expect(() => layout.write(new Writer(32), value)).toThrow(/Expected fixed array of length 3/)
   }
@@ -60,7 +61,7 @@ it("rejects invalid fixed-array schemas and conflicting metadata at construction
   const huge = Schema.Array(Schema.Array(Borsh.U16).pipe(Borsh.fixedArray(0xffff_ffff))).pipe(
     Borsh.fixedArray(0xffff_ffff),
   )
-  expect(compile(Schema.toEncoded(huge).ast).minBytes).toBe(Number.MAX_SAFE_INTEGER)
+  expect(compile(Schema.toEncoded(huge).ast, noLimits).minBytes).toBe(Number.MAX_SAFE_INTEGER)
   expect(() => Schema.decodeSync(Borsh.toCodec(huge))(new Uint8Array())).toThrow(
     /Truncated fixed array/,
   )
@@ -143,7 +144,7 @@ it("uses native Result values and Rust Err=0, Ok=1 tags", () => {
       new RegExp(`Invalid Result tag ${tag}`),
     )
   }
-  const boundary = compile(Schema.toEncoded(Schema.Result(Borsh.U8, Borsh.Unit)).ast)
+  const boundary = compile(Schema.toEncoded(Schema.Result(Borsh.U8, Borsh.Unit)).ast, noLimits)
   expect(() => boundary.write(new Writer(16), { _tag: "Success", success: 1 })).toThrow(
     /Expected Result/,
   )
@@ -220,9 +221,9 @@ it("validates Result arity and explicitly annotated fixed-array shapes", () => {
     [Borsh.U8.ast, Borsh.Unit.ast, Borsh.U8.ast],
     sparse,
   ]) {
-    expect(() => compile(new SchemaAST.Declaration(parameters, ast.run, ast.annotations))).toThrow(
-      /^\$: Result requires exactly 2 encoded type parameters$/,
-    )
+    expect(() =>
+      compile(new SchemaAST.Declaration(parameters, ast.run, ast.annotations), noLimits),
+    ).toThrow(/^\$: Result requires exactly 2 encoded type parameters$/)
   }
   const key = "@zorsh/effect/borsh/layout"
   for (const schema of [
@@ -246,7 +247,7 @@ it("keeps native array checks and fixed-item error paths", () => {
   expect(() => Schema.decodeSync(nested)(Uint8Array.of(1, 2))).toThrow(
     /Invalid bool tag 2 at byte 1\n {2}at \["b"\]\[0\]$/,
   )
-  const layout = compile(Schema.toEncoded(shared).ast)
+  const layout = compile(Schema.toEncoded(shared).ast, noLimits)
   const shrinking = [true, true]
   Object.defineProperty(shrinking, 0, {
     get: () => {
@@ -255,10 +256,10 @@ it("keeps native array checks and fixed-item error paths", () => {
     },
   })
   expect(() =>
-    compile(Schema.toEncoded(Schema.Array(Schema.Boolean).pipe(Borsh.fixedArray(2))).ast).write(
-      new Writer(8),
-      shrinking,
-    ),
+    compile(
+      Schema.toEncoded(Schema.Array(Schema.Boolean).pipe(Borsh.fixedArray(2))).ast,
+      noLimits,
+    ).write(new Writer(8), shrinking),
   ).toThrow(expect.objectContaining({ message: "Expected boolean at byte 1", path: [1] }))
   expect(() => layout.write(new Writer(8), [2])).toThrow(
     expect.objectContaining({ message: "Expected boolean at byte 0", path: [0] }),

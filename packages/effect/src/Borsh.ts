@@ -9,10 +9,11 @@
  */
 import { Effect, Order, Schema, SchemaAST, SchemaIssue, SchemaTransformation } from "effect"
 import { isU32Length, parseDescriptor, withLayout } from "./internal/annotations.js"
-import { compile, type Layout, rejectSuspensions } from "./internal/compiler.js"
+import { compile, type Layout, prepare } from "./internal/compiler.js"
 import { homogeneousItem } from "./internal/containers.js"
 import { enumVariants } from "./internal/enums.js"
 import { BinaryError, Reader, Writer } from "./internal/io.js"
+import type { DeferredChecks } from "./internal/limits.js"
 import { integerRange } from "./internal/primitives.js"
 
 function integer(bits: 8 | 16 | 32, signed: boolean) {
@@ -36,7 +37,7 @@ function bigInteger(bits: 64 | 128, signed: boolean): Schema.BigInt {
 
 /** Reject Suspend, with its path, before deriving the encoded AST. */
 function encodedAST(schema: Schema.Constraint): SchemaAST.AST {
-  rejectSuspensions(schema.ast)
+  prepare(schema.ast)
   return Schema.toEncoded(schema).ast
 }
 
@@ -427,6 +428,14 @@ export function discriminants<
 /**
  * Options for {@link toCodec}.
  *
+ * **Untrusted input**
+ *
+ * The binary layer checks every length prefix against the bytes that remain,
+ * but small items, such as unit enum variants or `Option.none()`, let one input
+ * byte become one decoded value. Set `maxBytes` and `maxItems` to the largest
+ * message you expect, and put `Schema.isMaxLength` or `Schema.isMaxSize` on the
+ * encoded side of each collection. Both are enforced before any item is read.
+ *
  * @category models
  * @since 0.1.0
  */
@@ -438,6 +447,19 @@ export interface Options {
    * @since 0.1.0
    */
   readonly maxBytes?: number | undefined
+  /**
+   * Maximum number of collection items per operation, nested ones included,
+   * as a non-negative safe integer. This is one budget for the whole value,
+   * not a limit per collection: every vector or fixed-array item, map entry
+   * and set member counts once, however deeply it is nested. Byte arrays and
+   * strings do not count, because `maxBytes` bounds them. A collection is
+   * charged as soon as its length is known, before any of its items is read,
+   * and the budget applies to encoding too, so anything a codec encodes it can
+   * also decode. Default: no limit.
+   *
+   * @since 0.1.0
+   */
+  readonly maxItems?: number | undefined
 }
 
 /** Turn a binary failure into a schema issue; any other error is a defect and is rethrown. */
@@ -445,17 +467,25 @@ function binaryFailure(error: unknown): SchemaIssue.Issue {
   if (!(error instanceof BinaryError)) {
     throw error
   }
-  const issue = new SchemaIssue.InvalidValue({ message: error.message })
+  const leaf = new SchemaIssue.InvalidValue({ message: error.message })
+  // An early schema check fails as a Filter on the user's own check, as the schema pass would.
+  const issue = error.check === undefined ? leaf : new SchemaIssue.Filter(error.check, leaf)
   return error.path.length === 0 ? issue : new SchemaIssue.Pointer(error.path, issue)
 }
 
-const codecCache = new WeakMap<
-  Schema.Constraint,
-  { readonly layout: Layout; readonly codecs: Map<number, unknown> }
->()
+interface CodecCacheEntry {
+  readonly encoded: SchemaAST.AST
+  readonly deferred: DeferredChecks
+  /** Keyed by whether collections charge maxItems; each variant compiles on first use. */
+  readonly layouts: Map<boolean, Layout>
+  /** Keyed by `maxBytes`, or `maxBytes/maxItems` when maxItems is set. */
+  readonly codecs: Map<number | string, unknown>
+}
+
+const codecCache = new WeakMap<Schema.Constraint, CodecCacheEntry>()
 const defaultMaxBytes = 16 * 1024 * 1024
-/** Bound the codecs retained per schema when callers vary maxBytes. */
-const maxBytesCacheSize = 8
+/** Bound the codecs retained per schema when callers vary the options. */
+const optionsCacheSize = 8
 
 /**
  * Derives a Borsh codec from a schema.
@@ -466,8 +496,23 @@ const maxBytesCacheSize = 8
  * schema's own checks, brands, transformations and services still apply.
  * Unsupported layouts and invalid options throw here, at construction. Decoding
  * must consume the whole input. Binary failures are `Schema.SchemaError`s whose
- * issue names the path and byte offset. Codecs are memoized by schema identity
- * and `maxBytes`, keeping up to 8 `maxBytes` values per schema.
+ * issue names the path and byte offset. Codecs are memoized by schema identity,
+ * `maxBytes` and `maxItems`, keeping up to 8 option combinations per schema.
+ *
+ * The binary layer enforces the schema's own length and size checks,
+ * `Schema.isMinLength`, `isMaxLength`, `isBetweenLength` (and `isNonEmpty`) on
+ * vectors and `Borsh.Bytes`, and `Schema.isMinSize`, `isMaxSize` and
+ * `isBetweenSize` on maps and sets, as soon as it reads the length prefix,
+ * before reading any item. They must be on the encoded side of the schema,
+ * before any transformation. Effect still runs them in the schema pass, so this
+ * only makes oversized input fail sooner, with a `Filter` issue for the failing
+ * check plus the count and byte offset. `disableChecks` skips them. Checks on
+ * strings, in custom filters and after a transformation run only in the
+ * schema pass, as does a maximum size on a map or set whose key schema has a
+ * transformation, because decoding can merge its keys, and any check beneath
+ * decoding middleware such as `Schema.catchDecoding`, or in a union containing
+ * it, since the middleware can recover from the failure. See {@link Options}
+ * for `maxItems`.
  *
  * **Example** (Encoding contract arguments)
  *
@@ -483,6 +528,21 @@ const maxBytesCacheSize = 8
  * // { receiver: "alice.near", amount: 123n }
  * ```
  *
+ * **Example** (Bounding untrusted input)
+ *
+ * ```ts
+ * import { Borsh } from "@zorsh/effect"
+ * import { Schema } from "effect"
+ *
+ * const Receipt = Schema.Struct({
+ *   logs: Schema.Array(Schema.String).check(Schema.isMaxLength(100)),
+ *   payload: Borsh.Bytes.check(Schema.isMaxLength(64 * 1024)),
+ * })
+ * const codec = Borsh.toCodec(Receipt, { maxBytes: 256 * 1024, maxItems: 10_000 })
+ * // A `logs` count of 2^32 - 1 fails right after its 4-byte prefix:
+ * // Expected a value with a length of at most 100, got 4294967295 items at byte 0
+ * ```
+ *
  * @category constructors
  * @since 0.1.0
  */
@@ -495,13 +555,26 @@ export function toCodec<S extends Schema.Constraint>(
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
     throw new Error("$: maxBytes must be a positive safe integer")
   }
+  const maxItems = options?.maxItems
+  const isValidMaxItems =
+    maxItems === undefined || (Number.isSafeInteger(maxItems) && maxItems >= 0)
+  if (!isValidMaxItems) {
+    throw new Error("$: maxItems must be a non-negative safe integer")
+  }
   let entry = codecCache.get(schema)
   if (entry === undefined) {
-    entry = { layout: compile(encodedAST(schema)), codecs: new Map() }
+    const deferred = prepare(schema.ast)
+    entry = {
+      encoded: Schema.toEncoded(schema).ast,
+      deferred,
+      layouts: new Map(),
+      codecs: new Map(),
+    }
     codecCache.set(schema, entry)
   }
-  const { layout, codecs } = entry
-  const cached = codecs.get(maxBytes)
+  // Without maxItems the key stays a number, so the common lookup builds no string.
+  const key = maxItems === undefined ? maxBytes : `${maxBytes}/${maxItems}`
+  const cached = entry.codecs.get(key)
   if (cached !== undefined) {
     return cached as Schema.Codec<
       S["Type"],
@@ -510,25 +583,41 @@ export function toCodec<S extends Schema.Constraint>(
       S["EncodingServices"]
     >
   }
-  const codec = binaryCodec(layout, maxBytes).pipe(Schema.decodeTo(schema))
-  // Maps iterate in insertion order, so this evicts the oldest maxBytes.
-  if (codecs.size >= maxBytesCacheSize) {
-    codecs.delete(codecs.keys().next().value as number)
+  const codec = binaryCodec(layoutOf(entry, maxItems !== undefined), maxBytes, maxItems).pipe(
+    Schema.decodeTo(schema),
+  )
+  // Maps iterate in insertion order, so this evicts the oldest options.
+  if (entry.codecs.size >= optionsCacheSize) {
+    entry.codecs.delete(entry.codecs.keys().next().value as number | string)
   }
-  codecs.set(maxBytes, codec)
+  entry.codecs.set(key, codec)
   return codec
 }
 
+/** Without maxItems, collections compile to layouts that do no counting at all. */
+function layoutOf(entry: CodecCacheEntry, countItems: boolean): Layout {
+  const cached = entry.layouts.get(countItems)
+  if (cached !== undefined) {
+    return cached
+  }
+  const layout = compile(entry.encoded, { countItems, ...entry.deferred })
+  entry.layouts.set(countItems, layout)
+  return layout
+}
+
 /** Bytes to the schema's encoded value and back; toCodec layers the schema itself on top. */
-function binaryCodec(layout: Layout, maxBytes: number) {
+function binaryCodec(layout: Layout, maxBytes: number, maxItems = Infinity) {
+  // Built once, so decoding allocates no options object per call.
+  const checked = { maxBytes, maxItems, checks: true }
+  const unchecked = { maxBytes, maxItems, checks: false }
   return Schema.Uint8Array.pipe(
     Schema.decodeTo(
       Schema.Unknown,
       SchemaTransformation.transformEffect({
-        decode: (bytes) =>
+        decode: (bytes, options) =>
           Effect.try({
             try: () => {
-              const reader = new Reader(bytes, maxBytes)
+              const reader = new Reader(bytes, options.disableChecks === true ? unchecked : checked)
               const value = layout.read(reader)
               if (reader.offset !== bytes.byteLength) {
                 throw new BinaryError(reader.offset, "Trailing bytes")
@@ -540,7 +629,7 @@ function binaryCodec(layout: Layout, maxBytes: number) {
         encode: (value) =>
           Effect.try({
             try: () => {
-              const writer = new Writer(maxBytes)
+              const writer = new Writer(maxBytes, maxItems)
               layout.write(writer, value)
               return writer.finish()
             },
