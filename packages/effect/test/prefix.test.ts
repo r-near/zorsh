@@ -384,6 +384,11 @@ describe("decodePrefixEffect", () => {
     )
   })
 
+  it("dies with a TypeError for bytes that are not a Uint8Array", () => {
+    const exit = Effect.runSyncExit(Borsh.decodePrefixEffect(Borsh.U8)([1] as never))
+    expect(exit).toEqual(Exit.die(new TypeError("Prefix decoding requires a Uint8Array")))
+  })
+
   it("reads the buffer when run, not when the effect is built", () => {
     const decode = Borsh.decodePrefixEffect(Borsh.U8)
     const buffer = Uint8Array.of(1)
