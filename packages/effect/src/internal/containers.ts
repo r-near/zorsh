@@ -1,7 +1,6 @@
 import type { SchemaAST } from "effect"
 import type { Compile, Layout } from "./compiler.js"
 import { BinaryError, prepend, type Reader, type Writer } from "./io.js"
-import { type CountGuard, countGuard, guardedRead, type Limits } from "./limits.js"
 
 /** A Rust struct: fields in declaration order. `omit` skips an enum variant's tag field. */
 export function compileObject(
@@ -95,7 +94,7 @@ export function compileArrays(
   ast: SchemaAST.Arrays,
   path: string,
   compile: Compile,
-  limits: Limits,
+  countItems: boolean,
 ): Layout {
   if (ast.rest.length === 0) {
     return tuple(ast.elements.map((item, i) => compile(item, `${path}[${i}]`)))
@@ -106,7 +105,7 @@ export function compileArrays(
       `${path}: Mixed tuple rests have no Borsh layout; move the rest into its own Schema.Array element, or use Schema.Array with Schema.isMinLength`,
     )
   }
-  return vector(compile(rest, `${path}[]`), countGuard(ast.checks, "items", limits))
+  return vector(compile(rest, `${path}[]`), countItems)
 }
 
 function tuple(items: ReadonlyArray<Layout>): Layout {
@@ -144,14 +143,14 @@ function tuple(items: ReadonlyArray<Layout>): Layout {
 }
 
 /** Rust Vec<T>. Zero-sized items are rejected when visited, as borsh-rs does. */
-function vector(item: Layout, guard: CountGuard | undefined): Layout {
+function vector(item: Layout, countItems: boolean): Layout {
   const rejectZeroSizedItem = (offset: number) => {
     if (item.isZeroSized) {
       throw new BinaryError(offset, "Borsh forbids vectors of zero-sized values")
     }
   }
-  // Without a guard these are the hot-path closures, so the limit helpers below stay out of them.
-  if (guard === undefined) {
+  // Without maxItems these are the hot-path closures, so charging stays out of them.
+  if (!countItems) {
     return {
       minBytes: 4,
       isZeroSized: false,
@@ -174,27 +173,25 @@ function vector(item: Layout, guard: CountGuard | undefined): Layout {
       },
     }
   }
-  const readGuarded = guardedRead(guard, (r, count) => {
-    if (count > Math.floor((r.end - r.offset) / item.minBytes)) {
-      throw r.pastEnd(r.offset, count * item.minBytes, "Truncated vector payload")
-    }
-    return readItems(r, item, count)
-  })
   return {
     minBytes: 4,
     isZeroSized: false,
     read: (r) => {
       rejectZeroSizedItem(r.offset)
-      return readGuarded(r)
+      const offset = r.offset
+      const count = r.u32()
+      r.charge(count, offset)
+      if (count > Math.floor((r.end - r.offset) / item.minBytes)) {
+        throw r.pastEnd(r.offset, count * item.minBytes, "Truncated vector payload")
+      }
+      return readItems(r, item, count)
     },
     write: (w, value) => {
       rejectZeroSizedItem(w.offset)
       if (!Array.isArray(value) || value.length > 0xffff_ffff) {
         throw new BinaryError(w.offset, "Expected array with u32 length")
       }
-      if (guard.countItems) {
-        w.charge(value.length, w.offset)
-      }
+      w.charge(value.length, w.offset)
       w.u32(value.length)
       writeItems(w, item, value)
     },
@@ -207,7 +204,7 @@ export function fixedArray(
   length: number,
   path: string,
   compile: Compile,
-  limits: Limits,
+  countItems: boolean,
 ): Layout {
   const rest = homogeneousItem(ast)
   if (rest === undefined) {
@@ -239,7 +236,7 @@ export function fixedArray(
     }
   }
   const isZeroSized = length === 0 || item.isZeroSized
-  if (!limits.countItems) {
+  if (!countItems) {
     return { minBytes, isZeroSized, read, write }
   }
   // Zero-sized items cost no bytes, so maxItems is the only bound on how many a read visits.

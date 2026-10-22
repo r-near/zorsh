@@ -3,11 +3,10 @@ import { expect, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { compile } from "../src/internal/compiler.js"
 import { Writer } from "../src/internal/io.js"
-import { noLimits } from "../src/internal/limits.js"
 
 function write(schema: Schema.Constraint, value: unknown) {
   const writer = new Writer(1024)
-  compile(Schema.toEncoded(schema).ast, noLimits).write(writer, value)
+  compile(Schema.toEncoded(schema).ast, false).write(writer, value)
   return writer.finish()
 }
 

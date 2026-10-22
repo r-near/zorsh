@@ -6,7 +6,6 @@ import {
   Result,
   Schema,
   SchemaAST,
-  SchemaIssue,
   SchemaRepresentation,
   SchemaTransformation,
 } from "effect"
@@ -14,7 +13,6 @@ import { describe, expect, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { compile } from "../src/internal/compiler.js"
 import { Writer } from "../src/internal/io.js"
-import { noLimits } from "../src/internal/limits.js"
 
 function failure(run: () => unknown): Schema.SchemaError {
   try {
@@ -26,21 +24,6 @@ function failure(run: () => unknown): Schema.SchemaError {
     throw error
   }
   throw new Error("Expected SchemaError")
-}
-
-/** The Filter issues in an issue tree, in order. */
-function filters(issue: SchemaIssue.Issue): Array<SchemaIssue.Filter> {
-  switch (issue._tag) {
-    case "Filter":
-      return [issue, ...filters(issue.issue)]
-    case "Encoding":
-    case "Pointer":
-      return filters(issue.issue)
-    case "Composite":
-    case "AnyOf":
-      return issue.issues.flatMap(filters)
-  }
-  return []
 }
 
 function encoder(schema: Schema.Top, options?: Borsh.Options) {
@@ -226,14 +209,7 @@ describe("decoding", () => {
     )
   })
 
-  it("enforces early length checks and maxItems inside it", () => {
-    const check = Schema.isMaxLength(1)
-    const Short = Borsh.withBytes(Schema.Array(Borsh.U8).check(check))
-    const error = failure(() => decoder(Short)(Uint8Array.of(2, 0, 0, 0, 1, 2)))
-    expect(error.message).toBe(
-      'Expected a value with a length of at most 1, got 2 items at byte 0\n  at ["value"]',
-    )
-    expect(filters(error.issue).map((issue) => issue.filter)).toEqual([check])
+  it("enforces maxItems inside it", () => {
     const Items = Borsh.withBytes(Schema.Array(Borsh.U8))
     const input = Uint8Array.of(2, 0, 0, 0, 1, 2)
     expect(decoder(Items, { maxItems: 2 })(input).bytes).toEqual(input)
@@ -335,7 +311,7 @@ describe("encoding", () => {
       expect(failure(() => encode(input)).message).toBe("Expected a value with its Borsh bytes")
     }
     // The schema pass rejects these first, so only a layout used on its own sees them.
-    const layout = compile(Schema.toEncoded(Borsh.withBytes(Borsh.U8)).ast, noLimits)
+    const layout = compile(Schema.toEncoded(Borsh.withBytes(Borsh.U8)).ast, false)
     expect(() => layout.write(new Writer(16), { bytes: new Uint8Array(0) })).toThrow(
       "Expected value with bytes at byte 0",
     )

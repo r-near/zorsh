@@ -1,7 +1,6 @@
 import { Order } from "effect"
 import type { Layout } from "./compiler.js"
-import { BinaryError, type Reader, utf8Length } from "./io.js"
-import { type CountGuard, guardedRead } from "./limits.js"
+import { BinaryError, utf8Length } from "./io.js"
 
 type IntegerBits = 8 | 16 | 32 | 64 | 128
 
@@ -123,19 +122,12 @@ export function float(bits: 32 | 64): Layout {
   }
 }
 
-/**
- * Rust Vec<u8> with a u32 length prefix, or [u8; N] when length is given. Only the prefixed form
- * has a count for a guard to check.
- */
-export function bytes(length?: number, guard?: CountGuard): Layout {
-  const read =
-    guard === undefined
-      ? (r: Reader) => r.take(length ?? r.u32()).slice()
-      : guardedRead(guard, (r, count) => r.take(count).slice())
+/** Rust Vec<u8> with a u32 length prefix, or [u8; N] when length is given. */
+export function bytes(length?: number): Layout {
   return {
     minBytes: length ?? 4,
     isZeroSized: length === 0,
-    read,
+    read: (r) => r.take(length ?? r.u32()).slice(),
     write: (w, value) => {
       if (!(value instanceof Uint8Array)) {
         throw new BinaryError(w.offset, "Expected Uint8Array")

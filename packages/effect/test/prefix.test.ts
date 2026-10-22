@@ -204,17 +204,8 @@ describe("decodePrefixSync", () => {
     expect(Borsh.decodePrefixSync(Text)(Uint8Array.of(3, 0))).toEqual({ value: "3", offset: 1 })
   })
 
-  it("enforces early length checks and maxItems inside the value, at absolute offsets", () => {
-    const Bounded = Schema.Struct({
-      tag: Borsh.U8,
-      items: Schema.Array(Borsh.U8).check(Schema.isMaxLength(2)),
-    })
+  it("enforces maxItems inside the value, at absolute offsets", () => {
     const buffer = Uint8Array.of(0, 0, 0, 7, ...u32(3), 1, 2, 3)
-    const early = failure(() => Borsh.decodePrefixSync(Bounded)(buffer, 3))
-    expect(early.message).toBe(
-      'Expected a value with a length of at most 2, got 3 items at byte 4\n  at ["items"]',
-    )
-    expect(early.issue).toMatchObject({ _tag: "Pointer", issue: { _tag: "Filter" } })
     const decodeBudgeted = Borsh.decodePrefixSync(Schema.Array(Borsh.U8), { maxItems: 2 })
     expect(failure(() => decodeBudgeted(buffer, 4)).message).toBe(
       "Input exceeds maxItems (2) at byte 4",
@@ -240,11 +231,6 @@ describe("decodePrefixSync", () => {
       'Expected a value less than 5\n  at ["a"]\nExpected a value less than 5\n  at ["b"]',
     )
     expect(decode(input, 0, { disableChecks: true })).toEqual({ value: { a: 9, b: 9 }, offset: 2 })
-    // disableChecks also skips the early length check, as toCodec does.
-    const bounded = Borsh.decodePrefixSync(Schema.Array(Borsh.U8).check(Schema.isMaxLength(0)))
-    const items = Uint8Array.of(...u32(1), 7)
-    expect(() => bounded(items)).toThrow("got 1 item at byte 0")
-    expect(bounded(items, 0, { disableChecks: true })).toEqual({ value: [7], offset: 5 })
   })
 
   it("throws a RangeError, not a SchemaError, for an offset outside the buffer", () => {

@@ -3,7 +3,6 @@ import { expect, expectTypeOf, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { compile } from "../src/internal/compiler.js"
 import { Reader, Writer } from "../src/internal/io.js"
-import { noLimits } from "../src/internal/limits.js"
 
 const key = "@zorsh/effect/borsh/layout"
 const variants = Schema.TaggedUnion({
@@ -155,7 +154,7 @@ it("checks every tag byte for value enums and rejects unknown values", () => {
   }
   expect(() => Schema.decodeSync(literals)(new Uint8Array())).toThrow(/Truncated/)
   expect(() => Schema.decodeSync(literals)(Uint8Array.of(0, 0))).toThrow(/Trailing/)
-  const layout = compile(Schema.Literals(["A", "B"]).ast, noLimits)
+  const layout = compile(Schema.Literals(["A", "B"]).ast, false)
   for (const value of ["C", 0, null, Numeric.Up]) {
     expect(() => layout.write(new Writer(4), value)).toThrow(/Invalid enum value/)
   }
@@ -475,7 +474,7 @@ it("rejects an inappropriate layout on a native Option declaration", () => {
 it("requires an own enum tag at the binary writer boundary", () => {
   const inherited = Object.setPrototypeOf({}, { _tag: "Idle" })
   expect(() =>
-    compile(Schema.toEncoded(schema).ast, noLimits).write(new Writer(20), inherited),
+    compile(Schema.toEncoded(schema).ast, false).write(new Writer(20), inherited),
   ).toThrow(/Invalid enum label/)
 })
 
@@ -579,7 +578,7 @@ it("reports enum tag, value and variant field failures at native paths and offse
   expect(decode(schema, [])).toThrow(/^Truncated input: need 1 bytes at byte 0$/)
 
   const write = (s: Schema.Top, value: unknown) => () =>
-    compile(Schema.toEncoded(s).ast, noLimits).write(new Writer(64), value)
+    compile(Schema.toEncoded(s).ast, false).write(new Writer(64), value)
   const failure = (message: string, path: ReadonlyArray<PropertyKey>) =>
     expect.objectContaining({ message, path })
   const actions = Schema.Array(schema)
@@ -678,12 +677,12 @@ it("checks malformed Option declarations and binary encoder inputs", () => {
   hole.length = 1
   for (const parameters of [[], [Borsh.U8.ast, Borsh.U8.ast], hole]) {
     const invalid = new SchemaAST.Declaration(parameters, ast.run, ast.annotations)
-    expect(() => compile(invalid, noLimits)).toThrow(
+    expect(() => compile(invalid, false)).toThrow(
       /^\$: Option requires exactly 1 encoded type parameter$/,
     )
   }
-  expect(() => compile(ast, noLimits).write(new Writer(20), {})).toThrow(/Expected Option/)
-  const layout = compile(Schema.toEncoded(schema).ast, noLimits)
+  expect(() => compile(ast, false).write(new Writer(20), {})).toThrow(/Expected Option/)
+  const layout = compile(Schema.toEncoded(schema).ast, false)
   for (const value of [null, 1]) {
     expect(() => layout.write(new Writer(20), value)).toThrow(
       expect.objectContaining({ message: "Expected enum object at byte 0", path: [] }),
@@ -694,8 +693,8 @@ it("checks malformed Option declarations and binary encoder inputs", () => {
       expect.objectContaining({ message: "Invalid enum label at byte 0", path: ["_tag"] }),
     )
   }
-  const reader = new Reader(Uint8Array.of(1), { maxBytes: 20, maxItems: Infinity, checks: true })
-  expect(() => compile(Schema.Option(Borsh.U8).ast, noLimits).read(reader)).toThrow(
+  const reader = new Reader(Uint8Array.of(1), { maxBytes: 20, maxItems: Infinity })
+  expect(() => compile(Schema.Option(Borsh.U8).ast, false).read(reader)).toThrow(
     expect.objectContaining({
       message: "Truncated input: need 1 bytes at byte 1",
       path: ["value"],
@@ -834,7 +833,7 @@ it("preserves application transformations over a whole encoded enum", () => {
 
 it("uses enum payload minimums without treating unit variants as zero sized", () => {
   const value = Schema.TaggedUnion({ Small: { value: Borsh.U16 }, Large: { value: Borsh.U32 } })
-  expect(compile(Schema.toEncoded(value).ast, noLimits).minBytes).toBe(3)
+  expect(compile(Schema.toEncoded(value).ast, false).minBytes).toBe(3)
   const c = Borsh.toCodec(Schema.Array(value))
   expect(Schema.decodeSync(c)(Uint8Array.of(1, 0, 0, 0, 0, 1, 2))).toEqual([
     { _tag: "Small", value: 513 },

@@ -1,18 +1,22 @@
-import { HashMap, HashSet, Option, Result, SchemaAST } from "effect"
+import { HashMap, HashSet, Option, Result, type SchemaAST } from "effect"
 import type { Compile, Layout } from "./compiler.js"
 import { BinaryError, prepend, type Reader, type Writer } from "./io.js"
-import { countGuard, filters, guardedRead, type Limits } from "./limits.js"
 import { bytes } from "./primitives.js"
 
 const uint8ArrayId = "effect/schema/Uint8Array"
 
-type Native = (ast: SchemaAST.Declaration, path: string, compile: Compile, limits: Limits) => Layout
+type Native = (
+  ast: SchemaAST.Declaration,
+  path: string,
+  compile: Compile,
+  countItems: boolean,
+) => Layout
 
 export function compileDeclaration(
   ast: SchemaAST.Declaration,
   path: string,
   compile: Compile,
-  limits: Limits,
+  countItems: boolean,
 ): Layout {
   const id = representationId(ast)
   // Own keys only, so an id such as "constructor" cannot select an Object.prototype member.
@@ -23,28 +27,12 @@ export function compileDeclaration(
       `${path}: ${subject} has no Borsh layout; decode it from a Borsh-encodable schema with Schema.decodeTo`,
     )
   }
-  return native(ast, path, compile, limits)
+  return native(ast, path, compile, countItems)
 }
 
 /** The declaration fixedBytes may annotate. */
 export function isUint8Array(ast: SchemaAST.AST): boolean {
   return ast._tag === "Declaration" && representationId(ast) === uint8ArrayId
-}
-
-/**
- * The checks of a map or set whose key schema has a transformation, which can merge distinct wire
- * keys into one decoded key. Untransformed keys keep their identity through `toEncoded`.
- */
-export function mergingKeyChecks(
-  ast: SchemaAST.Declaration,
-): ReadonlyArray<SchemaAST.Filter<unknown>> {
-  const id = representationId(ast)
-  const key = ast.typeParameters[0]
-  const isCollection = id !== undefined && collectionIds.has(id)
-  if (!isCollection || key === undefined || SchemaAST.toEncoded(key) === key) {
-    return []
-  }
-  return filters(ast.checks ?? [])
 }
 
 function representationId(ast: SchemaAST.Declaration): string | undefined {
@@ -212,7 +200,6 @@ function withBytes(ast: SchemaAST.Declaration, path: string, compile: Compile): 
 interface CollectionAdapter {
   readonly name: string
   readonly arity: 1 | 2
-  readonly unit: "entries" | "members"
   get(value: unknown): Collection | undefined
   make(entries: [unknown, unknown][]): unknown
 }
@@ -221,7 +208,12 @@ interface CollectionAdapter {
  * Rust BTreeMap/BTreeSet, also for Hash collections: a u32 count, then strictly increasing keys.
  */
 function collectionLayout(adapter: CollectionAdapter) {
-  return (ast: SchemaAST.Declaration, path: string, compile: Compile, limits: Limits): Layout => {
+  return (
+    ast: SchemaAST.Declaration,
+    path: string,
+    compile: Compile,
+    countItems: boolean,
+  ): Layout => {
     const [key, value] = parameters(ast, adapter.arity, adapter.name, path)
     const keyLayout = compile(key, `${path}["key"]`)
     const compare = keyLayout.compare
@@ -294,20 +286,23 @@ function collectionLayout(adapter: CollectionAdapter) {
       }
     }
     const write = (w: Writer, value: unknown) => writeEntries(w, expectCollection(w, value))
-    const guard = countGuard(ast.checks, adapter.unit, limits)
-    if (guard === undefined) {
+    if (!countItems) {
       return { minBytes: 4, isZeroSized: false, read: (r) => readEntries(r, r.u32()), write }
-    }
-    const chargedWrite = (w: Writer, value: unknown) => {
-      const collection = expectCollection(w, value)
-      w.charge(collection.size, w.offset)
-      writeEntries(w, collection)
     }
     return {
       minBytes: 4,
       isZeroSized: false,
-      read: guardedRead(guard, readEntries),
-      write: guard.countItems ? chargedWrite : write,
+      read: (r) => {
+        const offset = r.offset
+        const count = r.u32()
+        r.charge(count, offset)
+        return readEntries(r, count)
+      },
+      write: (w, value) => {
+        const collection = expectCollection(w, value)
+        w.charge(collection.size, w.offset)
+        writeEntries(w, collection)
+      },
     }
   }
 }
@@ -320,14 +315,12 @@ interface Collection {
 const readonlyMap = collectionLayout({
   name: "ReadonlyMap",
   arity: 2,
-  unit: "entries",
   get: (value) => (value instanceof Map ? { size: value.size, entries: value } : undefined),
   make: (entries) => new Map(entries),
 })
 const readonlySet = collectionLayout({
   name: "ReadonlySet",
   arity: 1,
-  unit: "members",
   get: (value) =>
     value instanceof Set ? { size: value.size, entries: value.entries() } : undefined,
   make: (entries) => new Set(entries.map(([key]) => key)),
@@ -335,7 +328,6 @@ const readonlySet = collectionLayout({
 const hashMap = collectionLayout({
   name: "HashMap",
   arity: 2,
-  unit: "entries",
   get: (value) =>
     HashMap.isHashMap(value) ? { size: HashMap.size(value), entries: value } : undefined,
   make: HashMap.fromIterable,
@@ -343,18 +335,10 @@ const hashMap = collectionLayout({
 const hashSet = collectionLayout({
   name: "HashSet",
   arity: 1,
-  unit: "members",
   get: (value) =>
     HashSet.isHashSet(value) ? { size: HashSet.size(value), entries: keyPairs(value) } : undefined,
   make: (entries) => HashSet.fromIterable(entries.map(([key]) => key)),
 })
-
-const collectionIds: ReadonlySet<string> = new Set([
-  "effect/schema/ReadonlyMap",
-  "effect/schema/ReadonlySet",
-  "effect/schema/HashMap",
-  "effect/schema/HashSet",
-])
 
 /** Set members as [key, key] entries, the shape Set.prototype.entries yields. */
 function* keyPairs<K>(keys: Iterable<K>): Generator<readonly [K, K]> {
@@ -365,8 +349,7 @@ function* keyPairs<K>(keys: Iterable<K>): Generator<readonly [K, K]> {
 
 /** Effect declarations with a Borsh layout, keyed by their representation id. */
 const natives: Readonly<Record<string, Native>> = {
-  [uint8ArrayId]: (ast, _path, _compile, limits) =>
-    bytes(undefined, countGuard(ast.checks, "bytes", limits)),
+  [uint8ArrayId]: () => bytes(),
   "effect/schema/Option": option,
   "effect/schema/Result": result,
   "effect/schema/ReadonlyMap": readonlyMap,

@@ -1,17 +1,7 @@
-import type { SchemaAST } from "effect"
-
 /** Expected binary failures only. User schema defects never cross this catch boundary. */
 export class BinaryError extends Error {
   readonly path: PropertyKey[] = []
-  /**
-   * @param check The schema's own check, when the binary layer enforced it early, so the issue
-   * names the same filter the schema pass would.
-   */
-  constructor(
-    offset: number,
-    detail: string,
-    readonly check?: SchemaAST.Filter<unknown>,
-  ) {
+  constructor(offset: number, detail: string) {
     super(`${detail} at byte ${offset}`)
   }
 }
@@ -36,8 +26,6 @@ export interface ReaderOptions {
   readonly maxBytes: number
   /** Infinity when the codec has no maxItems. */
   readonly maxItems: number
-  /** Whether layouts enforce the schema's own length checks; false under `disableChecks`. */
-  readonly checks: boolean
 }
 
 export class Reader {
@@ -47,7 +35,6 @@ export class Reader {
   readonly view: DataView
   /** One past the last byte the value may use. */
   readonly end: number
-  readonly checks: boolean
   readonly maxBytes: number
   readonly maxItems: number
   private items: number
@@ -67,7 +54,6 @@ export class Reader {
     this.view = length === 0 ? emptyView : new DataView(input.buffer, input.byteOffset, length)
     this.limit = start === undefined ? Infinity : start + options.maxBytes
     this.end = Math.min(length, this.limit)
-    this.checks = options.checks
     this.maxBytes = options.maxBytes
     this.maxItems = options.maxItems
     this.items = options.maxItems

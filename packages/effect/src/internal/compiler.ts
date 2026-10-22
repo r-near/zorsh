@@ -1,10 +1,9 @@
-import { Function, type SchemaAST } from "effect"
+import type { SchemaAST } from "effect"
 import { descriptor, type LayoutDescriptor } from "./annotations.js"
 import { compileArrays, compileObject, fixedArray } from "./containers.js"
 import { compileEnum } from "./enums.js"
 import type { Reader, Writer } from "./io.js"
-import { type DeferredChecks, filters, type Limits } from "./limits.js"
-import { compileDeclaration, isUint8Array, mergingKeyChecks } from "./natives.js"
+import { compileDeclaration, isUint8Array } from "./natives.js"
 import { boolean, bytes, float, integer, string } from "./primitives.js"
 
 export interface Layout {
@@ -20,54 +19,25 @@ export type Compile = (ast: SchemaAST.AST, path: string) => Layout
 /**
  * Walks the original schema, before `toEncoded` drops its type side. Recursive schemas are
  * unsupported, so any Suspend on the encoded or type side fails here with its path, without calling
- * its thunk. Returns the checks the binary layer must leave to the schema pass.
+ * its thunk.
  */
-export function prepare(root: SchemaAST.AST): DeferredChecks {
-  const mergingChecks = new WeakSet<SchemaAST.Check<unknown>>()
-  const recoverableChecks = new WeakSet<SchemaAST.Check<unknown>>()
-  // A node shared inside and outside decoding middleware is visited once in each state.
-  const seen = { plain: new Set<SchemaAST.AST>(), recoverable: new Set<SchemaAST.AST>() }
-  const pending = [{ ast: root, path: "$", recoverable: false }]
+export function prepare(root: SchemaAST.AST): void {
+  const seen = new Set<SchemaAST.AST>()
+  const pending = [{ ast: root, path: "$" }]
   for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
-    const { ast, path, recoverable } = node
-    const visited = recoverable ? seen.recoverable : seen.plain
-    if (visited.has(ast)) {
+    const { ast, path } = node
+    if (seen.has(ast)) {
       continue
     }
-    visited.add(ast)
+    seen.add(ast)
     if (ast._tag === "Suspend") {
       throw new Error(`${path}: Suspend/recursive schemas are unsupported`)
     }
-    if (recoverable) {
-      // Flipped nodes keep their wire-side checks in encodingChecks.
-      const encodingChecks = "encodingChecks" in ast ? ast.encodingChecks : undefined
-      for (const check of filters([...(ast.checks ?? []), ...(encodingChecks ?? [])])) {
-        recoverableChecks.add(check)
-      }
-    }
-    // Middleware can catch a failure anywhere in the schemas it wraps.
-    const wrapsRecovery = hasDecodingMiddleware(ast)
     ast.encoding?.forEach((link, i) =>
-      pending.push({
-        ast: link.to,
-        path: `${path}.encoding[${i}]`,
-        recoverable: recoverable || wrapsRecovery,
-      }),
+      pending.push({ ast: link.to, path: `${path}.encoding[${i}]` }),
     )
-    if (ast._tag === "Declaration") {
-      for (const check of mergingKeyChecks(ast)) {
-        mergingChecks.add(check)
-      }
-    }
-    // Effect tries a member with decoding middleware on every input, so its recovery can stand in
-    // for a sibling that failed a check. Middleware anywhere in a union counts, conservatively, which
-    // also covers middleware on a member's tag.
-    const membersRecover = ast._tag === "Union" && containsDecodingMiddleware(ast, path)
-    for (const child of children(ast, path)) {
-      pending.push({ ...child, recoverable: recoverable || membersRecover })
-    }
+    pending.push(...children(ast, path))
   }
-  return { mergingChecks, recoverableChecks }
 }
 
 /** The schemas directly inside ast, apart from its encoding chain, with their paths. */
@@ -105,42 +75,8 @@ function children(
   return []
 }
 
-/** Whether decoding middleware sits anywhere in root's subtree, including encoding chains. */
-function containsDecodingMiddleware(root: SchemaAST.AST, rootPath: string): boolean {
-  const seen = new Set<SchemaAST.AST>()
-  const pending = [{ ast: root, path: rootPath }]
-  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
-    const { ast, path } = node
-    if (seen.has(ast)) {
-      continue
-    }
-    seen.add(ast)
-    if (hasDecodingMiddleware(ast)) {
-      return true
-    }
-    ast.encoding?.forEach((link, i) =>
-      pending.push({ ast: link.to, path: `${path}.encoding[${i}]` }),
-    )
-    pending.push(...children(ast, path))
-  }
-  return false
-}
-
-function hasDecodingMiddleware(ast: SchemaAST.AST): boolean {
-  return ast.encoding?.some(isDecodingMiddleware) === true
-}
-
-/** Mirrors Effect's own test for middleware that can change a decoding result. */
-function isDecodingMiddleware(link: SchemaAST.Link): boolean {
-  const transformation = link.transformation
-  return transformation._tag === "Middleware" && transformation.decode !== Function.identity
-}
-
-/**
- * limits must come from prepare on the original schema, or merging and recoverable checks would
- * fail early.
- */
-export function compile(root: SchemaAST.AST, limits: Limits): Layout {
+/** countItems: whether collections charge their counts against the codec's maxItems budget. */
+export function compile(root: SchemaAST.AST, countItems: boolean): Layout {
   // A node reused across the schema compiles once.
   const memo = new Map<SchemaAST.AST, Layout>()
   const compileCached: Compile = (ast, path) => {
@@ -148,7 +84,7 @@ export function compile(root: SchemaAST.AST, limits: Limits): Layout {
     if (cached !== undefined) {
       return cached
     }
-    const layout = compileNode(ast, path, compileCached, limits)
+    const layout = compileNode(ast, path, compileCached, countItems)
     memo.set(ast, layout)
     return layout
   }
@@ -156,7 +92,12 @@ export function compile(root: SchemaAST.AST, limits: Limits): Layout {
 }
 
 /** An explicit layout annotation owns its node; natives and AST tags apply only without one. */
-function compileNode(ast: SchemaAST.AST, path: string, compile: Compile, limits: Limits): Layout {
+function compileNode(
+  ast: SchemaAST.AST,
+  path: string,
+  compile: Compile,
+  countItems: boolean,
+): Layout {
   if (ast.context?.isOptional) {
     throw new Error(
       `${path}: Optional properties and elements have no Borsh layout on the encoded side; use Schema.Option for a Rust Option`,
@@ -164,11 +105,11 @@ function compileNode(ast: SchemaAST.AST, path: string, compile: Compile, limits:
   }
   const layout = descriptor(ast, path)
   if (layout !== undefined) {
-    return compileDescriptor(ast, layout, path, compile, limits)
+    return compileDescriptor(ast, layout, path, compile, countItems)
   }
   switch (ast._tag) {
     case "Declaration":
-      return compileDeclaration(ast, path, compile, limits)
+      return compileDeclaration(ast, path, compile, countItems)
     case "Union":
     case "Enum":
       return compileEnum(ast, undefined, path, compile)
@@ -179,7 +120,7 @@ function compileNode(ast: SchemaAST.AST, path: string, compile: Compile, limits:
     case "Objects":
       return compileObject(ast, path, compile)
     case "Arrays":
-      return compileArrays(ast, path, compile, limits)
+      return compileArrays(ast, path, compile, countItems)
     case "Number":
     case "BigInt":
       throw new Error(
@@ -198,7 +139,7 @@ function compileDescriptor(
   layout: LayoutDescriptor,
   path: string,
   compile: Compile,
-  limits: Limits,
+  countItems: boolean,
 ): Layout {
   switch (layout.kind) {
     case "integer": {
@@ -220,7 +161,7 @@ function compileDescriptor(
       }
       return bytes(layout.length)
     case "fixedArray":
-      return fixedArray(ast, layout.length, path, compile, limits)
+      return fixedArray(ast, layout.length, path, compile, countItems)
     case "enum":
       return compileEnum(ast, layout, path, compile)
   }

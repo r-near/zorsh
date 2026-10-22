@@ -22,7 +22,6 @@ import { isU32Length, parseDescriptor, withLayout } from "./internal/annotations
 import { compile, type Layout, prepare } from "./internal/compiler.js"
 import { enumVariants } from "./internal/enums.js"
 import { BinaryError, Reader, type ReaderOptions, Writer } from "./internal/io.js"
-import type { DeferredChecks } from "./internal/limits.js"
 import { isValueWithBytes, type ValueWithBytes, withBytesId } from "./internal/natives.js"
 import { integerRange } from "./internal/primitives.js"
 
@@ -536,15 +535,12 @@ function binaryFailure(error: unknown): SchemaIssue.Issue {
   if (!(error instanceof BinaryError)) {
     throw error
   }
-  const leaf = new SchemaIssue.InvalidValue({ message: error.message })
-  // An early schema check fails as a Filter on the user's own check, as the schema pass would.
-  const issue = error.check === undefined ? leaf : new SchemaIssue.Filter(error.check, leaf)
+  const issue = new SchemaIssue.InvalidValue({ message: error.message })
   return error.path.length === 0 ? issue : new SchemaIssue.Pointer(error.path, issue)
 }
 
 interface CodecCacheEntry {
   readonly encoded: SchemaAST.AST
-  readonly deferred: DeferredChecks
   /** Keyed by whether collections charge maxItems; each variant compiles on first use. */
   readonly layouts: Map<boolean, Layout>
   /** Keyed by `maxBytes`, or `maxBytes/maxItems` when maxItems is set. */
@@ -666,10 +662,8 @@ function cacheEntry(schema: Schema.Constraint): CodecCacheEntry {
   if (cached !== undefined) {
     return cached
   }
-  const deferred = prepare(schema.ast)
   const entry: CodecCacheEntry = {
-    encoded: Schema.toEncoded(schema).ast,
-    deferred,
+    encoded: encodedAST(schema),
     layouts: new Map(),
     codecs: new Map(),
   }
@@ -683,35 +677,22 @@ function layoutOf(entry: CodecCacheEntry, countItems: boolean): Layout {
   if (cached !== undefined) {
     return cached
   }
-  const layout = compile(entry.encoded, { countItems, ...entry.deferred })
+  const layout = compile(entry.encoded, countItems)
   entry.layouts.set(countItems, layout)
   return layout
 }
 
-/**
- * Reader options for the parse options of a decode, where `disableChecks` turns off the schema's
- * own length checks. Both variants are built once, so decoding allocates no options object.
- */
-function readerOptions(
-  maxBytes: number,
-  maxItems = Infinity,
-): (parseOptions: SchemaAST.ParseOptions | undefined) => ReaderOptions {
-  const checked = { maxBytes, maxItems, checks: true }
-  const unchecked = { maxBytes, maxItems, checks: false }
-  return (parseOptions) => (parseOptions?.disableChecks === true ? unchecked : checked)
-}
-
 /** Bytes to the schema's encoded value and back; toCodec layers the schema itself on top. */
 function binaryCodec(layout: Layout, maxBytes: number, maxItems = Infinity) {
-  const optionsFor = readerOptions(maxBytes, maxItems)
+  const readerOptions: ReaderOptions = { maxBytes, maxItems }
   return Schema.Uint8Array.pipe(
     Schema.decodeTo(
       Schema.Unknown,
       SchemaTransformation.transformEffect({
-        decode: (bytes, options) =>
+        decode: (bytes) =>
           Effect.try({
             try: () => {
-              const reader = new Reader(bytes, optionsFor(options))
+              const reader = new Reader(bytes, readerOptions)
               const value = layout.read(reader)
               if (reader.offset !== bytes.byteLength) {
                 throw new BinaryError(reader.offset, "Trailing bytes")
@@ -757,11 +738,7 @@ export interface Prefix<A> {
 }
 
 /** Read one encoded value at offset; the prefix decoders run the schema pass on top. */
-type PrefixReader = (
-  bytes: Uint8Array,
-  offset: number,
-  parseOptions: SchemaAST.ParseOptions | undefined,
-) => Prefix<unknown>
+type PrefixReader = (bytes: Uint8Array, offset: number) => Prefix<unknown>
 
 function prefixReader(schema: Schema.Constraint, options: Options | undefined): PrefixReader {
   const { maxBytes, maxItems } = validLimits(options)
@@ -773,8 +750,8 @@ function prefixReader(schema: Schema.Constraint, options: Options | undefined): 
       "$: Prefix decoding requires a schema that encodes to at least one byte; this one always encodes to zero bytes, so a decoding loop would never advance",
     )
   }
-  const optionsFor = readerOptions(maxBytes, maxItems)
-  return (bytes, offset, parseOptions) => {
+  const readerOptions: ReaderOptions = { maxBytes, maxItems: maxItems ?? Infinity }
+  return (bytes, offset) => {
     // Not BinaryErrors: invalid arguments are caller bugs, so they are defects.
     if (!(bytes instanceof Uint8Array)) {
       throw new TypeError("Prefix decoding requires a Uint8Array")
@@ -789,7 +766,7 @@ function prefixReader(schema: Schema.Constraint, options: Options | undefined): 
         `Prefix offset must be an integer from 0 through ${bytes.byteLength}, got ${offset}`,
       )
     }
-    const reader = new Reader(bytes, optionsFor(parseOptions), offset)
+    const reader = new Reader(bytes, readerOptions, offset)
     return { value: layout.read(reader), offset: reader.offset }
   }
 }
@@ -859,7 +836,7 @@ export function decodePrefixEffect<S extends Schema.Constraint>(
   const read = prefixReader(schema, options)
   const decodeValue = Schema.decodeUnknownEffect(schema)
   return (bytes, offset = 0, parseOptions) =>
-    Effect.try({ try: () => read(bytes, offset, parseOptions), catch: binarySchemaError }).pipe(
+    Effect.try({ try: () => read(bytes, offset), catch: binarySchemaError }).pipe(
       Effect.flatMap((prefix) =>
         decodeValue(prefix.value, parseOptions).pipe(
           Effect.map((value) => ({ value, offset: prefix.offset })),
@@ -906,7 +883,7 @@ export function decodePrefixSync<S extends Schema.ConstraintDecoder<unknown>>(
   return (bytes, offset = 0, parseOptions) => {
     let prefix: Prefix<unknown>
     try {
-      prefix = read(bytes, offset, parseOptions)
+      prefix = read(bytes, offset)
     } catch (error) {
       throw binarySchemaError(error)
     }

@@ -14,7 +14,6 @@ import { expect, expectTypeOf, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { compile } from "../src/internal/compiler.js"
 import { Writer } from "../src/internal/io.js"
-import { noLimits } from "../src/internal/limits.js"
 
 const mapSchemas = [
   Schema.ReadonlyMap(Borsh.U16, Schema.String),
@@ -125,16 +124,16 @@ it("validates collection arities and native binary shapes", () => {
     }
     const arity = i < 2 ? "2 encoded type parameters" : "1 encoded type parameter"
     const message = new Error(`$: ${names[i]} requires exactly ${arity}`)
-    expect(() =>
-      compile(new SchemaAST.Declaration([], ast.run, ast.annotations), noLimits),
-    ).toThrow(message)
+    expect(() => compile(new SchemaAST.Declaration([], ast.run, ast.annotations), false)).toThrow(
+      message,
+    )
     // Sparse hand-built parameters fail the same check: an empty set key or map value slot.
     const sparse = ast.typeParameters.slice(0, i < 2 ? 1 : 0)
     sparse.length = ast.typeParameters.length
     expect(() =>
-      compile(new SchemaAST.Declaration(sparse, ast.run, ast.annotations), noLimits),
+      compile(new SchemaAST.Declaration(sparse, ast.run, ast.annotations), false),
     ).toThrow(message)
-    const layout = compile(ast, noLimits)
+    const layout = compile(ast, false)
     for (const value of [null, [], {}, 1]) {
       expect(() => layout.write(new Writer(64), value)).toThrow(/Expected native collection/)
     }
@@ -152,7 +151,7 @@ it("validates collection arities and native binary shapes", () => {
 
 it("preflights collection bytes before copying entries and preserves precise payload failures", () => {
   const schema = Schema.ReadonlyMap(Borsh.U16, Schema.Boolean)
-  const layout = compile(Schema.toEncoded(schema).ast, noLimits)
+  const layout = compile(Schema.toEncoded(schema).ast, false)
   const huge = new Map([[1, true]])
   Object.defineProperty(huge, "size", { value: 0x1_0000_0000, configurable: true })
   expect(() => layout.write(new Writer(32), huge)).toThrow(/u32 length/)
@@ -313,7 +312,7 @@ it("treats maps as nonzero-sized and only visits present value layouts", () => {
 })
 
 it("checks encoded iterator duplicates and invalid primitive comparison inputs", () => {
-  const layout = compile(Schema.toEncoded(Schema.ReadonlyMap(Borsh.U16, Borsh.Unit)).ast, noLimits)
+  const layout = compile(Schema.toEncoded(Schema.ReadonlyMap(Borsh.U16, Borsh.Unit)).ast, false)
   const duplicate = new Map([[1, []]])
   Object.defineProperty(duplicate, Symbol.iterator, {
     value: function* () {
@@ -336,7 +335,7 @@ it("checks encoded iterator duplicates and invalid primitive comparison inputs",
       ]),
     ),
   ).toThrow(/Expected ordered primitive/)
-  const strings = compile(Schema.toEncoded(Schema.ReadonlySet(Schema.String)).ast, noLimits)
+  const strings = compile(Schema.toEncoded(Schema.ReadonlySet(Schema.String)).ast, false)
   expect(() => strings.write(new Writer(64), new Set([1, 2]))).toThrow(/Expected string key/)
 })
 
@@ -345,7 +344,7 @@ it("encodes empty native maps when a shared value layout overflows its minimum s
   for (let i = 0; i < 500; i++) {
     value = Schema.Struct({ a: value, b: value, c: value, d: value })
   }
-  expect(compile(Schema.toEncoded(value).ast, noLimits).minBytes).toBe(Infinity)
+  expect(compile(Schema.toEncoded(value).ast, false).minBytes).toBe(Infinity)
   for (const [schema, empty] of [
     [Schema.ReadonlyMap(Borsh.U8, value), new Map()],
     [Schema.HashMap(Borsh.U8, value), HashMap.empty()],
