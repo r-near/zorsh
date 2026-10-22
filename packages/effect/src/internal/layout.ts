@@ -245,8 +245,8 @@ export interface Field {
 
 /** A Rust struct: fields in declaration order. */
 export function struct(fields: ReadonlyArray<Field>): Layout {
-  // Assignment would hit an inherited setter or a frozen inherited property. Checked once here:
-  // Effect's schema pass, which runs next, assigns plainly too.
+  // Assignment would hit an inherited setter or a frozen inherited property, so such names are
+  // defined instead. Deciding once here keeps the check off the read path.
   const entries = fields.map((field) => ({ ...field, define: field.name in Object.prototype }))
   return {
     minBytes: sum(fields, (field) => field.layout.minBytes),
@@ -664,6 +664,7 @@ export function enumOf(
 ): Layout {
   const isTagged = variants.some((variant) => variant.payload !== undefined)
   const byDiscriminant = new Map(variants.map((variant) => [variant.discriminant, variant]))
+  // Writes find a tagged variant by its label, read from the tag field, and others by value.
   const byKey = new Map(
     variants.map((variant) => [isTagged ? variant.label : variant.value, variant]),
   )

@@ -15,7 +15,7 @@ import {
   SchemaParser,
   SchemaTransformation,
 } from "effect"
-import { compile, enumVariants, maxLengthId, withBytesId, withLayout } from "./internal/compile.js"
+import { checkEnum, compile, maxLengthId, withBytesId, withLayout } from "./internal/compile.js"
 import { BinaryError, Reader, type Limits, utf8Length, Writer } from "./internal/io.js"
 import {
   integerRange,
@@ -262,7 +262,7 @@ export function discriminants(
     discriminants: parseDiscriminants(map),
   } as const
   return (schema) => {
-    enumVariants(Schema.toEncoded(schema).ast, layout, "$")
+    checkEnum(Schema.toEncoded(schema).ast, layout)
     return withLayout(schema, layout)
   }
 }
@@ -561,10 +561,16 @@ function binarySchemaError(error: unknown): Schema.SchemaError {
  * ```ts
  * const Frame = Schema.Struct({ id: Borsh.U32, body: Schema.String })
  * const decodeFrame = Borsh.decodePrefixEffect(Frame, { maxBytes: 1 << 20, maxItems: 10_000 })
- * const program = Effect.gen(function* () {
- *   const first = yield* decodeFrame(buffer)
- *   const second = yield* decodeFrame(buffer, first.offset)
- *   return [first.value, second.value]
+ *
+ * const decodeAll = Effect.fnUntraced(function* (buffer: Uint8Array) {
+ *   const frames: Array<typeof Frame.Type> = []
+ *   let offset = 0
+ *   while (offset < buffer.byteLength) {
+ *     const next = yield* decodeFrame(buffer, offset)
+ *     frames.push(next.value)
+ *     offset = next.offset
+ *   }
+ *   return frames
  * })
  * ```
  */

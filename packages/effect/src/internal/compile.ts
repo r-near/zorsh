@@ -262,12 +262,8 @@ function representationId(ast: SchemaAST.Declaration): string | undefined {
   return typeof id === "string" ? id : undefined
 }
 
-interface EnumVariant {
-  readonly label: string
-  readonly discriminant: number
-  readonly value?: unknown
-  readonly member?: SchemaAST.Objects
-}
+/** A classified variant: a tagged-struct one keeps its member AST until compileEnum lays it out. */
+type EnumVariant = Omit<L.Variant, "payload"> & { readonly member?: SchemaAST.Objects }
 
 type UnnumberedVariant = Omit<EnumVariant, "discriminant">
 
@@ -281,10 +277,14 @@ function compileEnum(
   compile: Compile,
 ): L.Layout {
   const tag = annotation === undefined ? "_tag" : annotation.tag
-  const variants = enumVariants(ast, annotation, path).map(({ member, ...variant }): L.Variant =>
-    member === undefined
-      ? variant
-      : { ...variant, payload: compileObject(member, path, compile, tag) },
+  // Every variant gets the same shape, so enumOf's reads stay monomorphic.
+  const variants = enumVariants(ast, annotation, path).map(
+    ({ label, discriminant, value, member }): L.Variant => ({
+      label,
+      discriminant,
+      value,
+      payload: member === undefined ? undefined : compileObject(member, path, compile, tag),
+    }),
   )
   // One dataless variant is a Rust ZST, unless an explicit map implies repr(u8).
   const isZeroSized =
@@ -294,8 +294,13 @@ function compileEnum(
   return L.enumOf(variants, tag, isZeroSized)
 }
 
+/** Check an enum schema as Borsh.discriminants is applied, before anything is compiled. */
+export function checkEnum(ast: SchemaAST.AST, annotation: EnumAnnotation): void {
+  enumVariants(ast, annotation, "$")
+}
+
 /** Read Rust enum variants with declaration-order or explicit discriminants. */
-export function enumVariants(
+function enumVariants(
   ast: SchemaAST.AST,
   annotation: EnumAnnotation | undefined,
   path: string,
