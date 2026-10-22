@@ -117,7 +117,8 @@ export const I128 = bigInteger(128, true)
  * Round explicitly with `Math.fround`.
  *
  * Effect's native arbitrary has no binary32 generator, so derived samples are
- * integers within ±2^24, which binary32 represents exactly.
+ * integers within ±2^24, which binary32 represents exactly. Refinements must
+ * admit such an integer for sampling.
  *
  * @category floats
  * @since 0.1.0
@@ -216,6 +217,14 @@ function exactLength(ast: SchemaAST.AST, length: number) {
   return Schema.isBetweenLength(length, length, Object.fromEntries(kept))
 }
 
+/** Whether a top-level check, such as an earlier `fixedArray`, already pins the length. */
+function hasExactLength(ast: SchemaAST.AST, length: number): boolean {
+  return (ast.checks ?? []).some((check) => {
+    const constraint = check.annotations?.arbitraryConstraint
+    return constraint?.minLength === length && constraint.maxLength === length
+  })
+}
+
 /**
  * Rust `[T; N]`: gives a native array schema a fixed-length layout with no
  * count prefix.
@@ -227,9 +236,9 @@ function exactLength(ast: SchemaAST.AST, length: number) {
  * codec requires exactly `length` items. A schema without a transformation,
  * such as a checked or branded `Schema.Array(item)`, also gets a native
  * exact-length check. A transformed schema is otherwise unchanged, so its
- * application type is kept and no check is added to the decoded value; check
- * the encoded array's length before the transformation instead. `length` must
- * be an integer from 0 through 2^32 - 1.
+ * application type is kept and no check is added to the decoded value; apply
+ * `fixedArray` before the transformation instead. `length` must be an integer
+ * from 0 through 2^32 - 1.
  *
  * **Example** (Three u16 values)
  *
@@ -253,7 +262,7 @@ export function fixedArray(length: number): <S extends Schema.Top>(schema: S) =>
       throw new Error("$: fixedArray requires a homogeneous encoded array")
     const fixed = withLayout(schema, { version: 1, kind: "fixedArray", length })
     // Without a transformation the decoded value is the encoded array, so it can carry the length.
-    return schema.ast.encoding === undefined
+    return schema.ast.encoding === undefined && !hasExactLength(schema.ast, length)
       ? fixed.check(exactLength(fixed.ast, length) as SchemaAST.Check<typeof fixed.Type>)
       : fixed
   }

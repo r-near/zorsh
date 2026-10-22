@@ -138,6 +138,23 @@ it("keeps schema annotations when fixedArray adds its length check", () => {
   const codec = Borsh.toCodec(schema)
   expect(() => Schema.encodeUnknownSync(codec)("x")).toThrow(/^Expected Triple$/)
   expect(() => Schema.encodeSync(codec)([1])).toThrow(/^Expected a value with a length of 3$/)
+  const pinned = (schema: Schema.Top) =>
+    schema
+      .pipe(Borsh.fixedArray(3))
+      .ast.checks?.filter((check) => check.annotations?.arbitraryConstraint?.maxLength === 3).length
+  const array = Schema.Array(Borsh.U8)
+  expect(pinned(array)).toBe(1)
+  expect(pinned(array.pipe(Borsh.fixedArray(3)))).toBe(1)
+  expect(pinned(array.check(Schema.isBetweenLength(3, 3)))).toBe(1)
+  expect(
+    pinned(
+      array.check(
+        Schema.isMinLength(3),
+        Schema.makeFilter(() => true),
+      ),
+    ),
+  ).toBe(1)
+  expect(pinned(array.check(Schema.isBetweenLength(2, 3)))).toBe(2)
   const custom = Schema.Array(Borsh.U8).check(Schema.isMinLength(1, { message: "need one" }))
   expect(() => Schema.encodeSync(Borsh.toCodec(custom.pipe(Borsh.fixedArray(3))))([])).toThrow(
     /^need one$/,
@@ -206,18 +223,16 @@ it("runs the package README fixture examples", () => {
   ).map((request) => Schema.encodeSync(requestCodec)(request))
   expect(fixtures).toHaveLength(100)
   expect(() => Borsh.toCodec(Schema.Literal("sign"))).toThrow(/Unsupported encoded schema Literal/)
-  const Range = Schema.Array(Borsh.U32)
-    .check(Schema.isBetweenLength(2, 2))
-    .pipe(
-      Schema.decodeTo(
-        Schema.Struct({ start: Borsh.U32, end: Borsh.U32 }),
-        SchemaTransformation.transform({
-          decode: ([start = 0, end = 0]) => ({ start, end }),
-          encode: ({ start, end }) => [start, end],
-        }),
-      ),
-      Borsh.fixedArray(2),
-    )
+  const Range = Schema.Array(Borsh.U32).pipe(
+    Borsh.fixedArray(2),
+    Schema.decodeTo(
+      Schema.Struct({ start: Borsh.U32, end: Borsh.U32 }),
+      SchemaTransformation.transform({
+        decode: ([start = 0, end = 0]) => ({ start, end }),
+        encode: ({ start, end }) => [start, end],
+      }),
+    ),
+  )
   const range = Borsh.toCodec(Range)
   expect(Schema.encodeSync(range)({ start: 1, end: 2 })).toEqual(
     Uint8Array.of(1, 0, 0, 0, 2, 0, 0, 0),
