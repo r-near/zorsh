@@ -138,23 +138,31 @@ it("keeps schema annotations when fixedArray adds its length check", () => {
   const codec = Borsh.toCodec(schema)
   expect(() => Schema.encodeUnknownSync(codec)("x")).toThrow(/^Expected Triple$/)
   expect(() => Schema.encodeSync(codec)([1])).toThrow(/^Expected a value with a length of 3$/)
-  const pinned = (schema: Schema.Top) =>
+  const lengthChecks = (schema: Schema.Top) =>
     schema
       .pipe(Borsh.fixedArray(3))
-      .ast.checks?.filter((check) => check.annotations?.arbitraryConstraint?.maxLength === 3).length
+      .ast.checks?.filter(
+        (check) => check.annotations?.representation?.id === "effect/schema/isBetweenLength",
+      ).length
   const array = Schema.Array(Borsh.U8)
-  expect(pinned(array)).toBe(1)
-  expect(pinned(array.pipe(Borsh.fixedArray(3)))).toBe(1)
-  expect(pinned(array.check(Schema.isBetweenLength(3, 3)))).toBe(1)
+  expect(lengthChecks(array)).toBe(1)
+  expect(lengthChecks(array.pipe(Borsh.fixedArray(3)))).toBe(1)
+  expect(lengthChecks(array.check(Schema.isBetweenLength(3, 3)))).toBe(1)
+  expect(lengthChecks(array.check(Schema.makeFilterGroup([Schema.isBetweenLength(3, 3)])))).toBe(0)
   expect(
-    pinned(
+    lengthChecks(
       array.check(
         Schema.isMinLength(3),
         Schema.makeFilter(() => true),
       ),
     ),
   ).toBe(1)
-  expect(pinned(array.check(Schema.isBetweenLength(2, 3)))).toBe(2)
+  expect(lengthChecks(array.check(Schema.isBetweenLength(2, 3)))).toBe(2)
+  // A generation hint alone does not enforce the length.
+  const hinted = array.check(
+    Schema.isMaxLength(5, { arbitraryConstraint: { minLength: 3, maxLength: 3 } }),
+  )
+  expect(Schema.is(hinted.pipe(Borsh.fixedArray(3)))([1])).toBe(false)
   const custom = Schema.Array(Borsh.U8).check(Schema.isMinLength(1, { message: "need one" }))
   expect(() => Schema.encodeSync(Borsh.toCodec(custom.pipe(Borsh.fixedArray(3))))([])).toThrow(
     /^need one$/,

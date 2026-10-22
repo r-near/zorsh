@@ -217,12 +217,14 @@ function exactLength(ast: SchemaAST.AST, length: number) {
   return Schema.isBetweenLength(length, length, Object.fromEntries(kept))
 }
 
-/** Whether a top-level check, such as an earlier `fixedArray`, already pins the length. */
-function hasExactLength(ast: SchemaAST.AST, length: number): boolean {
-  return (ast.checks ?? []).some((check) => {
-    const constraint = check.annotations?.arbitraryConstraint
-    return constraint?.minLength === length && constraint.maxLength === length
-  })
+/** Whether a check, such as an earlier `fixedArray`, already enforces exactly `length` items. */
+function pinsLength(check: SchemaAST.Check<never>, length: number): boolean {
+  if (check._tag === "FilterGroup") return check.checks.some((inner) => pinsLength(inner, length))
+  const representation = check.annotations?.representation
+  return (
+    representation?.id === "effect/schema/isBetweenLength" &&
+    JSON.stringify(representation.payload) === JSON.stringify({ minimum: length, maximum: length })
+  )
 }
 
 /**
@@ -262,7 +264,8 @@ export function fixedArray(length: number): <S extends Schema.Top>(schema: S) =>
       throw new Error("$: fixedArray requires a homogeneous encoded array")
     const fixed = withLayout(schema, { version: 1, kind: "fixedArray", length })
     // Without a transformation the decoded value is the encoded array, so it can carry the length.
-    return schema.ast.encoding === undefined && !hasExactLength(schema.ast, length)
+    return schema.ast.encoding === undefined &&
+      !schema.ast.checks?.some((check) => pinsLength(check, length))
       ? fixed.check(exactLength(fixed.ast, length) as SchemaAST.Check<typeof fixed.Type>)
       : fixed
   }
