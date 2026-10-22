@@ -51,6 +51,8 @@ export class Reader {
   readonly maxBytes: number
   readonly maxItems: number
   private items: number
+  /** Where a prefix read's maxBytes runs out. A whole input was checked against it up front. */
+  private readonly limit: number
   /**
    * Without start, the whole input must fit maxBytes. With start, this is a prefix read: it begins
    * there, may stop before the input ends, and maxBytes caps the value rather than the input.
@@ -63,17 +65,21 @@ export class Reader {
     this.offset = start ?? 0
     this.input = length === 0 ? empty : new Uint8Array(input.buffer, input.byteOffset, length)
     this.view = length === 0 ? emptyView : new DataView(input.buffer, input.byteOffset, length)
-    this.end = Math.min(length, this.offset + options.maxBytes)
+    this.limit = start === undefined ? Infinity : start + options.maxBytes
+    this.end = Math.min(length, this.limit)
     this.checks = options.checks
     this.maxBytes = options.maxBytes
     this.maxItems = options.maxItems
     this.items = options.maxItems
   }
 
-  /** The failure for a read that needs bytes past end, described as detail when the input ran out. */
-  pastEnd(offset: number, detail: string): BinaryError {
-    // Only a prefix read can end before the input does, and only because maxBytes clipped it.
-    if (this.end < this.input.byteLength) {
+  /**
+   * The failure for a read of at least length bytes at offset that passes end: detail when the input
+   * ran out first, so more input might complete the value.
+   */
+  pastEnd(offset: number, length: number, detail: string): BinaryError {
+    // A value that needs more than maxBytes can never fit, however much input follows.
+    if (offset + length > this.limit) {
       return new BinaryError(offset, `Value exceeds maxBytes (${this.maxBytes})`)
     }
     return new BinaryError(offset, detail)
@@ -91,7 +97,7 @@ export class Reader {
   advance(length: number): number {
     const offset = this.offset
     if (length > this.end - offset) {
-      throw this.pastEnd(offset, `Truncated input: need ${length} bytes`)
+      throw this.pastEnd(offset, length, `Truncated input: need ${length} bytes`)
     }
     this.offset = offset + length
     return offset

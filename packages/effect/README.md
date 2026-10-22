@@ -319,7 +319,7 @@ Second, set a budget for the whole message:
 const codec = Borsh.toCodec(Receipt, { maxBytes: 256 * 1024, maxItems: 10_000 })
 ```
 
-`maxItems` is one budget for everything the message contains, however deeply nested, not a limit per collection. Each collection is charged as soon as its length is read, so `Input exceeds maxItems (10000) at byte 812` names the length prefix that overran it. It is a codec limit rather than a schema check, so it also applies under `disableChecks`. Like truncated input or `maxBytes`, it fails in the binary layer, so only decoding middleware on the root schema, such as `Schema.catchDecoding`, can recover from it.
+`maxItems` is one budget for everything the message contains, however deeply nested, not a limit per collection. Each collection is charged as soon as its length is read, so `Input exceeds maxItems (10000) at byte 812` names the length prefix that overran it. It is a codec limit rather than a schema check, so it also applies under `disableChecks`. Like truncated input or `maxBytes`, it fails in the binary layer, so with `toCodec` only decoding middleware on the root schema, such as `Schema.catchDecoding`, can recover from it.
 
 ## Decoding from a larger buffer
 
@@ -346,9 +346,9 @@ const { value: message, offset: end } = decodeMessage(packet, 4)
 const trailer = packet.subarray(end)
 ```
 
-`maxBytes` caps the bytes the value may use, not the length of the buffer, so a value that would run past it fails with `Value exceeds maxBytes (65536) at byte …` even when the buffer is longer. `maxItems` is a budget per call. Byte offsets in errors are positions in the buffer. `decodePrefixEffect` needs the schema's decoding services, as `Schema.decodeEffect` does; `decodePrefixSync` accepts only schemas without them and throws `Schema.SchemaError`.
+`maxBytes` caps the bytes the value may use, not the length of the buffer. A value that needs more fails with `Value exceeds maxBytes (65536) at byte …`, whatever the buffer holds, while a `Truncated …` failure means the buffer ended first, so more input might complete the value. `maxItems` is a budget per call. Byte offsets in errors are positions in the buffer. Decoding middleware on the schema, such as `Schema.catchDecoding`, can recover from schema-pass failures but, unlike with `toCodec`, not from binary ones, because a value that was never read has no end to return as `offset`. `decodePrefixEffect` needs the schema's decoding services, as `Schema.decodeEffect` does; `decodePrefixSync` accepts only schemas without them and throws `Schema.SchemaError`.
 
-The offset defaults to 0 and must be an integer from 0 through `buffer.byteLength`; any other offset is a defect, a `RangeError`, rather than a decoding failure. A schema that always encodes to zero bytes, such as `Borsh.Unit`, an empty struct, `fixedBytes(0)` or `fixedArray(0)`, throws when the decoder is built, because a decoding loop over it would never advance. Every other schema reads at least one byte per value, including enums with one dataless variant, which Rust treats as zero-sized but Borsh still writes as a one-byte tag.
+The offset defaults to 0 and must be an integer from 0 through `buffer.byteLength`; any other offset is a defect, a `RangeError`, rather than a decoding failure, and so is a buffer that is not a `Uint8Array`. A schema that always encodes to zero bytes, such as `Borsh.Unit`, an empty struct, `fixedBytes(0)` or `fixedArray(0)`, throws when the decoder is built, because a decoding loop over it would never advance. Every other schema reads at least one byte per value, including enums with one dataless variant, which Rust treats as zero-sized but Borsh still writes as a one-byte tag.
 
 ## Binary format and limits
 

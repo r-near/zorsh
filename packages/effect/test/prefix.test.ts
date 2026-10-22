@@ -118,6 +118,25 @@ describe("decodePrefixSync", () => {
     expect(decode(fits)).toEqual({ value: [0x0101_0101, 0x0101_0101], offset: 12 })
   })
 
+  it("reports every kind of read past maxBytes as exceeding it, however short the buffer", () => {
+    // Each value starts at byte 3 and claims more than its 8 bytes; "at byte" is where it fails.
+    const cases = [
+      [Schema.String, [...u32(50), 97, 98], 7],
+      [Borsh.Bytes, [...u32(1000)], 7],
+      [Schema.Array(Borsh.U16), [...u32(10), 1, 0], 7],
+      [Schema.Array(Borsh.U32).pipe(Borsh.fixedArray(3)), [1, 0, 0, 0], 3],
+      [Schema.ReadonlyMap(Borsh.U8, Borsh.U8), [...u32(5), 1, 1], 7],
+    ] as const
+    for (const [schema, value, at] of cases) {
+      const decode = Borsh.decodePrefixSync(schema as Schema.Codec<unknown>, { maxBytes: 8 })
+      const message = `Value exceeds maxBytes (8) at byte ${at}`
+      // A streaming caller must not wait for more input when no amount of it could help.
+      expect(failure(() => decode(Uint8Array.of(9, 9, 9, ...value), 3)).message).toBe(message)
+      const long = Uint8Array.of(9, 9, 9, ...value, ...repeat(0, 64))
+      expect(failure(() => decode(long, 3)).message).toBe(message)
+    }
+  })
+
   it("reports truncation when the buffer, not maxBytes, ends first", () => {
     const decode = Borsh.decodePrefixSync(Frame, { maxBytes: 64 })
     const buffer = Uint8Array.of(0, ...frame(5, "abc").slice(0, -1))
@@ -224,6 +243,13 @@ describe("decodePrefixSync", () => {
     }
   })
 
+  it("throws a TypeError for bytes that are not a Uint8Array", () => {
+    const decode = Borsh.decodePrefixSync(Borsh.U8)
+    expect(() => decode([1, 2] as never)).toThrow(
+      new TypeError("Prefix decoding requires a Uint8Array"),
+    )
+  })
+
   it("accepts the end of the buffer as an offset, where any value is truncated", () => {
     const decode = Borsh.decodePrefixSync(Borsh.U8)
     expect(failure(() => decode(Uint8Array.of(1, 2), 2)).message).toBe(
@@ -232,6 +258,23 @@ describe("decodePrefixSync", () => {
     expect(failure(() => decode(new Uint8Array(0))).message).toBe(
       "Truncated input: need 1 bytes at byte 0",
     )
+  })
+
+  it("lets decoding middleware recover from schema-pass failures, but not binary ones", () => {
+    // toCodec can recover from both; a prefix decoder has no end offset for a value it never read.
+    const Recovering = Schema.Boolean.pipe(Schema.catchDecoding(() => Effect.succeedSome(false)))
+    expect(Schema.decodeSync(Borsh.toCodec(Recovering))(Uint8Array.of(2))).toBe(false)
+    expect(failure(() => Borsh.decodePrefixSync(Recovering)(Uint8Array.of(2))).message).toBe(
+      "Invalid bool tag 2 at byte 0",
+    )
+    const Checked = Schema.Struct({ a: Borsh.U8.check(Schema.isLessThan(5)) }).pipe(
+      Schema.catchDecoding(() => Effect.succeedSome({ a: 0 })),
+    )
+    expect(Schema.decodeSync(Borsh.toCodec(Checked))(Uint8Array.of(9))).toEqual({ a: 0 })
+    expect(Borsh.decodePrefixSync(Checked)(Uint8Array.of(9, 7))).toEqual({
+      value: { a: 0 },
+      offset: 1,
+    })
   })
 
   it("rethrows defects from the schema unchanged", () => {
@@ -303,6 +346,14 @@ describe("decodePrefixEffect", () => {
     )
   })
 
+  it("fails binary reads that decoding middleware on the schema would recover in toCodec", () => {
+    const Recovering = Schema.Boolean.pipe(Schema.catchDecoding(() => Effect.succeedSome(false)))
+    const exit = Effect.runSyncExit(Borsh.decodePrefixEffect(Recovering)(Uint8Array.of(2)))
+    expect(exit).toEqual(
+      Exit.fail(failure(() => Borsh.decodePrefixSync(Recovering)(Uint8Array.of(2)))),
+    )
+  })
+
   it("reads the buffer when run, not when the effect is built", () => {
     const decode = Borsh.decodePrefixEffect(Borsh.U8)
     const buffer = Uint8Array.of(1)
@@ -368,6 +419,8 @@ describe("zero-sized schemas", () => {
     Borsh.Bytes,
     Schema.Array(Borsh.U8),
     Schema.TaggedUnion({ Only: {} }),
+    Schema.Literals(["Only"]),
+    Schema.Literals(["A", "B"]),
   ] as never
   const schemas = fc.letrec<{ schema: Schema.Codec<unknown> }>((tie) => ({
     schema: fc.oneof(
@@ -384,6 +437,9 @@ describe("zero-sized schemas", () => {
         .map(([item, length]) => Schema.Array(item).pipe(Borsh.fixedArray(length))),
       tie("schema").map((item) => Schema.Option(item)),
       tie("schema").map((item) => Schema.TaggedUnion({ Only: { item } })),
+      tie("schema").map((item) => Schema.TaggedUnion({ Empty: {}, Full: { item } })),
+      fc.tuple(tie("schema"), tie("schema")).map(([ok, err]) => Schema.Result(ok, err)),
+      tie("schema").map((value) => Schema.ReadonlyMap(Borsh.U8, value)),
     ) as fc.Arbitrary<Schema.Codec<unknown>>,
   })).schema
 

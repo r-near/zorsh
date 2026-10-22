@@ -185,7 +185,7 @@ function collectionLayout(adapter: CollectionAdapter) {
     const readEntries = (r: Reader, count: number) => {
       // Each entry needs at least minEntryBytes, so reject an impossible count before allocating.
       if (count > Math.floor((r.end - r.offset) / minEntryBytes)) {
-        throw r.pastEnd(r.offset, "Truncated collection payload")
+        throw r.pastEnd(r.offset, count * minEntryBytes, "Truncated collection payload")
       }
       const entries: [unknown, unknown][] = []
       // The entry index and part locate a failure, as in [3]["value"].
