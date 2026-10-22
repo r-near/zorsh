@@ -87,7 +87,11 @@ it("keeps native views and string writes correct across writer growth", () => {
   const parts = rows.map((value) => Schema.encodeSync(one)(value))
   const expected = new Uint8Array(4 + parts.reduce((sum, part) => sum + part.byteLength, 0))
   new DataView(expected.buffer).setUint32(0, rows.length, true)
-  parts.reduce((offset, part) => (expected.set(part, offset), offset + part.byteLength), 4)
+  let offset = 4
+  for (const part of parts) {
+    expected.set(part, offset)
+    offset += part.byteLength
+  }
   const bytes = Schema.encodeSync(many)(rows)
   expect(bytes).toEqual(expected)
   const decoded = Schema.decodeSync(many)(bytes)

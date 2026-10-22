@@ -44,7 +44,13 @@ export const registry = new TypeRegistry()
 
 /** Numeric comparison for `number` and `bigint` values. */
 function compareNumeric(a: number | bigint, b: number | bigint): number {
-  return a < b ? -1 : a > b ? 1 : 0
+  if (a < b) {
+    return -1
+  }
+  if (a > b) {
+    return 1
+  }
+  return 0
 }
 
 /**

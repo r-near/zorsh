@@ -136,14 +136,7 @@ it("validates collection arities and native binary shapes", () => {
       expect(() => layout.write(new Writer(64), value)).toThrow(/Expected native collection/)
     }
     expect(() => Schema.encodeUnknownSync(Borsh.toCodec(schema))([])).toThrow(Schema.SchemaError)
-    const empty =
-      schema === mapSchemas[0]
-        ? new Map()
-        : schema === mapSchemas[1]
-          ? HashMap.empty()
-          : schema === setSchemas[0]
-            ? new Set()
-            : HashSet.empty()
+    const empty = [new Map(), HashMap.empty(), new Set(), HashSet.empty()][i]
     expect(Schema.encodeUnknownSync(Borsh.toCodec(schema))(empty)).toEqual(new Uint8Array(4))
     expect(() => Schema.encodeUnknownSync(Borsh.toCodec(schema, { maxBytes: 3 }))(empty)).toThrow(
       /maxBytes/,

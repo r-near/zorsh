@@ -118,7 +118,15 @@ function bytewise(a: Uint8Array, b: Uint8Array): number {
 const utf8Order = (a: string, b: string) => bytewise(utf8(a), utf8(b))
 
 /** Rust's `Ord` for integers. */
-const numeric = (a: bigint, b: bigint) => (a < b ? -1 : a > b ? 1 : 0)
+function numeric(a: bigint, b: bigint): number {
+  if (a < b) {
+    return -1
+  }
+  if (a > b) {
+    return 1
+  }
+  return 0
+}
 
 /** Every adjacent pair of `items` must be strictly ascending under `compare`. */
 function expectStrictlyAscending<T>(items: T[], compare: (a: T, b: T) => number): void {

@@ -148,6 +148,6 @@ export function withLayout<S extends Schema.Top>(
   layout: LayoutDescriptor,
 ): S["Rebuild"] {
   const next = parseDescriptor(layout, "$")
-  layout = merge(descriptor(Schema.toEncoded(schema).ast, "$"), next, "$")
-  return schema.pipe(Schema.annotateEncoded({ [key]: Object.freeze(layout) }))
+  const merged = merge(descriptor(Schema.toEncoded(schema).ast, "$"), next, "$")
+  return schema.pipe(Schema.annotateEncoded({ [key]: Object.freeze(merged) }))
 }

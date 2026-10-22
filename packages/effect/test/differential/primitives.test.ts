@@ -158,8 +158,12 @@ describe.each(primitives)("borsh-rs $id", (entry) => {
     for (const value of entry.examples) {
       await valueParity(entry, value)
     }
-    const value =
-      entry.id === "string" ? "é😀" : entry.id === "bytes" ? "000102ff" : entry.examples[0]
+    let value: unknown = entry.examples[0]
+    if (entry.id === "string") {
+      value = "é😀"
+    } else if (entry.id === "bytes") {
+      value = "000102ff"
+    }
     const encoded = await oracle.request(entry.id, "encode", { value })
     assert.ok(encoded.ok)
     const raw = bytes(encoded.hex)

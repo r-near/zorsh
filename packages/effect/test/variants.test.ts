@@ -804,12 +804,16 @@ it("preserves application transformations over a whole encoded enum", () => {
     Schema.decodeTo(
       Schema.String,
       SchemaTransformation.transform({
-        decode: (value) =>
-          value._tag === "Idle"
-            ? "idle"
-            : value._tag === "Count"
-              ? String(value.value)
-              : value.label,
+        decode: (value) => {
+          switch (value._tag) {
+            case "Idle":
+              return "idle"
+            case "Count":
+              return String(value.value)
+            default:
+              return value.label
+          }
+        },
         encode: (text) =>
           text === "idle"
             ? { _tag: "Idle" as const }

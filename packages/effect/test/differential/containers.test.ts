@@ -114,15 +114,16 @@ const entries = [
         enabled: fc.boolean(),
       }),
     ),
-    (value) => ({
-      variant: value._tag,
-      value:
-        value._tag === "Idle"
-          ? null
-          : value._tag === "Count"
-            ? String(value.value)
-            : { label: value.label, enabled: value.enabled },
-    }),
+    (value) => {
+      switch (value._tag) {
+        case "Idle":
+          return { variant: value._tag, value: null }
+        case "Count":
+          return { variant: value._tag, value: String(value.value) }
+        case "Named":
+          return { variant: value._tag, value: { label: value.label, enabled: value.enabled } }
+      }
+    },
   ),
   spec(
     "status",
@@ -167,15 +168,19 @@ const entries = [
       fc.record({ _tag: fc.constant("Square" as const), value: fc.nat({ max: 0xffff_ffff }) }),
       fc.record({ _tag: fc.constant("Rect" as const), width: u16, height: u16 }),
     ),
-    (value) => ({
-      variant: value._tag,
-      value:
-        value._tag === "Empty"
-          ? null
-          : value._tag === "Square"
-            ? String(value.value)
-            : { width: String(value.width), height: String(value.height) },
-    }),
+    (value) => {
+      switch (value._tag) {
+        case "Empty":
+          return { variant: value._tag, value: null }
+        case "Square":
+          return { variant: value._tag, value: String(value.value) }
+        case "Rect":
+          return {
+            variant: value._tag,
+            value: { width: String(value.width), height: String(value.height) },
+          }
+      }
+    },
   ),
   spec("option_u128", Schema.Option(Borsh.U128), option(u128), (value) =>
     optionTransport(value, String),
@@ -379,6 +384,11 @@ it("matches Rust zero-sized visitation and malicious vector counts", async () =>
   }
 })
 
+/** A tag byte followed by its payload in `payloads`, or the bare tag when it has none. */
+function tagged(tag: number, payloads: Readonly<Record<number, ReadonlyArray<number>>>) {
+  return Uint8Array.of(tag, ...(payloads[tag] ?? []))
+}
+
 it("checks every enum discriminant and Option flag against Rust", async () => {
   const enumCodec = Borsh.toCodec(ExplicitEnum)
   const statusCodecs = [
@@ -391,34 +401,16 @@ it("checks every enum discriminant and Option flag against Rust", async () => {
   const optionCodec = Borsh.toCodec(Schema.Option(Borsh.U128))
   const resultCodec = Borsh.toCodec(Schema.Result(Borsh.U16, Schema.String))
   for (let tag = 0; tag < 256; tag++) {
-    const enumRaw =
-      tag === 17
-        ? Uint8Array.of(tag, 1, 2)
-        : tag === 250
-          ? Uint8Array.of(tag, 1, 0, 0, 0, 120, 1)
-          : Uint8Array.of(tag)
+    const enumRaw = tagged(tag, { 17: [1, 2], 250: [1, 0, 0, 0, 120, 1] })
     const optionRaw = tag === 1 ? Uint8Array.of(tag, ...new Uint8Array(16)) : Uint8Array.of(tag)
-    const shapeRaw =
-      tag === 1
-        ? Uint8Array.of(tag, 5, 0, 0, 0)
-        : tag === 2
-          ? Uint8Array.of(tag, 1, 2, 3, 4)
-          : Uint8Array.of(tag)
+    const shapeRaw = tagged(tag, { 1: [5, 0, 0, 0], 2: [1, 2, 3, 4] })
     for (const [id, codec, raw] of [
       ["explicit_enum", enumCodec, enumRaw],
       ...statusCodecs.map((codec) => ["status", codec, Uint8Array.of(tag)] as const),
       ...sparseCodecs.map((codec) => ["sparse_status", codec, Uint8Array.of(tag)] as const),
       ["shape", shapeCodec, shapeRaw],
       ["option_u128", optionCodec, optionRaw],
-      [
-        "result_u16_string",
-        resultCodec,
-        tag === 0
-          ? Uint8Array.of(0, 0, 0, 0, 0)
-          : tag === 1
-            ? Uint8Array.of(1, 1, 2)
-            : Uint8Array.of(tag),
-      ],
+      ["result_u16_string", resultCodec, tagged(tag, { 0: [0, 0, 0, 0], 1: [1, 2] })],
     ] as const) {
       const ts = attempt(() => Schema.decodeSync(codec)(raw))
       const rust = await oracle.request(id, "decode", { hex: hex(raw) })

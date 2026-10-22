@@ -207,7 +207,12 @@ function sets<A>(
         )
         const offset =
           id === "set_string" ? 8 + (parts[0]?.length ?? 0) : 3 + (parts[0]?.length ?? 0)
-        const mask = id === "set_string" ? 0x20 : id === "set_bool" ? 1 : 0x80
+        let mask = 0x80
+        if (id === "set_string") {
+          mask = 0x20
+        } else if (id === "set_bool") {
+          mask = 1
+        }
         for (const [index, mutated] of mutations(raw, parts, offset, mask).entries()) {
           const ts = attempt(() => decode(mutated))
           const rust = await oracle.request(id, "decode", { hex: hex(mutated) })
