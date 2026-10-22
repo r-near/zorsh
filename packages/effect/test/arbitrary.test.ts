@@ -198,9 +198,18 @@ it("keeps schema annotations when fixedArray adds its length check", () => {
   // Spreading a list that turns out empty leaves `checks` as `[]`.
   const none = [] as unknown as [SchemaAST.Check<ReadonlyArray<number>>]
   const unchecked = Schema.Array(Borsh.U8)
-    .annotate({ identifier: "Pair" })
+    .annotate({ identifier: "Pair", description: "Two bytes" })
     .check(...none)
     .pipe(Borsh.fixedArray(2))
+  expect(Schema.toJsonSchemaDocument(unchecked).definitions).toEqual({
+    Pair: {
+      type: "array",
+      items: { type: "integer", minimum: 0, maximum: 255 },
+      description: "Two bytes",
+      minItems: 2,
+      maxItems: 2,
+    },
+  })
   expect(Schema.encodeSync(Borsh.toCodec(unchecked))([1, 2])).toEqual(Uint8Array.of(1, 2))
   expect(() => Schema.encodeUnknownSync(Borsh.toCodec(unchecked))("x")).toThrow(/^Expected Pair$/)
   const custom = Schema.Array(Borsh.U8).check(Schema.isMinLength(1, { message: "need one" }))

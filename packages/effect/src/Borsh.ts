@@ -235,11 +235,17 @@ function withExactLength<S extends Schema.Top>(schema: S, length: number): S["Re
   // `.check()` with no checks leaves an empty array, which `resolve` and `annotate` do not handle.
   const emptyChecks = checks !== undefined && checks.length === 0
   const annotations = (emptyChecks ? schema.ast.annotations : SchemaAST.resolve(schema.ast)) ?? {}
-  const moved = Object.entries(annotations).filter(([key]) => !checkKeys.has(key))
-  const lengthCheck = Schema.isBetweenLength(length, length, Object.fromEntries(moved))
   if (emptyChecks) {
+    // The schema's own annotations cannot be cleared here, so JSON Schema keywords stay on it.
+    // Effect could not resolve this schema's annotations before the check was added either.
+    const kept = Object.entries(annotations).filter(
+      ([key]) => !checkKeys.has(key) && !jsonSchemaKeys.includes(key),
+    )
+    const lengthCheck = Schema.isBetweenLength(length, length, Object.fromEntries(kept))
     return schema.check(lengthCheck as SchemaAST.Check<S["Type"]>)
   }
+  const moved = Object.entries(annotations).filter(([key]) => !checkKeys.has(key))
+  const lengthCheck = Schema.isBetweenLength(length, length, Object.fromEntries(moved))
   const cleared = jsonSchemaKeys.filter((key) => key in annotations).map((key) => [key, undefined])
   return schema
     .annotate(Object.fromEntries(cleared))
