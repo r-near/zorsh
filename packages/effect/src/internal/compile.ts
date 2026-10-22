@@ -286,8 +286,7 @@ function compileEnum(
       ? variant
       : { ...variant, payload: compileObject(member, path, compile, tag) },
   )
-  // A default-discriminant enum with one dataless variant is a Rust ZST; explicit maps imply
-  // repr(u8).
+  // One dataless variant is a Rust ZST, unless an explicit map implies repr(u8).
   const isZeroSized =
     annotation === undefined &&
     variants.length === 1 &&
@@ -449,7 +448,6 @@ function maxLengthOf(ast: SchemaAST.AST): number | undefined {
   return smallest
 }
 
-/** Every filter, including those in groups. */
 function filters(
   checks: ReadonlyArray<SchemaAST.Check<unknown>>,
 ): Array<SchemaAST.Filter<unknown>> {

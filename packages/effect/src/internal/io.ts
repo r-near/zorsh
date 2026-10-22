@@ -215,7 +215,6 @@ export class Writer {
     this.view = new DataView(buffer.buffer)
   }
 
-  /** Reserve length bytes and return their start offset. */
   advance(length: number): number {
     this.ensure(length)
     const offset = this.offset
