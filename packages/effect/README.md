@@ -276,7 +276,7 @@ const fixtures = Effect.runSync(
 
 Samples follow the decoded type and its checks. `fixedBytes(n)` samples exactly `n` bytes and an untransformed `fixedArray(n)` exactly `n` items. Effect has no binary32 generator, so `F32` samples integers within ±2^24, which are exact; refinements of `F32` must admit such an integer.
 
-Raw `Schema.String` samples can contain lone UTF-16 surrogates, which Borsh strings reject. Narrow strings to the business values the contract expects, as with `receiver` and `method` above, or check `String.prototype.isWellFormed` (ES2024) as with `memo`. A bare `Schema.Literal` has no Borsh layout, so encode it to `Schema.String`. Vectors of zero-sized values, such as `Schema.Array(Borsh.Unit)`, sample but cannot be encoded.
+Raw `Schema.String` samples can contain lone UTF-16 surrogates, which Borsh strings reject. Narrow strings to the business values the contract expects, as with `receiver` and `method` above, or check `String.prototype.isWellFormed` as with `memo`, which TypeScript types with `lib` ES2024 or later. A bare `Schema.Literal` has no Borsh layout, so encode it to `Schema.String`. Vectors of zero-sized values, such as `Schema.Array(Borsh.Unit)`, sample but cannot be encoded.
 
 `fixedArray` cannot check the decoded value of a transformed array, including an identity `Schema.decodeTo(Schema.Array(item))`, so its samples can have other lengths. Apply `fixedArray` to the array before the transformation, so other lengths fail Schema validation, and give the decoded type a fixed shape, so samples encode to `n` items:
 

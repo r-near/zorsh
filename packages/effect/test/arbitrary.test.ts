@@ -122,7 +122,7 @@ it("keeps schema annotations when fixedArray adds its length check", () => {
   const schema = Schema.Array(Borsh.U8).pipe(
     Schema.overrideToFormatter(() => () => "<redacted>"),
     Schema.overrideToEquivalence(() => (a, b) => a.length === b.length),
-    Schema.annotate({ identifier: "Triple", description: "Three bytes" }),
+    Schema.annotate({ identifier: "Triple", description: "Three bytes", examples: [[1, 2, 3]] }),
     Borsh.fixedArray(3),
   )
   expect(Schema.resolveAnnotations(schema)).toMatchObject({
@@ -132,9 +132,15 @@ it("keeps schema annotations when fixedArray adds its length check", () => {
   })
   expect(Schema.toFormatter(schema)([1, 2, 3])).toBe("<redacted>")
   expect(Schema.toEquivalence(schema)([1, 2, 3], [4, 5, 6])).toBe(true)
-  expect(Schema.toJsonSchemaDocument(Schema.Struct({ a: schema })).definitions).toHaveProperty(
-    "Triple",
-  )
+  expect(Schema.toJsonSchemaDocument(Schema.Struct({ a: schema })).definitions).toEqual({
+    Triple: {
+      type: "array",
+      items: { type: "integer", minimum: 0, maximum: 255 },
+      description: "Three bytes",
+      examples: [[1, 2, 3]],
+      allOf: [{ minItems: 3, maxItems: 3, description: "Three bytes" }],
+    },
+  })
   const codec = Borsh.toCodec(schema)
   expect(() => Schema.encodeUnknownSync(codec)("x")).toThrow(/^Expected Triple$/)
   expect(() => Schema.encodeSync(codec)([1])).toThrow(/^Expected a value with a length of 3$/)

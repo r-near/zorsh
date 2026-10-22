@@ -200,7 +200,10 @@ export function fixedBytes(length: number): Schema.Uint8Array {
   )
 }
 
-/** Filter annotations that describe the check itself rather than the schema it refines. */
+/**
+ * Annotations not copied to the length check: those describing a check itself,
+ * and JSON Schema keywords that would repeat in its fragment.
+ */
 const checkKeys = new Set([
   "expected",
   "message",
@@ -209,6 +212,14 @@ const checkKeys = new Set([
   "toCode",
   "arbitraryConstraint",
   "~structural",
+  "default",
+  "examples",
+  "readOnly",
+  "writeOnly",
+  "format",
+  "contentEncoding",
+  "contentMediaType",
+  "contentSchema",
 ])
 
 /** Effect resolves annotations from the last check, so the new check keeps the schema's. */
