@@ -10,6 +10,15 @@ it("encodes the package README Transfer example with inferred ordinary objects",
   const value = Schema.decodeSync(codec)(bytes)
   expectTypeOf(value).toEqualTypeOf<Transfer>()
   expect(value).toEqual({ receiver: "alice.near", amount: 123n })
+  const program = Effect.gen(function* () {
+    const bytes = yield* Schema.encodeEffect(codec)(value)
+    return yield* Schema.decodeEffect(codec)(bytes)
+  })
+  expectTypeOf(program).toEqualTypeOf<Effect.Effect<Transfer, Schema.SchemaError>>()
+  expect(Effect.runSync(program)).toEqual(value)
+  expect(() => Schema.decodeSync(codec)(bytes.subarray(0, 20))).toThrow(
+    /^Truncated input: need 16 bytes at byte 14\n {2}at \["amount"\]$/,
+  )
   expect(bytes).toEqual(
     Uint8Array.of(
       10,
@@ -23,7 +32,7 @@ it("encodes the package README Transfer example with inferred ordinary objects",
   )
 })
 
-it("runs the package README mixed actions and Effect workflow", () => {
+it("runs a batch of mixed actions through toCodec and an Effect workflow", () => {
   const Asset = Schema.Struct({ contractId: Schema.String })
   const Recipient = Schema.Struct({
     accountId: Schema.String,

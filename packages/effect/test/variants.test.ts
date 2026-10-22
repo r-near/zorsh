@@ -1,4 +1,4 @@
-import { Context, Effect, Option, Schema, SchemaTransformation } from "effect"
+import { Context, Effect, Option, Result, Schema, SchemaTransformation } from "effect"
 import { expect, expectTypeOf, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { compile } from "../src/internal/compiler.js"
@@ -749,7 +749,7 @@ it("handles all 256 variants and rejects larger enums", () => {
   }
 })
 
-it("runs the README enum and Option examples", () => {
+it("runs the README enum, Option and Result examples", () => {
   const Shape = Schema.TaggedUnion({
     Empty: {},
     Square: { value: Borsh.U32 },
@@ -764,6 +764,9 @@ it("runs the README enum and Option examples", () => {
   const Deposit = Schema.Option(Borsh.U128)
   const deposit = Schema.encodeSync(Borsh.toCodec(Deposit))(Option.some(1_000_000n))
   expect(deposit).toEqual(Uint8Array.of(1, 64, 66, 15, ...new Uint8Array(13)))
+  const Outcome = Schema.Result(Borsh.U16, Schema.String)
+  const outcome = Schema.encodeSync(Borsh.toCodec(Outcome))(Result.succeed(513))
+  expect(outcome).toEqual(Uint8Array.of(1, 1, 2))
 })
 
 it("supports unsafe tag property names and nested enum payloads", () => {
