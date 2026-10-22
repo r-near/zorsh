@@ -692,45 +692,52 @@ export function collection(
 export interface Variant {
   readonly label: string
   readonly discriminant: number
+  /** What a variant without a payload is: its literal or TS enum value. */
   readonly value?: unknown
+  /** A tagged-struct variant's fields, written after the discriminant without the tag. */
   readonly payload?: Layout
 }
 
-/** A literal union or TS enum: each value is written as its discriminant alone. */
-export function valueEnum(variants: ReadonlyArray<Variant>, isZeroSized: boolean): Layout {
-  const readVariant = variantReader(variants)
-  const discriminantByValue = new Map(
-    variants.map((variant) => [variant.value, variant.discriminant]),
-  )
-  return {
-    minBytes: 1,
-    isZeroSized,
-    read: (r) => readVariant(r).value,
-    write: (w, value) => {
-      const discriminant = discriminantByValue.get(value)
-      if (discriminant === undefined) {
-        throw new BinaryError(w.offset, "Invalid enum value")
-      }
-      w.u8(discriminant)
-    },
-  }
-}
-
-/** A tagged union: the discriminant, then the variant's fields without its tag. */
-export function objectEnum(
-  variants: ReadonlyArray<Variant & { readonly payload: Layout }>,
+/**
+ * A Rust enum: a u8 discriminant, then the variant's payload. Tagged-struct variants all have one
+ * and are found by their tag; literal and TS enum variants have none and are found by value.
+ */
+export function enumOf(
+  variants: ReadonlyArray<Variant>,
   tag: string,
   isZeroSized: boolean,
 ): Layout {
-  const readVariant = variantReader(variants)
-  const variantByLabel = new Map(variants.map((variant) => [variant.label, variant]))
+  const isTagged = variants.some((variant) => variant.payload !== undefined)
+  const byDiscriminant = new Map(variants.map((variant) => [variant.discriminant, variant]))
+  const byKey = new Map(
+    variants.map((variant) => [isTagged ? variant.label : variant.value, variant]),
+  )
   // As for struct fields, assignment would hit an inherited setter or a frozen inherited property.
   const define = tag in Object.prototype
+  const taggedVariant = (w: Writer, value: unknown) => {
+    if (typeof value !== "object" || value === null) {
+      throw new BinaryError(w.offset, "Expected enum object")
+    }
+    const label = Object.hasOwn(value, tag) ? Reflect.get(value, tag) : undefined
+    const variant = typeof label === "string" ? byKey.get(label) : undefined
+    if (variant === undefined) {
+      throw prepend(new BinaryError(w.offset, "Invalid enum label"), tag)
+    }
+    return variant
+  }
   return {
-    minBytes: 1 + Math.min(...variants.map((variant) => variant.payload.minBytes)),
+    minBytes: 1 + Math.min(...variants.map((variant) => variant.payload?.minBytes ?? 0)),
     isZeroSized,
     read: (r) => {
-      const variant = readVariant(r)
+      const offset = r.offset
+      const discriminant = r.u8()
+      const variant = byDiscriminant.get(discriminant)
+      if (variant === undefined) {
+        throw new BinaryError(offset, `Invalid enum tag ${discriminant}`)
+      }
+      if (variant.payload === undefined) {
+        return variant.value
+      }
       const value = variant.payload.read(r) as Record<string, unknown>
       if (define) {
         defineField(value, tag, variant.label)
@@ -740,31 +747,13 @@ export function objectEnum(
       return value
     },
     write: (w, value) => {
-      if (typeof value !== "object" || value === null) {
-        throw new BinaryError(w.offset, "Expected enum object")
-      }
-      const label = Object.hasOwn(value, tag) ? Reflect.get(value, tag) : undefined
-      const variant = typeof label === "string" ? variantByLabel.get(label) : undefined
+      const variant = isTagged ? taggedVariant(w, value) : byKey.get(value)
       if (variant === undefined) {
-        throw prepend(new BinaryError(w.offset, "Invalid enum label"), tag)
+        throw new BinaryError(w.offset, "Invalid enum value")
       }
       w.u8(variant.discriminant)
-      variant.payload.write(w, value)
+      variant.payload?.write(w, value)
     },
-  }
-}
-
-/** Read the u8 discriminant, reporting an unknown one at its own offset. */
-function variantReader<V extends Variant>(variants: ReadonlyArray<V>): (r: Reader) => V {
-  const variantByDiscriminant = new Map(variants.map((variant) => [variant.discriminant, variant]))
-  return (r) => {
-    const offset = r.offset
-    const discriminant = r.u8()
-    const variant = variantByDiscriminant.get(discriminant)
-    if (variant === undefined) {
-      throw new BinaryError(offset, `Invalid enum tag ${discriminant}`)
-    }
-    return variant
   }
 }
 

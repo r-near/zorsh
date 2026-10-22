@@ -5,6 +5,7 @@ import {
   bytes,
   type Collection,
   collection,
+  enumOf,
   fixedBytes,
   float,
   hashMap,
@@ -12,7 +13,6 @@ import {
   integer,
   type Key,
   type Layout,
-  objectEnum,
   option,
   readonlyMap,
   readonlySet,
@@ -20,7 +20,7 @@ import {
   string,
   struct,
   tuple,
-  valueEnum,
+  type Variant,
   vector,
   withBytes,
 } from "./layout.js"
@@ -304,23 +304,18 @@ function compileEnum(
   compile: Compile,
 ): Layout {
   const tag = annotation === undefined ? "_tag" : annotation.tag
-  const variants = enumVariants(ast, annotation, path)
-  const objectVariants = variants.flatMap(({ member, ...variant }) =>
+  const variants = enumVariants(ast, annotation, path).map(({ member, ...variant }): Variant =>
     member === undefined
-      ? []
-      : [{ ...variant, payload: compileObject(member, path, compile, tag) }],
+      ? variant
+      : { ...variant, payload: compileObject(member, path, compile, tag) },
   )
   // A default-discriminant enum with one dataless variant is a Rust ZST; explicit maps imply
   // repr(u8).
   const isZeroSized =
     annotation === undefined &&
     variants.length === 1 &&
-    objectVariants.every((variant) => variant.payload.isZeroSized)
-  // Literal and TS enum variants have no payload; tagged union variants all have one.
-  if (objectVariants.length === 0) {
-    return valueEnum(variants, isZeroSized)
-  }
-  return objectEnum(objectVariants, tag, isZeroSized)
+    variants.every(({ payload }) => payload === undefined || payload.isZeroSized)
+  return enumOf(variants, tag, isZeroSized)
 }
 
 /** Read Rust enum variants with declaration-order or explicit discriminants. */
