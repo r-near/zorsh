@@ -6,7 +6,6 @@ import {
   Option,
   Result,
   Schema,
-  SchemaGetter,
   SchemaTransformation,
 } from "effect"
 import { expectTypeOf } from "vite-plus/test"
@@ -55,14 +54,6 @@ expectTypeOf(batch).toEqualTypeOf<
 const Actions = Schema.TaggedUnion({ Idle: {}, Set: { value: Schema.Option(schema) } })
 const Action = Actions.pipe(Borsh.discriminants({ Idle: 3, Set: 17 }))
 expectTypeOf(Action).toEqualTypeOf<typeof Actions>()
-// @ts-expect-error Missing discriminant for Set.
-Actions.pipe(Borsh.discriminants({ Idle: 3 }))
-// @ts-expect-error Typo in a discriminant key.
-Actions.pipe(Borsh.discriminants({ Idle: 3, Sett: 17 }))
-// @ts-expect-error Extra discriminant key.
-Actions.pipe(Borsh.discriminants({ Idle: 3, Set: 17, Other: 1 }))
-// @ts-expect-error The map must match the selected tag key.
-Actions.pipe(Borsh.discriminants({ Idle: 3, Set: 17 }, { tag: "kind" }))
 const action = Borsh.toCodec(Action)
 expectTypeOf(action).toEqualTypeOf<Schema.Codec<typeof Action.Type, Uint8Array, Decode, Encode>>()
 expectTypeOf(Action.cases.Set.make({ value: Option.some("v1") })._tag).toEqualTypeOf<"Set">()
@@ -86,9 +77,9 @@ const Status = Schema.Literals(["Pending", "Done"])
 expectTypeOf(Schema.decodeSync(Borsh.toCodec(Status))(Uint8Array.of(1))).toEqualTypeOf<
   "Pending" | "Done"
 >()
-Status.pipe(Borsh.discriminants({ Pending: 1, Done: 5 }))
-// @ts-expect-error Missing discriminant for Done.
-Status.pipe(Borsh.discriminants({ Pending: 1 }))
+expectTypeOf(Status.pipe(Borsh.discriminants({ Pending: 1, Done: 5 }))).toEqualTypeOf<
+  typeof Status
+>()
 enum Direction {
   Up = 1,
   Down = 5,
@@ -97,62 +88,10 @@ const Directions = Schema.Enum(Direction).pipe(Borsh.discriminants({ Up: 1, Down
 expectTypeOf(
   Schema.decodeSync(Borsh.toCodec(Directions))(Uint8Array.of(1)),
 ).toEqualTypeOf<Direction>()
-// @ts-expect-error TS enum maps use member names, not values.
-Schema.Enum(Direction).pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
 const BrandedDirection = Schema.Enum(Direction).pipe(Schema.brand("Direction"))
-BrandedDirection.pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
-// @ts-expect-error Branded TS enums still use member names.
-BrandedDirection.pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
-const DirectionText = Schema.Enum(Direction).pipe(
-  Schema.decodeTo(Schema.String, {
-    decode: SchemaGetter.transform(String),
-    encode: SchemaGetter.transform((text) => (text === "1" ? Direction.Up : Direction.Down)),
-  }),
-)
-expectTypeOf(
-  DirectionText.pipe(Borsh.discriminants({ Up: 1, Down: 5 })).Type,
-).toEqualTypeOf<string>()
-// @ts-expect-error Transformed TS enums use their encoded member names.
-DirectionText.pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
-DirectionText.pipe(Schema.brand("Text"), Borsh.discriminants({ Up: 1, Down: 5 }))
-// @ts-expect-error Only object variants have a tag key.
-Status.pipe(Borsh.discriminants({ Pending: 1, Done: 5 }, { tag: "kind" }))
-// @ts-expect-error Only object variants have a tag key.
-Schema.Enum(Direction).pipe(Borsh.discriminants({ Up: 1, Down: 5 }, { tag: "kind" }))
-const RefinedDirection = Schema.Enum(Direction).pipe(
-  Schema.refine((d): d is Direction.Up => d === Direction.Up),
-)
-RefinedDirection.pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
-// @ts-expect-error Refined TS enums still use member names.
-RefinedDirection.pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
-Schema.toEncoded(Schema.Enum(Direction)).pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
-// @ts-expect-error Encoded TS enums still use member names.
-Schema.toEncoded(Schema.Enum(Direction)).pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
-Schema.flip(Schema.Enum(Direction)).pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
-const TypedDirection = Schema.toType(
-  Schema.String.pipe(
-    Schema.decodeTo(Schema.Enum(Direction), {
-      decode: SchemaGetter.transform(() => Direction.Up),
-      encode: SchemaGetter.transform(String),
-    }),
-  ),
-)
-TypedDirection.pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
-// @ts-expect-error The type side of a transformation still uses member names.
-TypedDirection.pipe(Borsh.discriminants({ 1: 1, 5: 5 }))
-Schema.Enum({ 0: "zero", 1: "one" } as const).pipe(Borsh.discriminants({ 0: 1, 1: 5 }))
-// @ts-expect-error Plain object enums use their keys, including integer keys.
-Schema.Enum({ 0: "zero", 1: "one" } as const).pipe(Borsh.discriminants({ zero: 1, one: 5 }))
-// @ts-expect-error Array items are not enum names.
-Schema.Array(Schema.Enum(Direction)).pipe(Borsh.discriminants({ Up: 1, Down: 5 }))
-declare const eitherTag: "_tag" | "kind"
-// @ts-expect-error The tag key must be one string literal.
-Actions.pipe(Borsh.discriminants({ Idle: 3, Set: 17 }, { tag: eitherTag }))
-// @ts-expect-error The tag key must be one string literal.
-Actions.pipe(Borsh.discriminants({ Idle: 3, Set: 17 }, { tag: "_tag" as string }))
-const partial: Partial<Record<"Idle" | "Set", number>> = { Idle: 3 }
-// @ts-expect-error Optional map entries do not cover a variant.
-Actions.pipe(Borsh.discriminants(partial))
+expectTypeOf(BrandedDirection.pipe(Borsh.discriminants({ Up: 1, Down: 5 }))).toEqualTypeOf<
+  typeof BrandedDirection
+>()
 const Kinds = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("A") }),
   Schema.Struct({ kind: Schema.Literal("B"), value: U16 }),

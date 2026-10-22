@@ -371,67 +371,6 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.byteLength === right.byteLength && left.every((byte, i) => byte === right[i])
 }
 
-/** TS enum member names, found through wrappers that keep the encoded (or flipped type) side. */
-type EnumNames<S, Side extends "Encoded" | "Type" = "Encoded"> = S extends {
-  readonly enums: infer E
-}
-  ? `${Extract<keyof E, string | number>}`
-  : S extends { readonly from: infer F; readonly to: infer T }
-    ? EnumNames<Side extends "Encoded" ? F : T, Side>
-    : S extends Schema.Top & { readonly schema: infer I extends Schema.Top }
-      ? [S[Side], I[Side]] extends [I[Side], S[Side]]
-        ? EnumNames<I, Side>
-        : Side extends "Encoded"
-          ? [S[Side], I["Type"]] extends [I["Type"], S[Side]]
-            ? EnumNames<I, "Type">
-            : never
-          : never
-      : never
-// The labels a discriminant map must cover: TS enum names, literal values or variant tags.
-type EnumLabels<S extends Schema.Top, Tag extends string> = [EnumNames<S>] extends [never]
-  ? S["Encoded"] extends infer E
-    ? E extends SchemaAST.LiteralValue
-      ? Tag extends "_tag"
-        ? `${E}`
-        : never
-      : E extends { readonly [K in Tag]: infer L }
-        ? Extract<L, string>
-        : never
-    : never
-  : Tag extends "_tag"
-    ? EnumNames<S>
-    : never
-// The keys of a discriminant map, or only its required keys.
-type MapLabels<D, Required = false> = `${Extract<
-  { [K in keyof D]-?: Required extends true ? ({} extends Pick<D, K> ? never : K) : K }[keyof D],
-  string | number
->}`
-// True only for a single string literal, not `string` or a union.
-type SingleTag<Tag extends string> = string extends Tag
-  ? false
-  : [Tag] extends [infer T]
-    ? T extends unknown
-      ? [Tag] extends [T]
-        ? true
-        : false
-      : never
-    : never
-// A type error naming the problem unless Tag is one literal and the map covers exactly the labels.
-type ExactDiscriminants<S extends Schema.Top, D, Tag extends string> = [SingleTag<Tag>] extends [
-  true,
-]
-  ? ExactLabels<S, D, Tag>
-  : { readonly "Borsh discriminants tag must be one string literal": Tag }
-type ExactLabels<S extends Schema.Top, D, Tag extends string> = [
-  Exclude<EnumLabels<S, Tag>, MapLabels<D, true>>,
-  Exclude<MapLabels<D>, EnumLabels<S, Tag>>,
-] extends [never, never]
-  ? unknown
-  : {
-      readonly "Missing Borsh discriminants": Exclude<EnumLabels<S, Tag>, MapLabels<D, true>>
-      readonly "Unknown Borsh discriminants": Exclude<MapLabels<D>, EnumLabels<S, Tag>>
-    }
-
 /**
  * Rust `#[borsh(use_discriminant = true)]`: assigns explicit u8 discriminants
  * to an enum schema.
@@ -440,10 +379,10 @@ type ExactLabels<S extends Schema.Top, D, Tag extends string> = [
  *
  * Without this, each variant's discriminant is its declaration index. Keys are
  * the encoded `_tag` values, literal values as strings, or TS enum member
- * names; every variant needs exactly one unique integer from 0 to 255. Missing
- * and unknown keys are type errors. Pass `{ tag: "kind" }` for unions tagged by
- * another literal field. Values are checked when the combinator is called and
- * labels when it is applied to a schema.
+ * names; every variant needs exactly one unique integer from 0 to 255. Pass
+ * `{ tag: "kind" }` for unions tagged by another literal field. Values are
+ * checked when the combinator is called, and missing or unknown keys throw
+ * when it is applied to a schema.
  *
  * **Example** (Sparse discriminants)
  *
@@ -462,13 +401,10 @@ type ExactLabels<S extends Schema.Top, D, Tag extends string> = [
  * @category enums
  * @since 0.1.0
  */
-export function discriminants<
-  const D extends Readonly<Record<string, number>>,
-  Tag extends string = "_tag",
->(
-  map: D,
-  options?: { readonly tag?: Tag | undefined },
-): <S extends Schema.Top>(schema: S & ExactDiscriminants<S, D, Tag>) => S["Rebuild"] {
+export function discriminants(
+  map: Readonly<Record<string, number>>,
+  options?: { readonly tag?: string | undefined },
+): <S extends Schema.Top>(schema: S) => S["Rebuild"] {
   const layout = {
     kind: "enum",
     tag: options?.tag ?? "_tag",

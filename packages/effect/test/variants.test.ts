@@ -13,13 +13,6 @@ const variants = Schema.TaggedUnion({
 const discriminants = { Idle: 3, Count: 17, Named: 250 }
 const schema = variants.pipe(Borsh.discriminants(discriminants))
 const codec = Borsh.toCodec(schema)
-/** Bypass the exhaustive map type to reach runtime validation. */
-const unchecked = <S extends Schema.Top>(
-  schema: S,
-  map: Readonly<Record<string, number>>,
-  tag?: string,
-): S["Rebuild"] => Borsh.discriminants(map, { tag })(schema as never)
-
 it("retains native union helpers, checks and discriminant narrowing", () => {
   expectTypeOf(schema).toEqualTypeOf<typeof variants>()
   const count = schema.cases.Count.make({ value: 513 })
@@ -300,7 +293,7 @@ it("requires explicit discriminants for numeric and non-string enums", () => {
 it("validates explicit maps eagerly and keeps tag keys for object variants", () => {
   expect(() => Borsh.discriminants({ A: 0, B: 0 })).toThrow(/unique integers/)
   const assign = Borsh.discriminants({ Pending: 0, Done: 1 })
-  expect(() => unchecked(Schema.Literals(["Pending"]), { Pending: 0, Done: 1 })).toThrow(
+  expect(() => Borsh.discriminants({ Pending: 0, Done: 1 })(Schema.Literals(["Pending"]))).toThrow(
     /Unknown enum discriminants Done/,
   )
   expect(Schema.Literals(["Done", "Pending"]).pipe(assign)).toBeDefined()
@@ -308,7 +301,9 @@ it("validates explicit maps eagerly and keeps tag keys for object variants", () 
     [Schema.Literals(["A"]), { A: 0 }],
     [Schema.Enum(Text), { Pending: 0, Done: 1 }],
   ] as const) {
-    expect(() => unchecked(value, map, "kind")).toThrow(/Only object enum variants have a tag key/)
+    expect(() => Borsh.discriminants(map, { tag: "kind" })(value)).toThrow(
+      /Only object enum variants have a tag key/,
+    )
   }
   const kinds = Schema.Union([
     Schema.Struct({ kind: Schema.Literal("A") }),
@@ -343,7 +338,7 @@ it("rejects malformed enums and discriminant maps", () => {
     { ...discriminants, Count: NaN },
     { ...discriminants, Count: "17" },
   ]) {
-    expect(() => Borsh.discriminants(invalidMap as never)).toThrow(
+    expect(() => Borsh.discriminants(invalidMap as Record<string, number>)).toThrow(
       /discriminants must be unique integers from 0 to 255/,
     )
   }
@@ -351,16 +346,27 @@ it("rejects malformed enums and discriminant maps", () => {
     [{ Idle: 3, Count: 17 }, /Missing enum discriminant for Named/],
     [{ ...discriminants, Extra: 9, Other: 8 }, /Unknown enum discriminants Extra, Other/],
   ] as const) {
-    expect(() => unchecked(variants, map)).toThrow(message)
+    expect(() => Borsh.discriminants(map)(variants)).toThrow(message)
   }
-  expect(() => unchecked(Borsh.Bytes, { Idle: 0 })).toThrow(
+  // Labels are untyped, so these mistakes surface when the map is applied.
+  enum Direction {
+    Up = 1,
+    Down = 5,
+  }
+  expect(() => Schema.Enum(Direction).pipe(Borsh.discriminants({ 1: 1, 5: 5 }))).toThrow(
+    new Error("$: Unknown enum discriminants 1, 5"),
+  )
+  expect(() => variants.pipe(Borsh.discriminants(discriminants, { tag: "kind" }))).toThrow(
+    /Enum tag "kind" must be a required string literal/,
+  )
+  expect(() => Borsh.discriminants({ Idle: 0 })(Borsh.Bytes)).toThrow(
     /Enum layout requires a tagged union, literal union or Schema.Enum/,
   )
 })
 
 it("keeps enum metadata fixed when options have extra keys", () => {
   const options = { tag: "_tag", kind: "integer", bits: 8, signed: false } as const
-  expect(() => Borsh.discriminants(discriminants, options)(Schema.Finite as never)).toThrow(
+  expect(() => Borsh.discriminants(discriminants, options)(Schema.Finite)).toThrow(
     /Enum layout requires/,
   )
   const mapped = variants.pipe(Borsh.discriminants(discriminants, options))
@@ -375,9 +381,9 @@ it("rejects duplicate enum labels independently of map coverage", () => {
     Schema.TaggedStruct("Idle", {}),
   ])
   expect(() => Borsh.toCodec(duplicate)).toThrow(/Duplicate enum label Idle/)
-  expect(() => unchecked(duplicate, { Idle: 0 })).toThrow(/Duplicate enum label Idle/)
+  expect(() => Borsh.discriminants({ Idle: 0 })(duplicate)).toThrow(/Duplicate enum label Idle/)
   for (const literals of [Schema.Literals(["A", "A"]), Schema.Literals([1, "1"])]) {
-    expect(() => unchecked(literals, { A: 0, "1": 1 })).toThrow(/Duplicate enum label/)
+    expect(() => Borsh.discriminants({ A: 0, "1": 1 })(literals)).toThrow(/Duplicate enum label/)
   }
 })
 
@@ -387,7 +393,7 @@ it("rejects optional enum tags independently of map coverage", () => {
     Schema.TaggedStruct("Idle", {}),
   ])
   expect(() => Borsh.toCodec(optional)).toThrow(/Enum tag "_tag" must be a required string literal/)
-  expect(() => unchecked(optional, { Count: 1, Idle: 0 })).toThrow(
+  expect(() => Borsh.discriminants({ Count: 1, Idle: 0 })(optional)).toThrow(
     /Enum tag "_tag" must be a required string literal/,
   )
 })
@@ -403,7 +409,7 @@ it("requires required enum members and rejects mixed unions", () => {
     expect(() => Borsh.toCodec(invalid)).toThrow(/Enum variants must be required/)
   }
   const mixed = Schema.Union([Schema.String, Schema.TaggedStruct("Idle", {})])
-  expect(() => unchecked(mixed, { Idle: 0 })).toThrow(/Enum layout requires/)
+  expect(() => Borsh.discriminants({ Idle: 0 })(mixed)).toThrow(/Enum layout requires/)
   for (const union of [
     mixed,
     Schema.NullOr(Borsh.U8),
@@ -426,7 +432,7 @@ it("requires a single string literal enum tag and points to custom tag keys", ()
     Schema.Struct({ _tag: Schema.Literal(7) }),
   ]) {
     const invalid = Schema.Union([member, Schema.TaggedStruct("Idle", {})])
-    expect(() => unchecked(invalid, { "7": 1, Idle: 0 })).toThrow(
+    expect(() => Borsh.discriminants({ "7": 1, Idle: 0 })(invalid)).toThrow(
       /Enum tag "_tag" must be a required string literal; set another key with Borsh.discriminants\(map, \{ tag \}\)/,
     )
   }
@@ -675,7 +681,7 @@ it("maps literal wire tags before native application tag transformations", () =>
   const c = Borsh.toCodec(mapped)
   expect(Schema.encodeSync(c)({ kind: "Count", value: 7 })).toEqual(Uint8Array.of(17, 7))
   expect(Schema.decodeSync(c)(Uint8Array.of(17, 7))).toEqual({ kind: "Count", value: 7 })
-  expect(() => unchecked(union, { Count: 17, Idle: 3 }, "kind")).toThrow(
+  expect(() => Borsh.discriminants({ Count: 17, Idle: 3 }, { tag: "kind" })(union)).toThrow(
     /Unknown enum discriminants Count/,
   )
   const numeric = Schema.Union([
@@ -689,7 +695,7 @@ it("maps literal wire tags before native application tag transformations", () =>
     }),
     Schema.Struct({ kind: Schema.Literal("Idle") }),
   ])
-  expect(() => unchecked(numeric, { Count: 17, Idle: 3 }, "kind")).toThrow(
+  expect(() => Borsh.discriminants({ Count: 17, Idle: 3 }, { tag: "kind" })(numeric)).toThrow(
     /Enum tag "kind" must be a required string literal/,
   )
 })
@@ -698,7 +704,7 @@ it("handles all 256 variants and rejects larger enums", () => {
   const members = Array.from({ length: 256 }, (_, i) => Schema.TaggedStruct(`V${i}`, {}))
   const reversed = Object.fromEntries(members.map((_, i) => [`V${i}`, 255 - i]))
   const positional = Borsh.toCodec(Schema.Union(members))
-  const mapped = Borsh.toCodec(unchecked(Schema.Union(members), reversed))
+  const mapped = Borsh.toCodec(Borsh.discriminants(reversed)(Schema.Union(members)))
   for (let i = 0; i < 256; i++) {
     expect(Schema.encodeSync(positional)({ _tag: `V${i}` })).toEqual(Uint8Array.of(i))
     expect(Schema.decodeSync(positional)(Uint8Array.of(i))).toEqual({ _tag: `V${i}` })
