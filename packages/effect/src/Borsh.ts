@@ -156,6 +156,7 @@ export interface withBytes<S extends Schema.Top> extends Schema.declareConstruct
  * })
  * const signed = Schema.decodeSync(Borsh.toCodec(SignedTransaction))(input)
  * verify(signed.signature, sha256(signed.transaction.bytes))
+ * signed.transaction.value.receiverId
  * ```
  */
 export function withBytes<S extends Schema.Top>(schema: S): withBytes<S> {

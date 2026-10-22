@@ -185,6 +185,7 @@ function compileArrays(
 interface Declared {
   readonly path: string
   readonly maxLength: number
+  readonly parameterCount: number
   readonly child: (index: number, segment: string) => L.Layout
 }
 
@@ -193,10 +194,10 @@ const declarations: Readonly<Record<string, (node: Declared) => L.Layout>> = {
   "effect/schema/Uint8Array": ({ maxLength }) => L.bytes(maxLength),
   "effect/schema/Option": ({ child }) => L.option(child(0, "value")),
   "effect/schema/Result": ({ child }) => L.result(child(0, "success"), child(1, "failure")),
-  "effect/schema/ReadonlyMap": map("ReadonlyMap", L.readonlyMap),
-  "effect/schema/ReadonlySet": set("ReadonlySet", L.readonlySet),
-  "effect/schema/HashMap": map("HashMap", L.hashMap),
-  "effect/schema/HashSet": set("HashSet", L.hashSet),
+  "effect/schema/ReadonlyMap": collectionDeclaration("ReadonlyMap", L.readonlyMap),
+  "effect/schema/ReadonlySet": collectionDeclaration("ReadonlySet", L.readonlySet),
+  "effect/schema/HashMap": collectionDeclaration("HashMap", L.hashMap),
+  "effect/schema/HashSet": collectionDeclaration("HashSet", L.hashSet),
   [withBytesId]: ({ child }) => L.withBytes(child(0, "value")),
 }
 
@@ -209,21 +210,16 @@ const lengthPrefixedIds: ReadonlySet<string> = new Set([
   "effect/schema/HashSet",
 ])
 
-function map(name: string, kind: L.Collection) {
-  return (node: Declared) =>
-    L.collection(kind, orderedKey(node, name), node.child(1, "value"), node.maxLength)
-}
-
-function set(name: string, kind: L.Collection) {
-  return (node: Declared) => L.collection(kind, orderedKey(node, name), undefined, node.maxLength)
-}
-
-function orderedKey(node: Declared, name: string): L.Key {
-  const key = node.child(0, "key")
-  if (!isKey(key)) {
-    throw new Error(`${node.path}: ${name} keys require Boolean, integer or String Rust ordering`)
+function collectionDeclaration(name: string, kind: L.Collection) {
+  return (node: Declared) => {
+    const key = node.child(0, "key")
+    if (!isKey(key)) {
+      throw new Error(`${node.path}: ${name} keys require Boolean, integer or String Rust ordering`)
+    }
+    // Sets have no value parameter.
+    const value = node.parameterCount > 1 ? node.child(1, "value") : undefined
+    return L.collection(kind, key, value, node.maxLength)
   }
-  return key
 }
 
 function isKey(layout: L.Layout): layout is L.Key {
@@ -249,6 +245,7 @@ function compileDeclaration(
   return declared({
     path,
     maxLength,
+    parameterCount: ast.typeParameters.length,
     // The constructors behind these representation ids fix each declaration's type parameters.
     child: (index, segment) =>
       compile(ast.typeParameters[index] as SchemaAST.AST, `${path}[${JSON.stringify(segment)}]`),

@@ -2,8 +2,11 @@ import { HashMap, HashSet, Option, Order, Result } from "effect"
 import { BinaryError, checkMaxLength, prepend, type Reader, utf8Length, type Writer } from "./io.js"
 
 export interface Layout {
+  /** Lets readers reject an impossible count before allocating. */
   readonly minBytes: number
+  /** Rust borsh rejects vectors of zero-sized items. */
   readonly isZeroSized: boolean
+  /** Rust ordering, present only on layouts usable as map keys or set members. */
   readonly compare?: (left: unknown, right: unknown) => number
   read(reader: Reader): unknown
   write(writer: Writer, value: unknown): void
@@ -238,7 +241,7 @@ function compareString(a: unknown, b: unknown): number {
   return a.length - b.length
 }
 
-export interface Field {
+interface Field {
   readonly name: string | number
   readonly layout: Layout
 }
@@ -246,7 +249,7 @@ export interface Field {
 /** A Rust struct: fields in declaration order. */
 export function struct(fields: ReadonlyArray<Field>): Layout {
   // Assignment would hit an inherited setter or a frozen inherited property, so such names are
-  // defined instead. Deciding once here keeps the check off the read path.
+  // defined instead. Only this layer: Effect's schema pass, which runs next, assigns plainly too.
   const entries = fields.map((field) => ({ ...field, define: field.name in Object.prototype }))
   return {
     minBytes: sum(fields, (field) => field.layout.minBytes),
