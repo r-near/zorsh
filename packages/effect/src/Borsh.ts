@@ -332,7 +332,8 @@ export function fixedArray(length: number): <S extends Schema.Top>(schema: S) =>
 export interface withBytes<S extends Schema.Top> extends Schema.declareConstructor<
   { readonly value: S["Type"]; readonly bytes: Uint8Array },
   { readonly value: S["Encoded"]; readonly bytes: Uint8Array },
-  readonly [S]
+  readonly [S],
+  { readonly value: S["Iso"]; readonly bytes: Uint8Array }
 > {
   readonly Rebuild: withBytes<S>
   readonly schema: S
@@ -348,17 +349,21 @@ export interface withBytes<S extends Schema.Top> extends Schema.declareConstruct
  * was read from: hash or verify a signature over it, or store or forward it
  * unchanged. Failures inside `value` are reported under `["value"]`.
  *
- * Encoding writes `value`, never `bytes`, and fails at `["bytes"]`, naming the
- * first byte that differs, unless that reproduces `bytes` exactly. Borsh
- * decoding is strict, so a decoded value always re-encodes to its bytes unless
- * a transformation in `schema` is lossy. To build a new outgoing value, encode
- * it with `schema` itself, which writes the same bytes.
+ * Encoding writes `value`, never `bytes`, and fails at `["bytes"]` unless that
+ * reproduces `bytes` exactly, naming the output offset where they first
+ * differ. Borsh decoding is strict, so a decoded value always re-encodes to its
+ * bytes unless `schema` substitutes a value while decoding, as a lossy
+ * transformation, decoding middleware or a decoding default can. To build a new
+ * outgoing value, encode it with `schema` itself, which writes the same bytes.
  *
  * `bytes` is copied, never a view into the decoded input, so it stays valid
  * when the caller reuses its buffer. Samples from `Arbitrary.schema` carry the
- * bytes their value encodes to. Samples that `schema` cannot encode, such as
- * strings with lone surrogates, are discarded, and a `schema` whose encoding
- * needs services cannot be sampled.
+ * bytes `schema` encodes their value to. Samples that `schema` cannot encode,
+ * such as strings with lone surrogates, are discarded, and a `schema` whose
+ * encoding needs services cannot be sampled. Samples of `Schema.toType`,
+ * `Schema.toEncoded` or `Schema.flip` applied to this schema still carry
+ * `schema`'s bytes, so when `schema` has a transformation, encoding them fails
+ * at `["bytes"]`.
  *
  * **Example** (Verify a signature over the transaction's exact bytes)
  *
@@ -383,7 +388,8 @@ export interface withBytes<S extends Schema.Top> extends Schema.declareConstruct
 export function withBytes<S extends Schema.Top>(schema: S): withBytes<S> {
   const declaration = Schema.declareConstructor<
     ValueWithBytes<S["Type"]>,
-    ValueWithBytes<S["Encoded"]>
+    ValueWithBytes<S["Encoded"]>,
+    ValueWithBytes<S["Iso"]>
   >()(
     [schema],
     ([value]) =>
@@ -431,15 +437,15 @@ export function withBytes<S extends Schema.Top>(schema: S): withBytes<S> {
 }
 
 /**
- * Generates `value` from the hook's type-side parameter and derives `bytes` by encoding it. Only
- * `schema` can encode its own type, but on a derived side, such as `Schema.toEncoded`'s, the
- * parameter describes a different type, which it can encode itself.
+ * Generates `value` from the hook's type-side parameter and derives `bytes` by encoding it with
+ * `schema`. The hook cannot tell this schema from `Schema.toType`, `toEncoded` or `flip` applied
+ * to it, so it always describes this one; the encode check rejects bytes that do not match.
  */
 function sampleWithBytes(schema: Schema.Top, parameter: Schema.Codec<unknown>): SchemaAST.Link {
-  const isOwnType = parameter.ast === SchemaAST.toType(schema.ast)
   // Arbitrary links cannot require services, so a schema that needs them dies when sampled.
-  const codec = toCodec(isOwnType ? schema : parameter) as Schema.Codec<unknown, Uint8Array>
-  const encode = SchemaParser.encodeUnknownEffect(codec)
+  const encode = SchemaParser.encodeUnknownEffect(
+    toCodec(schema) as Schema.Codec<unknown, Uint8Array>,
+  )
   return Schema.link<ValueWithBytes<unknown>>()(parameter, {
     // A failure discards the sample, so samples that cannot be encoded never carry wrong bytes.
     decode: SchemaGetter.transformEffect((value) =>

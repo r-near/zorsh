@@ -254,3 +254,8 @@ expectTypeOf(servicedWithBytes.Encoded).toEqualTypeOf<{
 expectTypeOf(Borsh.toCodec(servicedWithBytes)).toEqualTypeOf<
   Schema.Codec<{ readonly value: string; readonly bytes: Uint8Array }, Uint8Array, Decode, Encode>
 >()
+const optionWithBytes = Borsh.withBytes(Schema.Option(U16))
+expectTypeOf(Schema.toCodecIso(optionWithBytes).Encoded).toEqualTypeOf<{
+  readonly value: { readonly _tag: "None" } | { readonly _tag: "Some"; readonly value: number }
+  readonly bytes: Uint8Array
+}>()

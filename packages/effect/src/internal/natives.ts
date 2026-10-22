@@ -168,6 +168,7 @@ export function isValueWithBytes(input: unknown): input is ValueWithBytes<unknow
     typeof input === "object" &&
     input !== null &&
     Object.hasOwn(input, "value") &&
+    Object.hasOwn(input, "bytes") &&
     Reflect.get(input, "bytes") instanceof Uint8Array
   )
 }

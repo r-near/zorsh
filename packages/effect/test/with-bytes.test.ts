@@ -329,6 +329,8 @@ describe("encoding", () => {
       { value: 1 },
       { value: 1, bytes: [1] },
       { bytes: new Uint8Array(1) },
+      // An inherited field is not the value's own, as for any struct field.
+      Object.assign(Object.create({ bytes: new Uint8Array(1) }), { value: 1 }),
     ]) {
       expect(failure(() => encode(input)).message).toBe("Expected a value with its Borsh bytes")
     }
@@ -370,6 +372,15 @@ describe("schema", () => {
     expect(equivalent(self, { value, bytes: Uint8Array.of(1, 1, 1) })).toBe(false)
     expect(equivalent(self, { value, bytes: Uint8Array.of(1, 1) })).toBe(false)
     expect(equivalent(self, { value: { ...value, count: 2 }, bytes: self.bytes })).toBe(false)
+  })
+
+  it("derives its Iso from the schema's own", () => {
+    const iso = Schema.toCodecIso(Borsh.withBytes(Schema.Option(Borsh.U8)))
+    const bytes = Uint8Array.of(1, 1)
+    expect(Schema.encodeSync(iso)({ value: Option.some(1), bytes })).toEqual({
+      value: { _tag: "Some", value: 1 },
+      bytes,
+    })
   })
 
   it("formats value with the schema's formatter, then bytes", () => {
@@ -439,13 +450,45 @@ describe("Arbitrary", () => {
     }
   })
 
-  it("samples the encoded side by encoding it as given", () => {
-    const Encoded = Schema.toEncoded(Borsh.withBytes(Schema.Struct({ flag: LossyFlag })))
-    const encode = encoder(Schema.toEncoded(Schema.Struct({ flag: LossyFlag })))
-    const samples = sample(Encoded)
-    expect(samples.some(({ value }) => value.flag > 1)).toBe(true)
-    for (const { value, bytes } of samples) {
-      expect(bytes).toEqual(encode(value))
+  /** A u8 sent as its decimal string, so its type and wire layouts write different bytes. */
+  const Digits = Schema.String.pipe(
+    Schema.decodeTo(Borsh.U8, SchemaTransformation.transform({ decode: Number, encode: String })),
+  )
+
+  it("encodes samples with the schema itself, not its type side", () => {
+    const encode = encoder(Digits)
+    const codec = Borsh.toCodec(Borsh.withBytes(Digits))
+    for (const sampled of sample(Borsh.withBytes(Digits))) {
+      expect(sampled.bytes).toEqual(encode(sampled.value))
+      expect(sampled.bytes).toHaveLength(4 + String(sampled.value).length)
+      expect(Schema.decodeSync(codec)(Schema.encodeSync(codec)(sampled))).toEqual(sampled)
+    }
+  })
+
+  it("still describes the schema itself when sampled through toType, toEncoded or flip", () => {
+    // The hook sees only a type side, so these cannot be told apart from the original.
+    const typeSide = Schema.toType(Borsh.withBytes(Digits))
+    const [sampled] = sample(typeSide, 1)
+    expect(failure(() => Schema.encodeSync(Borsh.toCodec(typeSide))(sampled!)).message).toBe(
+      'Bytes do not match the encoded value at byte 0\n  at ["bytes"]',
+    )
+    // A transformation between equal wire schemas makes even the parameter identical.
+    const Reversed = Borsh.U8.pipe(
+      Schema.decodeTo(
+        Borsh.U8,
+        SchemaTransformation.transform({ decode: (n) => 255 - n, encode: (n) => 255 - n }),
+      ),
+    )
+    const encodedSide = Schema.toEncoded(Borsh.withBytes(Reversed))
+    const reversed = sample(encodedSide).find(({ value }) => value !== 127)
+    expect(failure(() => Schema.encodeSync(Borsh.toCodec(encodedSide))(reversed!)).message).toBe(
+      'Bytes do not match the encoded value at byte 0\n  at ["bytes"]',
+    )
+    // Without a transformation every side is the same schema, so its samples encode.
+    const plainSide = Schema.toEncoded(Borsh.withBytes(Transaction))
+    const codec = Borsh.toCodec(plainSide)
+    for (const sampled of sample(plainSide, 10)) {
+      expect(Schema.encodeSync(codec)(sampled)).toEqual(sampled.bytes)
     }
   })
 
