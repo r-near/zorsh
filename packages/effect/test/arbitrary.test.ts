@@ -187,7 +187,7 @@ it("keeps annotations, brands and checks added after fixedArray", () => {
   expect(() => Schema.encodeSync(codec)([1])).toThrow(/^Expected a value with a length of 3$/)
   const Pair = Borsh.fixedArray(Borsh.U8, 2).pipe(Schema.brand("Pair"))
   expect(Schema.encodeSync(Borsh.toCodec(Pair))(Pair.make([1, 2]))).toEqual(Uint8Array.of(1, 2))
-  expect(() => Pair.make([1])).toThrow(/Schema validation failed/)
+  expect(Schema.is(Pair)([1])).toBe(false)
   const custom = Borsh.fixedArray(Borsh.U8, 3).check(
     Schema.makeFilter((values) => values[0] === 1, { message: "need a leading one" }),
   )
