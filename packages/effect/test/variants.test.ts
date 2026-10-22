@@ -504,11 +504,12 @@ it("does not force visible suspensions while adding enum metadata", () => {
     forced = true
     return Borsh.U8
   })
-  expect(() =>
-    Schema.TaggedUnion({ Idle: {}, Count: { value: suspended } }).pipe(
-      Borsh.discriminants({ Idle: 0, Count: 1 }),
-    ),
-  ).toThrow(/Suspend/)
+  const schema = Schema.TaggedUnion({ Idle: {}, Count: { value: suspended } }).pipe(
+    Borsh.discriminants({ Idle: 0, Count: 1 }),
+  )
+  expect(() => Borsh.toCodec(schema)).toThrow(
+    new Error('$["value"]: Suspend/recursive schemas are unsupported'),
+  )
   expect(forced).toBe(false)
 })
 

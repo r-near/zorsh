@@ -19,65 +19,6 @@ export type Compile = (ast: SchemaAST.AST, path: string) => Layout
 /** Every u32 length fits, so a layout without Borsh.maxLength never fails its comparison. */
 const unbounded = 0xffff_ffff
 
-/**
- * Walks the original schema, before `toEncoded` drops its type side. Recursive schemas are
- * unsupported, so any Suspend on the encoded or type side fails here with its path, without calling
- * its thunk.
- */
-export function prepare(root: SchemaAST.AST): void {
-  const seen = new Set<SchemaAST.AST>()
-  const pending = [{ ast: root, path: "$" }]
-  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
-    const { ast, path } = node
-    if (seen.has(ast)) {
-      continue
-    }
-    seen.add(ast)
-    if (ast._tag === "Suspend") {
-      throw new Error(`${path}: Suspend/recursive schemas are unsupported`)
-    }
-    ast.encoding?.forEach((link, i) =>
-      pending.push({ ast: link.to, path: `${path}.encoding[${i}]` }),
-    )
-    pending.push(...children(ast, path))
-  }
-}
-
-/** The schemas directly inside ast, apart from its encoding chain, with their paths. */
-function children(
-  ast: SchemaAST.AST,
-  path: string,
-): Array<{ readonly ast: SchemaAST.AST; readonly path: string }> {
-  switch (ast._tag) {
-    case "Declaration":
-      return ast.typeParameters.map((child, i) => ({
-        ast: child,
-        path: `${path}.typeParameters[${i}]`,
-      }))
-    case "Arrays":
-      return [
-        ...ast.elements.map((child, i) => ({ ast: child, path: `${path}[${i}]` })),
-        ...ast.rest.map((child, i) => ({ ast: child, path: `${path}.rest[${i}]` })),
-      ]
-    case "Objects":
-      return [
-        ...ast.propertySignatures.map((field) => ({
-          ast: field.type,
-          path: `${path}.${String(field.name)}`,
-        })),
-        ...ast.indexSignatures.flatMap((index, i) => [
-          { ast: index.parameter, path: `${path}.keys[${i}]` },
-          { ast: index.type, path: `${path}.values[${i}]` },
-        ]),
-      ]
-    case "Union":
-      return ast.types.map((child, i) => ({ ast: child, path: `${path}.union[${i}]` }))
-    case "TemplateLiteral":
-      return ast.parts.map((child, i) => ({ ast: child, path: `${path}.parts[${i}]` }))
-  }
-  return []
-}
-
 export function compile(root: SchemaAST.AST): Layout {
   // A node reused across the schema compiles once.
   const memo = new Map<SchemaAST.AST, Layout>()
@@ -131,6 +72,9 @@ function compileNode(ast: SchemaAST.AST, path: string, compile: Compile): Layout
       throw new Error(
         `${path}: Unsupported encoded schema Literal; use Schema.Literals or a tagged union for a Rust enum`,
       )
+    case "Suspend":
+      // Compiling the thunk's schema would recurse forever on a recursive one, so never call it.
+      throw new Error(`${path}: Suspend/recursive schemas are unsupported`)
   }
   throw new Error(`${path}: Unsupported encoded schema ${ast._tag}`)
 }

@@ -290,7 +290,7 @@ it("rejects fixed-array Suspend when deriving the codec, without evaluating its 
   })
   const schema = Borsh.fixedArray(item, 2)
   expect(() => Borsh.toCodec(schema)).toThrow(
-    /\$\.rest\[0\]: Suspend\/recursive schemas are unsupported/,
+    new Error("$[]: Suspend/recursive schemas are unsupported"),
   )
   expect(calls).toBe(0)
 })

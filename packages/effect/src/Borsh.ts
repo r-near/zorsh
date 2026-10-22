@@ -21,7 +21,7 @@ import {
   SchemaTransformation,
 } from "effect"
 import { isU32Length, maxLengthId, parseDescriptor, withLayout } from "./internal/annotations.js"
-import { compile, type Layout, prepare } from "./internal/compiler.js"
+import { compile, type Layout } from "./internal/compiler.js"
 import { enumVariants } from "./internal/enums.js"
 import { BinaryError, Reader, type ReaderOptions, utf8Length, Writer } from "./internal/io.js"
 import { isValueWithBytes, type ValueWithBytes, withBytesId } from "./internal/natives.js"
@@ -44,12 +44,6 @@ function bigInteger(bits: 64 | 128, signed: boolean): Schema.BigInt {
     bits,
     signed,
   }).check(Schema.isBetweenBigInt(integerRange(bits, signed)))
-}
-
-/** Reject Suspend, with its path, before deriving the encoded AST. */
-function encodedAST(schema: Schema.Constraint): SchemaAST.AST {
-  prepare(schema.ast)
-  return Schema.toEncoded(schema).ast
 }
 
 /**
@@ -489,7 +483,7 @@ export function discriminants<
     "$",
   )
   return (schema) => {
-    enumVariants(encodedAST(schema), layout, "$")
+    enumVariants(Schema.toEncoded(schema).ast, layout, "$")
     return withLayout(schema, layout)
   }
 }
@@ -766,7 +760,10 @@ function cacheEntry(schema: Schema.Constraint): CodecCacheEntry {
   if (cached !== undefined) {
     return cached
   }
-  const entry: CodecCacheEntry = { layout: compile(encodedAST(schema)), codecs: new Map() }
+  const entry: CodecCacheEntry = {
+    layout: compile(Schema.toEncoded(schema).ast),
+    codecs: new Map(),
+  }
   codecCache.set(schema, entry)
   return entry
 }

@@ -433,58 +433,54 @@ describe("unsupported encoded layouts and metadata", () => {
     }
   })
 
-  it("rejects Suspend without evaluating the thunk, including a hidden recursive Type", () => {
+  it("rejects encoded-side Suspend at its path without evaluating the thunk", () => {
     let calls = 0
     const suspended = Schema.suspend(() => {
       calls++
-      return Borsh.U8
+      return Schema.String
     })
-    expect(() => Borsh.toCodec(suspended)).toThrow(/\$: Suspend/)
-    const struct = Schema.Struct({ hidden: suspended })
+    const encodedSide = suspended.pipe(
+      Schema.decodeTo(
+        Schema.Finite,
+        SchemaTransformation.transform({ decode: Number, encode: String }),
+      ),
+    )
+    const cases = [
+      { schema: suspended, path: "$" },
+      { schema: encodedSide, path: "$" },
+      { schema: Schema.Tuple([suspended]), path: "$[0]" },
+      { schema: Schema.Array(suspended), path: "$[]" },
+      { schema: Schema.Struct({ hidden: suspended }), path: '$["hidden"]' },
+      { schema: Schema.Option(suspended), path: '$["value"]' },
+    ]
+    for (const { schema, path } of cases) {
+      expect(() => Borsh.toCodec(schema)).toThrow(
+        new Error(`${path}: Suspend/recursive schemas are unsupported`),
+      )
+    }
+    expect(calls).toBe(0)
+  })
+
+  it("round-trips Suspend on the type side, which the binary layer never sees", () => {
+    const suspended = Schema.suspend(() => Borsh.U8)
     const typeSide = Borsh.U8.pipe(
       Schema.decodeTo(
-        struct,
+        Schema.Struct({ hidden: suspended }),
         SchemaTransformation.transform({
           decode: (hidden) => ({ hidden }),
           encode: (value) => value.hidden,
         }),
       ),
     )
-    expect(() => Borsh.toCodec(typeSide)).toThrow(/\$\.hidden: Suspend/)
+    const codec = Borsh.toCodec(typeSide)
+    expect(Schema.decodeSync(codec)(Uint8Array.of(5))).toEqual({ hidden: 5 })
+    expect(Schema.encodeSync(codec)({ hidden: 6 })).toEqual(Uint8Array.of(6))
     const declaration = Schema.declareConstructor<number>()(
       [suspended],
       () => () => Effect.succeed(1),
     )
-    const declarationType = Borsh.U8.pipe(Schema.decodeTo(declaration))
-    expect(() => Borsh.toCodec(declarationType)).toThrow(/\$\.typeParameters\[0\]: Suspend/)
-    const encodedSide = suspended.pipe(
-      Schema.decodeTo(
-        Schema.String,
-        SchemaTransformation.transform({ decode: String, encode: Number }),
-      ),
-    )
-    expect(() => Borsh.toCodec(encodedSide)).toThrow(/encoding\[0\].*Suspend/)
-    expect(calls).toBe(0)
-  })
-
-  it("finds suspended nodes nested in tuple, vector, union and record schemas without forcing them", () => {
-    let calls = 0
-    const suspended = Schema.suspend(() => {
-      calls++
-      return Schema.String
-    })
-    const cases = [
-      { schema: Schema.Tuple([suspended]), path: "$[0]" },
-      { schema: Schema.Array(suspended), path: "$.rest[0]" },
-      { schema: Schema.Union([Schema.String, suspended]), path: "$.union[1]" },
-      { schema: Schema.Record(Schema.String, suspended), path: "$.values[0]" },
-    ]
-    for (const { schema, path } of cases) {
-      expect(() => Borsh.toCodec(schema)).toThrow(
-        `${path}: Suspend/recursive schemas are unsupported`,
-      )
-    }
-    expect(calls).toBe(0)
+    const declarationType = Borsh.toCodec(Borsh.U8.pipe(Schema.decodeTo(declaration)))
+    expect(Schema.decodeSync(declarationType)(Uint8Array.of(5))).toBe(1)
   })
 
   it("validates malformed, mismatched and conflicting private metadata", () => {
