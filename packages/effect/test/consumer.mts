@@ -159,7 +159,8 @@ const Kinds = Schema.Union([
 ]).pipe(Borsh.discriminants({ A: 2, B: 9 }, { tag: "kind" }), Schema.toTaggedUnion("kind"))
 expectTypeOf(Kinds.match({ kind: "A" }, { A: () => 0, B: (b) => b.value })).toEqualTypeOf<number>()
 
-const fixed = Schema.Array(schema).pipe(Borsh.fixedArray(2))
+const fixed = Borsh.fixedArray(schema, 2)
+expectTypeOf(fixed).toEqualTypeOf<Schema.$Array<typeof schema>>()
 expectTypeOf(fixed.Type).toEqualTypeOf<readonly string[]>()
 expectTypeOf(Borsh.toCodec(fixed)).toEqualTypeOf<
   Schema.Codec<readonly string[], Uint8Array, Decode, Encode>

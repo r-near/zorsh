@@ -126,7 +126,7 @@ const entries = [
   ),
   spec(
     "array_u16_3",
-    Schema.Array(Borsh.U16).pipe(Borsh.fixedArray(3)),
+    Borsh.fixedArray(Borsh.U16, 3),
     fc.array(u16, { minLength: 3, maxLength: 3 }),
     (values) => values.map(String),
   ),

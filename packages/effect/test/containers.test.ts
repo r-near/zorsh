@@ -101,9 +101,12 @@ it("runs the package README number, byte, array and tuple examples", () => {
   expect(requestId).toEqual(new Uint8Array(32))
   const Amounts = Schema.Array(Borsh.U16)
   const amounts = Schema.encodeSync(Borsh.toCodec(Amounts))([7, 513])
+  const ThreeAmounts = Borsh.fixedArray(Borsh.U16, 3)
+  const threeAmounts = Schema.encodeSync(Borsh.toCodec(ThreeAmounts))([7, 513, 0])
   const RecipientAmount = Schema.Tuple([Schema.String, Borsh.U128])
   const recipientAmount = Schema.encodeSync(Borsh.toCodec(RecipientAmount))(["alice.near", 123n])
   expect(amounts).toEqual(Uint8Array.of(2, 0, 0, 0, 7, 0, 1, 2))
+  expect(threeAmounts).toEqual(Uint8Array.of(7, 0, 1, 2, 0, 0))
   expect(Schema.decodeSync(Borsh.toCodec(RecipientAmount))(recipientAmount)).toEqual([
     "alice.near",
     123n,

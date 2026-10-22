@@ -84,7 +84,7 @@ export function defineField(target: object, name: PropertyKey, value: unknown): 
 }
 
 /** The item of a plain `ReadonlyArray<T>`, with no leading or trailing elements. */
-export function homogeneousItem(ast: SchemaAST.AST): SchemaAST.AST | undefined {
+function homogeneousItem(ast: SchemaAST.AST): SchemaAST.AST | undefined {
   if (ast._tag === "Arrays" && ast.elements.length === 0 && ast.rest.length === 1) {
     return ast.rest[0]
   }

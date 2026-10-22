@@ -109,7 +109,7 @@ describe("decoding", () => {
       version: Borsh.U8,
       items: Schema.Array(Item),
       pair: Schema.Tuple([Item, Item]),
-      fixed: Schema.Array(Borsh.withBytes(Borsh.U16)).pipe(Borsh.fixedArray(2)),
+      fixed: Borsh.fixedArray(Borsh.withBytes(Borsh.U16), 2),
       byName: Schema.ReadonlyMap(Schema.String, Borsh.withBytes(Borsh.U32)),
     })
     const plain = encoder(Schema.Struct({ id: Borsh.U8, name: Schema.String }))

@@ -53,6 +53,8 @@ Frames are limited to 1 MiB excluding LF; CR in CRLF counts. Raw Borsh data and 
 | `option_u128` | `Option<u128>` |
 | `option_option_u8` | `Option<Option<u8>>` |
 | `array_u16_3` | `[u16; 3]` |
+| `array_array_u8_2_2` | `[[u8; 2]; 2]` |
+| `vec_array_u16_2` | `Vec<[u16; 2]>` |
 | `transfer` | `Transfer { receiver: String, amount: u128 }` |
 | `storage_deposit` | `StorageDeposit { token_id: String, account_id: String, storage_deposit_amount: Option<u128> }` |
 | `explicit_enum` | Derived `#[repr(u8)] #[borsh(use_discriminant = true)] enum ExplicitEnum { Idle = 3, Count(u16) = 17, Named { label: String, enabled: bool } = 250 }` |

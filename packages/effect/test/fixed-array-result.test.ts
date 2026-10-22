@@ -6,7 +6,7 @@ import { Writer } from "../src/internal/io.js"
 import { noLimits } from "../src/internal/limits.js"
 
 it("writes fixed arrays without a prefix and enforces their binary length", () => {
-  const schema = Schema.Array(Borsh.U16).pipe(Borsh.fixedArray(3))
+  const schema = Borsh.fixedArray(Borsh.U16, 3)
   const codec = Borsh.toCodec(schema)
   const raw = Uint8Array.of(0, 0, 1, 0, 255, 255)
   expect(Schema.encodeSync(codec)([0, 1, 65535])).toEqual(raw)
@@ -18,6 +18,9 @@ it("writes fixed arrays without a prefix and enforces their binary length", () =
   for (const value of [[], [1, 2], [1, 2, 3, 4], {}, null]) {
     expect(() => Schema.encodeUnknownSync(codec)(value)).toThrow(Schema.SchemaError)
   }
+  expect(() => Schema.encodeUnknownSync(codec, { disableChecks: true })([1, 2])).toThrow(
+    /^Expected fixed array of length 3 at byte 0$/,
+  )
   const layout = compile(Schema.toEncoded(schema).ast, noLimits)
   for (const value of [[], [1, 2, 3, 4], {}]) {
     expect(() => layout.write(new Writer(32), value)).toThrow(/Expected fixed array of length 3/)
@@ -30,26 +33,17 @@ it("writes fixed arrays without a prefix and enforces their binary length", () =
   expect(Schema.encodeSync(Borsh.toCodec(vector))([7])).toEqual(Uint8Array.of(1, 0, 0, 0, 7))
 })
 
-it("rejects invalid fixed-array schemas and conflicting metadata at construction", () => {
+it("rejects invalid fixed-array lengths and conflicting layout metadata", () => {
   for (const length of [-1, 0.5, NaN, Infinity, 0x1_0000_0000]) {
-    expect(() => Borsh.fixedArray(length)).toThrow(/fixedArray length must be a safe integer/)
-  }
-  for (const schema of [
-    Borsh.U8,
-    Schema.Tuple([Borsh.U8]),
-    Schema.NonEmptyArray(Borsh.U8),
-    Schema.TupleWithRest(Schema.Tuple([]), [Borsh.U8, Borsh.U16]),
-  ]) {
-    expect(() => schema.pipe(Borsh.fixedArray(1))).toThrow(
-      /fixedArray requires a homogeneous encoded array/,
+    expect(() => Borsh.fixedArray(Borsh.U8, length)).toThrow(
+      /fixedArray length must be a safe integer/,
     )
   }
-  const schema = Schema.Array(Borsh.U8).pipe(Borsh.fixedArray(1))
-  expect(() => schema.pipe(Borsh.fixedArray(2))).toThrow(/Conflicting Borsh layout annotations/)
-  expect(Schema.encodeSync(Borsh.toCodec(schema.pipe(Borsh.fixedArray(1))))([7])).toEqual(
-    Uint8Array.of(7),
-  )
   const key = "@zorsh/effect/borsh/layout"
+  const schema = Borsh.fixedArray(Borsh.U8, 1)
+  expect(() =>
+    Borsh.toCodec(schema.annotate({ [key]: { version: 1, kind: "fixedArray", length: 2 } })),
+  ).toThrow(/Conflicting Borsh layout annotations/)
   expect(() =>
     Borsh.toCodec(Schema.String.annotate({ [key]: { version: 1, kind: "fixedArray", length: 1 } })),
   ).toThrow(/Fixed array layout requires a homogeneous encoded array/)
@@ -58,9 +52,7 @@ it("rejects invalid fixed-array schemas and conflicting metadata at construction
       Schema.Array(Borsh.U8).annotate({ [key]: { version: 1, kind: "fixedArray", length: -1 } }),
     ),
   ).toThrow(/Invalid Borsh layout annotation/)
-  const huge = Schema.Array(Schema.Array(Borsh.U16).pipe(Borsh.fixedArray(0xffff_ffff))).pipe(
-    Borsh.fixedArray(0xffff_ffff),
-  )
+  const huge = Borsh.fixedArray(Borsh.fixedArray(Borsh.U16, 0xffff_ffff), 0xffff_ffff)
   expect(compile(Schema.toEncoded(huge).ast, noLimits).minBytes).toBe(Number.MAX_SAFE_INTEGER)
   expect(() => Schema.decodeSync(Borsh.toCodec(huge))(new Uint8Array())).toThrow(
     /Truncated fixed array/,
@@ -69,30 +61,30 @@ it("rejects invalid fixed-array schemas and conflicting metadata at construction
 
 it("matches fixed-array zero-sized visitation", () => {
   for (const [schema, value] of [
-    [Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(0)), []],
-    [Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(1)), [[]]],
-    [Schema.Array(Schema.Array(Borsh.Unit)).pipe(Borsh.fixedArray(0)), []],
+    [Borsh.fixedArray(Borsh.Unit, 0), []],
+    [Borsh.fixedArray(Borsh.Unit, 1), [[]]],
+    [Borsh.fixedArray(Schema.Array(Borsh.Unit), 0), []],
   ] as const) {
     const codec = Borsh.toCodec(schema)
     expect(Schema.encodeUnknownSync(codec)(value)).toEqual(new Uint8Array())
     expect(Schema.decodeSync(codec)(new Uint8Array())).toEqual(value)
   }
   for (const [schema, value] of [
-    [Schema.Array(Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(1))), [[[]]]],
-    [Schema.Array(Schema.Array(Borsh.Unit)).pipe(Borsh.fixedArray(1)), [[]]],
+    [Schema.Array(Borsh.fixedArray(Borsh.Unit, 1)), [[[]]]],
+    [Borsh.fixedArray(Schema.Array(Borsh.Unit), 1), [[]]],
   ] as const) {
     const codec = Borsh.toCodec(schema)
     expect(() => Schema.encodeUnknownSync(codec)(value)).toThrow(/zero-sized/)
     expect(() => Schema.decodeSync(codec)(Uint8Array.of(0, 0, 0, 0))).toThrow(/zero-sized/)
   }
-  const zeroItem = Schema.Array(Schema.Array(Borsh.U8).pipe(Borsh.fixedArray(0)))
+  const zeroItem = Schema.Array(Borsh.fixedArray(Borsh.U8, 0))
   expect(() => Schema.encodeSync(Borsh.toCodec(zeroItem))([])).toThrow(/zero-sized/)
 })
 
 it("preserves transformed array application values and directional services", () => {
   class Decode extends Context.Service<Decode, { readonly prefix: string }>()("FixedDecode") {}
   class Encode extends Context.Service<Encode, { readonly prefix: string }>()("FixedEncode") {}
-  const schema = Schema.Array(Borsh.U16.check(Schema.isGreaterThan(0))).pipe(
+  const schema = Borsh.fixedArray(Borsh.U16.check(Schema.isGreaterThan(0)), 2).pipe(
     Schema.decodeTo(
       Schema.Struct({ label: Schema.String }),
       SchemaTransformation.transformEffect({
@@ -102,7 +94,6 @@ it("preserves transformed array application values and directional services", ()
           Effect.map(Encode, ({ prefix }) => label.slice(prefix.length).split(",").map(Number)),
       }),
     ),
-    Borsh.fixedArray(2),
     Schema.brand("Pair"),
   )
   const codec = Borsh.toCodec(schema)
@@ -175,9 +166,7 @@ it("retains nested Result paths, payload transformations and inactive branch non
   const Nested = Schema.TaggedUnion({
     Empty: {},
     Values: {
-      rows: Schema.Array(Schema.Option(Schema.Result(Schema.Boolean, Borsh.Bytes))).pipe(
-        Borsh.fixedArray(1),
-      ),
+      rows: Borsh.fixedArray(Schema.Option(Schema.Result(Schema.Boolean, Borsh.Bytes)), 1),
     },
   }).pipe(Borsh.discriminants({ Empty: 0, Values: 3 }))
   const nested = Borsh.toCodec(Nested)
@@ -238,11 +227,11 @@ it("validates Result arity and explicitly annotated fixed-array shapes", () => {
 })
 
 it("keeps native array checks and fixed-item error paths", () => {
-  const schema = Schema.Array(Borsh.U8).check(Schema.isMinLength(2)).pipe(Borsh.fixedArray(1))
+  const schema = Borsh.fixedArray(Borsh.U8, 1).check(Schema.isMinLength(2))
   const codec = Borsh.toCodec(schema)
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(1))).toThrow(Schema.SchemaError)
   expect(() => Schema.encodeSync(codec)([1])).toThrow(Schema.SchemaError)
-  const shared = Schema.Array(Schema.Boolean).pipe(Borsh.fixedArray(1))
+  const shared = Borsh.fixedArray(Schema.Boolean, 1)
   const nested = Borsh.toCodec(Schema.Struct({ a: shared, b: shared }))
   expect(() => Schema.decodeSync(nested)(Uint8Array.of(1, 2))).toThrow(
     /Invalid bool tag 2 at byte 1\n {2}at \["b"\]\[0\]$/,
@@ -256,10 +245,10 @@ it("keeps native array checks and fixed-item error paths", () => {
     },
   })
   expect(() =>
-    compile(
-      Schema.toEncoded(Schema.Array(Schema.Boolean).pipe(Borsh.fixedArray(2))).ast,
-      noLimits,
-    ).write(new Writer(8), shrinking),
+    compile(Schema.toEncoded(Borsh.fixedArray(Schema.Boolean, 2)).ast, noLimits).write(
+      new Writer(8),
+      shrinking,
+    ),
   ).toThrow(expect.objectContaining({ message: "Expected boolean at byte 1", path: [1] }))
   expect(() => layout.write(new Writer(8), [2])).toThrow(
     expect.objectContaining({ message: "Expected boolean at byte 0", path: [0] }),
@@ -279,7 +268,7 @@ it("accepts vectors and fixed arrays of Results with zero-byte payloads", () => 
   const mixedRaw = Uint8Array.of(2, 0, 0, 0, 0, 1)
   expect(Schema.encodeSync(units)(mixed)).toEqual(mixedRaw)
   expect(Schema.decodeSync(units)(mixedRaw)).toEqual(mixed)
-  const fixed = Borsh.toCodec(Schema.Array(item).pipe(Borsh.fixedArray(2)))
+  const fixed = Borsh.toCodec(Borsh.fixedArray(item, 2))
   expect(Schema.encodeSync(fixed)(values)).toEqual(Uint8Array.of(1, 1))
   expect(Schema.decodeSync(fixed)(Uint8Array.of(1, 1))).toEqual(values)
 })
@@ -294,13 +283,14 @@ it("rejects truncated Result vectors before visiting their payloads", () => {
   }
 })
 
-it("rejects fixed-array Suspend at helper construction without evaluating its thunk", () => {
+it("rejects fixed-array Suspend when deriving the codec, without evaluating its thunk", () => {
   let calls = 0
   const item = Schema.suspend(() => {
     calls++
     return Borsh.U8
   })
-  expect(() => Schema.Array(item).pipe(Borsh.fixedArray(2))).toThrow(
+  const schema = Borsh.fixedArray(item, 2)
+  expect(() => Borsh.toCodec(schema)).toThrow(
     /\$\.rest\[0\]: Suspend\/recursive schemas are unsupported/,
   )
   expect(calls).toBe(0)

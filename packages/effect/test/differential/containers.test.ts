@@ -79,9 +79,24 @@ const u128 = fc.bigInt({ min: 0n, max: (1n << 128n) - 1n })
 const entries = [
   spec(
     "array_u16_3",
-    Schema.Array(Borsh.U16).pipe(Borsh.fixedArray(3)),
+    Borsh.fixedArray(Borsh.U16, 3),
     fc.array(fc.integer({ min: 0, max: 65535 }), { minLength: 3, maxLength: 3 }),
     (values) => values.map(String),
+  ),
+  spec(
+    "array_array_u8_2_2",
+    Borsh.fixedArray(Borsh.fixedArray(Borsh.U8, 2), 2),
+    fc.array(fc.array(fc.integer({ min: 0, max: 255 }), { minLength: 2, maxLength: 2 }), {
+      minLength: 2,
+      maxLength: 2,
+    }),
+    (rows) => rows.map((row) => row.map(String)),
+  ),
+  spec(
+    "vec_array_u16_2",
+    Schema.Array(Borsh.fixedArray(Borsh.U16, 2)),
+    fc.array(fc.array(u16, { minLength: 2, maxLength: 2 }), { maxLength: 4 }),
+    (rows) => rows.map((row) => row.map(String)),
   ),
   spec(
     "result_u16_string",
@@ -322,27 +337,17 @@ for (const entry of entries) {
 
 it("matches Rust zero-sized visitation and malicious vector counts", async () => {
   for (const [id, schema, values, raws] of [
-    [
-      "array_unit_0",
-      Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(0)),
-      [[]],
-      [new Uint8Array(), Uint8Array.of(0)],
-    ],
-    [
-      "array_unit_1",
-      Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(1)),
-      [[[]]],
-      [new Uint8Array(), Uint8Array.of(0)],
-    ],
+    ["array_unit_0", Borsh.fixedArray(Borsh.Unit, 0), [[]], [new Uint8Array(), Uint8Array.of(0)]],
+    ["array_unit_1", Borsh.fixedArray(Borsh.Unit, 1), [[[]]], [new Uint8Array(), Uint8Array.of(0)]],
     [
       "array_vec_unit_0",
-      Schema.Array(Schema.Array(Borsh.Unit)).pipe(Borsh.fixedArray(0)),
+      Borsh.fixedArray(Schema.Array(Borsh.Unit), 0),
       [[]],
       [new Uint8Array(), Uint8Array.of(0)],
     ],
     [
       "array_vec_unit_1",
-      Schema.Array(Schema.Array(Borsh.Unit)).pipe(Borsh.fixedArray(1)),
+      Borsh.fixedArray(Schema.Array(Borsh.Unit), 1),
       [[[]]],
       [new Uint8Array(), Uint8Array.of(0, 0, 0, 0)],
     ],

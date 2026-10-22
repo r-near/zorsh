@@ -125,6 +125,12 @@ fn concrete_types_and_options() {
     golden("vec_u16", json!(["1", "256"]), "0200000001000001");
     golden("array_u16_3", json!(["0", "1", "65535"]), "00000100ffff");
     golden(
+        "array_array_u8_2_2",
+        json!([["1", "2"], ["3", "4"]]),
+        "01020304",
+    );
+    golden("vec_array_u16_2", json!([["1", "513"]]), "0100000001000102");
+    golden(
         "tuple_u8_u128",
         json!(["7", "18446744073709551616"]),
         "0700000000000000000100000000000000",
@@ -456,7 +462,7 @@ fn bad_transport_never_counts_as_borsh_rejection() {
 fn registry_has_no_accidental_duplicate_ids() {
     let ids: std::collections::BTreeSet<_> = SCHEMA_IDS.iter().collect();
     assert_eq!(ids.len(), SCHEMA_IDS.len());
-    assert_eq!(SCHEMA_IDS.len(), 52);
+    assert_eq!(SCHEMA_IDS.len(), 54);
 }
 
 #[test]

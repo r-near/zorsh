@@ -70,14 +70,14 @@ Use native `Schema.Array` for a variable-length sequence and `Schema.Tuple` for 
 ```ts
 const Amounts = Schema.Array(Borsh.U16)
 const amounts = Schema.encodeSync(Borsh.toCodec(Amounts))([7, 513])
-const ThreeAmounts = Schema.Array(Borsh.U16).pipe(Borsh.fixedArray(3))
+const ThreeAmounts = Borsh.fixedArray(Borsh.U16, 3)
 const threeAmounts = Schema.encodeSync(Borsh.toCodec(ThreeAmounts))([7, 513, 0])
 
 const RecipientAmount = Schema.Tuple([Schema.String, Borsh.U128])
 const recipientAmount = Schema.encodeSync(Borsh.toCodec(RecipientAmount))(["alice.near", 123n])
 ```
 
-An array writes a u32 item count followed by its items, like Rust `Vec<T>`. For a nonempty vector, use `Schema.Array(item).check(Schema.isMinLength(1))`. `Borsh.fixedArray(3)` applies the Rust `[T; 3]` layout to a homogeneous native encoded array. The codec requires exactly three items and writes no count prefix. The helper rejects other schema shapes at construction. An exact-length native check alone still describes a vector. Without a transformation, the helper also adds a native exact-length check, so other lengths fail Schema validation. It preserves array-to-application transformations and adds no check to their decoded value, so apply it before a transformation; see [Generating fixtures](#generating-fixtures). A tuple writes its elements in order without a prefix. `Borsh.Unit` is `Schema.Tuple([])`, representing Rust `()` with no bytes.
+An array writes a u32 item count followed by its items, like Rust `Vec<T>`. For a nonempty vector, use `Schema.Array(item).check(Schema.isMinLength(1))`. `Borsh.fixedArray(item, 3)` is Rust `[T; 3]`: a native `Schema.Array(item)` with an exact-length check, so other lengths fail Schema validation, and the codec writes no count prefix. An exact-length check on a plain `Schema.Array` still describes a vector. Annotate, brand or transform a fixed array like any other array schema. A tuple writes its elements in order without a prefix. `Borsh.Unit` is `Schema.Tuple([])`, representing Rust `()` with no bytes.
 
 ### Structs
 
@@ -274,28 +274,9 @@ const fixtures = Effect.runSync(
 ).map((request) => Schema.encodeSync(requestCodec)(request))
 ```
 
-Samples follow the decoded type and its checks. `withBytes(schema)` samples carry the bytes `schema` encodes their value to: samples it cannot encode, such as strings with lone surrogates, are discarded, and a schema whose encoding needs services cannot be sampled. Samples of `Schema.toType`, `Schema.toEncoded` or `Schema.flip` applied to it are still encoded with `schema`, so when it has a transformation they can be discarded, or carry bytes that differ from what the derived schema writes and so fail to encode at `["bytes"]`. `fixedBytes(n)` samples exactly `n` bytes and an untransformed `fixedArray(n)` exactly `n` items. Effect has no binary32 generator, so `F32` samples integers within ±2^24, which are exact; refinements of `F32` must admit such an integer.
+Samples follow the decoded type and its checks. `withBytes(schema)` samples carry the bytes `schema` encodes their value to: samples it cannot encode, such as strings with lone surrogates, are discarded, and a schema whose encoding needs services cannot be sampled. Samples of `Schema.toType`, `Schema.toEncoded` or `Schema.flip` applied to it are still encoded with `schema`, so when it has a transformation they can be discarded, or carry bytes that differ from what the derived schema writes and so fail to encode at `["bytes"]`. `fixedBytes(n)` samples exactly `n` bytes and an untransformed `fixedArray(item, n)` exactly `n` items. Effect has no binary32 generator, so `F32` samples integers within ±2^24, which are exact; refinements of `F32` must admit such an integer.
 
 Raw `Schema.String` samples can contain lone UTF-16 surrogates, which Borsh strings reject. Narrow strings to the business values the contract expects, as with `receiver` and `method` above, or check `String.prototype.isWellFormed` as with `memo`, which TypeScript types with `lib` ES2024 or later. A bare `Schema.Literal` has no Borsh layout, so encode it to `Schema.String`. Vectors of zero-sized values, such as `Schema.Array(Borsh.Unit)`, sample but cannot be encoded.
-
-`fixedArray` cannot check the decoded value of a transformed array, including an identity `Schema.decodeTo(Schema.Array(item))`, so its samples can have other lengths. Apply `fixedArray` to the array before the transformation, so other lengths fail Schema validation, and give the decoded type a fixed shape, so samples encode to `n` items:
-
-```ts
-import { SchemaTransformation } from "effect"
-
-const Range = Schema.Array(Borsh.U32).pipe(
-  Borsh.fixedArray(2),
-  Schema.decodeTo(
-    Schema.Struct({ start: Borsh.U32, end: Borsh.U32 }),
-    SchemaTransformation.transform({
-      decode: ([start = 0, end = 0]) => ({ start, end }),
-      encode: ({ start, end }) => [start, end],
-    }),
-  ),
-)
-```
-
-The encoded check governs validation; the decoded type governs generation.
 
 ## Untrusted input
 
@@ -348,7 +329,7 @@ const trailer = packet.subarray(end)
 
 `maxBytes` caps the bytes the value may use, not the length of the buffer. As soon as a read's length or count shows that the value cannot fit, it fails with `Value exceeds maxBytes (65536) at byte …`, however short the buffer is, so a streaming caller can stop waiting for more input. A `Truncated …` failure only means the buffer ended before the current read; with more input, a later field might still exceed `maxBytes`. Once the buffer holds `maxBytes` bytes after the offset, a failure is never `Truncated`, so waiting for more input always ends. `maxItems` is a budget per call. Byte offsets in errors are positions in the buffer. Decoding middleware on the schema, such as `Schema.catchDecoding`, can recover from schema-pass failures but, unlike with `toCodec`, not from binary ones, because a value that was never read has no end to return as `offset`. `decodePrefixEffect` needs the schema's decoding services, as `Schema.decodeEffect` does; `decodePrefixSync` accepts only schemas without them and throws `Schema.SchemaError`.
 
-The offset defaults to 0 and must be an integer from 0 through `buffer.byteLength`; any other offset is a defect rather than a decoding failure: a `TypeError` if it is not a number, such as parse options passed second, and a `RangeError` otherwise. A buffer that is not a `Uint8Array` is a `TypeError`. A schema that always encodes to zero bytes, such as `Borsh.Unit`, an empty struct, `fixedBytes(0)` or `fixedArray(0)`, throws when the decoder is built, because a decoding loop over it would never advance. Every other schema reads at least one byte per value, including enums with one dataless variant, which Rust treats as zero-sized but Borsh still writes as a one-byte tag.
+The offset defaults to 0 and must be an integer from 0 through `buffer.byteLength`; any other offset is a defect rather than a decoding failure: a `TypeError` if it is not a number, such as parse options passed second, and a `RangeError` otherwise. A buffer that is not a `Uint8Array` is a `TypeError`. A schema that always encodes to zero bytes, such as `Borsh.Unit`, an empty struct, `fixedBytes(0)` or `fixedArray(item, 0)`, throws when the decoder is built, because a decoding loop over it would never advance. Every other schema reads at least one byte per value, including enums with one dataless variant, which Rust treats as zero-sized but Borsh still writes as a one-byte tag.
 
 ## Keeping the exact bytes
 
