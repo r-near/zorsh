@@ -41,23 +41,48 @@ export interface ReaderOptions {
 }
 
 export class Reader {
-  offset = 0
+  offset: number
   /** A plain view, so slices copy even when the input is a Buffer. */
   readonly input: Uint8Array
   readonly view: DataView
+  /** One past the last byte the value may use. */
+  readonly end: number
   readonly checks: boolean
+  readonly maxBytes: number
   readonly maxItems: number
   private items: number
-  constructor(input: Uint8Array, options: ReaderOptions) {
-    if (input.byteLength > options.maxBytes) {
+  /** Where a prefix read's maxBytes runs out. A whole input was checked against it up front. */
+  private readonly limit: number
+  /**
+   * Without start, the whole input must fit maxBytes. With start, this is a prefix read: it begins
+   * there, may stop before the input ends, and maxBytes caps the value rather than the input.
+   */
+  constructor(input: Uint8Array, options: ReaderOptions, start?: number) {
+    const length = input.byteLength
+    if (start === undefined && length > options.maxBytes) {
       throw new BinaryError(0, `Input exceeds maxBytes (${options.maxBytes})`)
     }
-    const length = input.byteLength
+    this.offset = start ?? 0
     this.input = length === 0 ? empty : new Uint8Array(input.buffer, input.byteOffset, length)
     this.view = length === 0 ? emptyView : new DataView(input.buffer, input.byteOffset, length)
+    this.limit = start === undefined ? Infinity : start + options.maxBytes
+    this.end = Math.min(length, this.limit)
     this.checks = options.checks
+    this.maxBytes = options.maxBytes
     this.maxItems = options.maxItems
     this.items = options.maxItems
+  }
+
+  /**
+   * The error for a read of at least length bytes at offset that runs past end. It reports maxBytes
+   * when this read alone shows the value can never fit, and detail when the input ran out first.
+   */
+  pastEnd(offset: number, length: number, detail: string): BinaryError {
+    // A value that needs more than maxBytes can never fit, however much input follows.
+    if (offset + length > this.limit) {
+      return new BinaryError(offset, `Value exceeds maxBytes (${this.maxBytes})`)
+    }
+    return new BinaryError(offset, detail)
   }
 
   /** Spend count items of the maxItems budget, failing at the length prefix that overran it. */
@@ -71,8 +96,8 @@ export class Reader {
   /** Reserve length bytes and return their start offset. */
   advance(length: number): number {
     const offset = this.offset
-    if (length > this.input.byteLength - offset) {
-      throw new BinaryError(offset, `Truncated input: need ${length} bytes`)
+    if (length > this.end - offset) {
+      throw this.pastEnd(offset, length, `Truncated input: need ${length} bytes`)
     }
     this.offset = offset + length
     return offset

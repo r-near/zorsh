@@ -319,13 +319,42 @@ Second, set a budget for the whole message:
 const codec = Borsh.toCodec(Receipt, { maxBytes: 256 * 1024, maxItems: 10_000 })
 ```
 
-`maxItems` is one budget for everything the message contains, however deeply nested, not a limit per collection. Each collection is charged as soon as its length is read, so `Input exceeds maxItems (10000) at byte 812` names the length prefix that overran it. It is a codec limit rather than a schema check, so it also applies under `disableChecks`. Like truncated input or `maxBytes`, it fails in the binary layer, so only decoding middleware on the root schema, such as `Schema.catchDecoding`, can recover from it.
+`maxItems` is one budget for everything the message contains, however deeply nested, not a limit per collection. Each collection is charged as soon as its length is read, so `Input exceeds maxItems (10000) at byte 812` names the length prefix that overran it. It is a codec limit rather than a schema check, so it also applies under `disableChecks`. Like truncated input or `maxBytes`, it fails in the binary layer, so with `toCodec` only decoding middleware on the root schema, such as `Schema.catchDecoding`, can recover from it.
+
+## Decoding from a larger buffer
+
+`Borsh.decodePrefixEffect(schema, options)` and `Borsh.decodePrefixSync` decode one value at an offset and return `{ value, offset }`, where `offset` is where the next value starts. They use the same layout, limits, schema pass and errors as `toCodec`, except that bytes after the value are allowed. Concatenated frames decode in a loop:
+
+```ts
+const Frame = Schema.Struct({ id: Borsh.U32, body: Schema.String })
+const decodeFrame = Borsh.decodePrefixSync(Frame, { maxBytes: 1 << 20, maxItems: 10_000 })
+
+let offset = 0
+while (offset < buffer.byteLength) {
+  const next = decodeFrame(buffer, offset)
+  handle(next.value)
+  offset = next.offset
+}
+```
+
+A message inside an envelope decodes from its own offset, leaving the rest of the packet to the caller:
+
+```ts
+// A u32 tag, then one Borsh message, then an unrelated trailer.
+const decodeMessage = Borsh.decodePrefixSync(Message, { maxBytes: 64 * 1024 })
+const { value: message, offset: end } = decodeMessage(packet, 4)
+const trailer = packet.subarray(end)
+```
+
+`maxBytes` caps the bytes the value may use, not the length of the buffer. As soon as a read's length or count shows that the value cannot fit, it fails with `Value exceeds maxBytes (65536) at byte …`, however short the buffer is, so a streaming caller can stop waiting for more input. A `Truncated …` failure only means the buffer ended before the current read; with more input, a later field might still exceed `maxBytes`. Once the buffer holds `maxBytes` bytes after the offset, a failure is never `Truncated`, so waiting for more input always ends. `maxItems` is a budget per call. Byte offsets in errors are positions in the buffer. Decoding middleware on the schema, such as `Schema.catchDecoding`, can recover from schema-pass failures but, unlike with `toCodec`, not from binary ones, because a value that was never read has no end to return as `offset`. `decodePrefixEffect` needs the schema's decoding services, as `Schema.decodeEffect` does; `decodePrefixSync` accepts only schemas without them and throws `Schema.SchemaError`.
+
+The offset defaults to 0 and must be an integer from 0 through `buffer.byteLength`; any other offset is a defect rather than a decoding failure: a `TypeError` if it is not a number, such as parse options passed second, and a `RangeError` otherwise. A buffer that is not a `Uint8Array` is a `TypeError`. A schema that always encodes to zero bytes, such as `Borsh.Unit`, an empty struct, `fixedBytes(0)` or `fixedArray(0)`, throws when the decoder is built, because a decoding loop over it would never advance. Every other schema reads at least one byte per value, including enums with one dataless variant, which Rust treats as zero-sized but Borsh still writes as a one-byte tag.
 
 ## Binary format and limits
 
 Integers and floats are little endian. Booleans use one byte, 0 or 1. Strings use a u32 UTF-8 byte length followed by UTF-8; lone UTF-16 surrogates and malformed UTF-8 are rejected, and a leading U+FEFF is preserved. Structs and tuples have no prefix; variable arrays and byte vectors use u32 lengths; fixed arrays have no prefix. Enums, Options and Results use one-byte tags.
 
-Decoded input must be consumed completely: truncated data and trailing bytes fail. Encoded output and decoded byte arrays own their storage; the binary layer respects subarray offsets and does not mutate inputs.
+Decoded input must be consumed completely: truncated data and trailing bytes fail. Use the prefix decoders above to allow bytes after a value. Encoded output and decoded byte arrays own their storage; the binary layer respects subarray offsets and does not mutate inputs.
 
 `Borsh.toCodec(schema, { maxBytes, maxItems })` limits each operation. `maxBytes` caps input and output bytes and defaults to **16 MiB**; overrides must be positive safe integers. `maxItems` caps the total number of collection items: every vector or fixed-array item, map entry and set member, nested ones included. It has no default limit; overrides must be non-negative safe integers. Byte arrays and strings count toward `maxBytes`, not `maxItems`. Both limits apply to encoding as well, so a codec can decode anything it encodes. `fixedBytes` and `fixedArray` accept lengths from 0 through 2^32 - 1. Vector and collection counts are checked against the schema's own length and size checks, against `maxItems` and against the remaining bytes before any item is read. Only `maxItems` bounds the work and heap needed for fixed arrays of zero-sized items, which use no bytes. Native schema parsing and application validators or transformations can do their own work independently.
 

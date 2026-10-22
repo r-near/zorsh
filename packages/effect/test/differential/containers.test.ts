@@ -24,6 +24,7 @@ function spec<A>(
   const codec = Borsh.toCodec(schema)
   const encode = Schema.encodeSync(codec)
   const decode = Schema.decodeSync(codec)
+  const decodePrefix = Borsh.decodePrefixSync(schema)
   return {
     id,
     name,
@@ -31,6 +32,10 @@ function spec<A>(
     decode: (raw: Uint8Array) => {
       const value = decode(raw)
       return { raw: encode(value), transport: transport(value) }
+    },
+    decodePrefix: (raw: Uint8Array, offset: number) => {
+      const prefix = decodePrefix(raw, offset)
+      return { transport: transport(prefix.value), offset: prefix.offset }
     },
   }
 }
@@ -262,6 +267,29 @@ for (const entry of entries) {
           }
         },
         { numRuns: 300, seed: 20261020 },
+      )
+    })
+    it("decodes concatenated Rust frames one prefix at a time", async () => {
+      await assertProperty(
+        fc.array(entry.arbitrary, { minLength: 1, maxLength: 3 }),
+        async (values) => {
+          const frames: Uint8Array[] = []
+          for (const { transport } of values) {
+            const encoded = await oracle.request(entry.id, "encode", { value: transport })
+            assert.ok(encoded.ok)
+            frames.push(bytes(encoded.hex))
+          }
+          const buffer = Uint8Array.from(frames.flatMap((frame) => [...frame]))
+          let offset = 0
+          values.forEach(({ transport }, i) => {
+            const next = entry.decodePrefix(buffer, offset)
+            assert.deepEqual(next.transport, transport)
+            offset += frames[i]?.byteLength ?? Number.NaN
+            assert.equal(next.offset, offset)
+          })
+          assert.equal(offset, buffer.byteLength)
+        },
+        { numRuns: 100, seed: 20261022 },
       )
     })
     it("generated raw frames and mutated canonical frames agree with Rust", async () => {

@@ -159,8 +159,8 @@ function vector(item: Layout, guard: CountGuard | undefined): Layout {
         rejectZeroSizedItem(r.offset)
         const count = r.u32()
         // Each item needs at least minBytes, so reject an impossible count before allocating.
-        if (count > Math.floor((r.input.byteLength - r.offset) / item.minBytes)) {
-          throw new BinaryError(r.offset, "Truncated vector payload")
+        if (count > Math.floor((r.end - r.offset) / item.minBytes)) {
+          throw r.pastEnd(r.offset, count * item.minBytes, "Truncated vector payload")
         }
         return readItems(r, item, count)
       },
@@ -175,8 +175,8 @@ function vector(item: Layout, guard: CountGuard | undefined): Layout {
     }
   }
   const readGuarded = guardedRead(guard, (r, count) => {
-    if (count > Math.floor((r.input.byteLength - r.offset) / item.minBytes)) {
-      throw new BinaryError(r.offset, "Truncated vector payload")
+    if (count > Math.floor((r.end - r.offset) / item.minBytes)) {
+      throw r.pastEnd(r.offset, count * item.minBytes, "Truncated vector payload")
     }
     return readItems(r, item, count)
   })
@@ -217,8 +217,8 @@ export function fixedArray(
   // Nested fixed arrays can multiply past 2^53, so clamp to stay a safe integer.
   const minBytes = length === 0 ? 0 : Math.min(Number.MAX_SAFE_INTEGER, length * item.minBytes)
   const read = (r: Reader) => {
-    if (minBytes > r.input.byteLength - r.offset) {
-      throw new BinaryError(r.offset, "Truncated fixed array payload")
+    if (minBytes > r.end - r.offset) {
+      throw r.pastEnd(r.offset, minBytes, "Truncated fixed array payload")
     }
     return readItems(r, item, length)
   }

@@ -34,10 +34,19 @@ expectTypeOf(Schema.encodeEffect(codec)("v1")).toEqualTypeOf<
   Effect.Effect<Uint8Array, Schema.SchemaError, Encode>
 >()
 
+expectTypeOf(Borsh.decodePrefixEffect(schema)(Uint8Array.of(1, 0), 0)).toEqualTypeOf<
+  Effect.Effect<Borsh.Prefix<string>, Schema.SchemaError, Decode>
+>()
+// @ts-expect-error A schema that needs decoding services cannot decode synchronously.
+Borsh.decodePrefixSync(schema)
+
 const Transfer = Schema.Struct({ receiver: Schema.String, amount: Borsh.U128 })
 const transfer = Borsh.toCodec(Transfer)
 const bytes = Schema.encodeSync(transfer)({ receiver: "alice.near", amount: 123n })
 expectTypeOf(Schema.decodeSync(transfer)(bytes)).toEqualTypeOf<typeof Transfer.Type>()
+expectTypeOf(Borsh.decodePrefixSync(Transfer)(bytes, 0, { errors: "all" })).toEqualTypeOf<
+  Borsh.Prefix<typeof Transfer.Type>
+>()
 const batch = Borsh.toCodec(Schema.Struct({ values: Schema.Array(schema) }))
 expectTypeOf(batch).toEqualTypeOf<
   Schema.Codec<{ readonly values: readonly string[] }, Uint8Array, Decode, Encode>
