@@ -244,6 +244,22 @@ export class Writer {
     }
   }
 
+  /**
+   * Where the bytes written since start first differ from expected, or undefined when they are
+   * equal. When one is a prefix of the other, that is where the shorter one ends.
+   */
+  firstDifference(start: number, expected: Uint8Array): number | undefined {
+    const written = this.offset - start
+    const shared = Math.min(written, expected.byteLength)
+    const buffer = this.buffer
+    for (let i = 0; i < shared; i++) {
+      if (buffer[start + i] !== expected[i]) {
+        return start + i
+      }
+    }
+    return written === expected.byteLength ? undefined : start + shared
+  }
+
   finish(): Uint8Array {
     return this.buffer.slice(0, this.offset)
   }

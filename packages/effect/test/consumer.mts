@@ -229,3 +229,28 @@ expectTypeOf(Borsh.toCodec(Schema.ReadonlySet(schema))).toEqualTypeOf<
 expectTypeOf(Borsh.toCodec(Schema.HashSet(schema))).toEqualTypeOf<
   Schema.Codec<HashSet.HashSet<string>, Uint8Array, Decode, Encode>
 >()
+
+const transferWithBytes = Borsh.withBytes(Transfer)
+expectTypeOf(transferWithBytes.schema).toEqualTypeOf<typeof Transfer>()
+expectTypeOf(transferWithBytes.annotate({ title: "Transfer" })).toEqualTypeOf<
+  Borsh.withBytes<typeof Transfer>
+>()
+expectTypeOf(transferWithBytes.Type).toEqualTypeOf<{
+  readonly value: typeof Transfer.Type
+  readonly bytes: Uint8Array
+}>()
+const SignedTransfer = Schema.Struct({
+  transfer: transferWithBytes,
+  signature: Borsh.fixedBytes(64),
+})
+const signed = Schema.decodeSync(Borsh.toCodec(SignedTransfer))(new Uint8Array(0))
+expectTypeOf(signed.transfer.value.amount).toEqualTypeOf<bigint>()
+expectTypeOf(signed.transfer.bytes).toEqualTypeOf<Uint8Array>()
+const servicedWithBytes = Borsh.withBytes(schema)
+expectTypeOf(servicedWithBytes.Encoded).toEqualTypeOf<{
+  readonly value: number
+  readonly bytes: Uint8Array
+}>()
+expectTypeOf(Borsh.toCodec(servicedWithBytes)).toEqualTypeOf<
+  Schema.Codec<{ readonly value: string; readonly bytes: Uint8Array }, Uint8Array, Decode, Encode>
+>()
