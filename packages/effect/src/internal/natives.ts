@@ -163,6 +163,7 @@ export interface ValueWithBytes<A> {
   readonly bytes: Uint8Array
 }
 
+/** Own properties only, as for any struct field, so an inherited `bytes` is never trusted. */
 export function isValueWithBytes(input: unknown): input is ValueWithBytes<unknown> {
   return (
     typeof input === "object" &&

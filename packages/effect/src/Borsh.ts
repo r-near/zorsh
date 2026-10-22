@@ -353,17 +353,18 @@ export interface withBytes<S extends Schema.Top> extends Schema.declareConstruct
  * reproduces `bytes` exactly, naming the output offset where they first
  * differ. Borsh decoding is strict, so a decoded value always re-encodes to its
  * bytes unless `schema` substitutes a value while decoding, as a lossy
- * transformation, decoding middleware or a decoding default can. To build a new
- * outgoing value, encode it with `schema` itself, which writes the same bytes.
+ * transformation or decoding middleware can. To build a new outgoing value,
+ * encode it with `schema` itself, which writes the same bytes.
  *
  * `bytes` is copied, never a view into the decoded input, so it stays valid
  * when the caller reuses its buffer. Samples from `Arbitrary.schema` carry the
  * bytes `schema` encodes their value to. Samples that `schema` cannot encode,
  * such as strings with lone surrogates, are discarded, and a `schema` whose
  * encoding needs services cannot be sampled. Samples of `Schema.toType`,
- * `Schema.toEncoded` or `Schema.flip` applied to this schema still carry
- * `schema`'s bytes. When a transformation in `schema` makes those differ from
- * what the derived schema writes, encoding them fails at `["bytes"]`.
+ * `Schema.toEncoded` or `Schema.flip` applied to this schema are still encoded
+ * with `schema`, so when it has a transformation they can be discarded, or
+ * carry bytes that differ from what the derived schema writes and so fail to
+ * encode at `["bytes"]`.
  *
  * **Example** (Verify a signature over the transaction's exact bytes)
  *
