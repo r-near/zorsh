@@ -465,7 +465,7 @@ describe("Arbitrary", () => {
     }
   })
 
-  it("still describes the schema itself when sampled through toType, toEncoded or flip", () => {
+  it("still carries the schema's own bytes when sampled through toType, toEncoded or flip", () => {
     // The hook sees only a type side, so these cannot be told apart from the original.
     const typeSide = Schema.toType(Borsh.withBytes(Digits))
     const [sampled] = sample(typeSide, 1)
@@ -484,6 +484,12 @@ describe("Arbitrary", () => {
     expect(failure(() => Schema.encodeSync(Borsh.toCodec(encodedSide))(reversed!)).message).toBe(
       'Bytes do not match the encoded value at byte 0\n  at ["bytes"]',
     )
+    // Reversing twice restores the bytes, so flipped samples happen to encode.
+    const flipped = Schema.flip(Borsh.withBytes(Reversed))
+    const flippedCodec = Borsh.toCodec(flipped)
+    for (const sampled of sample(flipped, 10)) {
+      expect(Schema.encodeSync(flippedCodec)(sampled)).toEqual(sampled.bytes)
+    }
     // Without a transformation every side is the same schema, so its samples encode.
     const plainSide = Schema.toEncoded(Borsh.withBytes(Transaction))
     const codec = Borsh.toCodec(plainSide)
@@ -528,5 +534,48 @@ describe("Arbitrary", () => {
     )
     const unsampleable = Borsh.withBytes(NeedsService) as Schema.Top as Schema.Codec<unknown>
     expect(() => sample(unsampleable)).toThrow("Prefix")
+  })
+})
+
+describe("prefix decoding", () => {
+  // bytes holds the value's own span wherever it sits, while error offsets are positions in the
+  // buffer, as for any prefix decode.
+  const Frame = Schema.Struct({ kind: Borsh.U8, body: Borsh.withBytes(Transaction) })
+  const frame = Uint8Array.of(1, ...transactionBytes)
+  const buffer = Uint8Array.of(0xee, 0xee, ...frame, ...frame, 0xff)
+
+  it("keeps the exact span of each value in a larger buffer", () => {
+    const decode = Borsh.decodePrefixSync(Frame)
+    const first = decode(buffer, 2)
+    expect(first.offset).toBe(2 + frame.byteLength)
+    expect(first.value.body).toEqual({ value: transaction, bytes: transactionBytes })
+    const second = decode(buffer, first.offset)
+    expect(second.offset).toBe(buffer.byteLength - 1)
+    expect(second.value.body.bytes).toEqual(transactionBytes)
+    expect(Schema.encodeSync(Borsh.toCodec(Frame))(second.value)).toEqual(frame)
+  })
+
+  it("copies the span out of the caller's buffer", async () => {
+    const copy = Uint8Array.from(buffer)
+    const root = await Effect.runPromise(
+      Borsh.decodePrefixEffect(Borsh.withBytes(Transaction))(copy, 3),
+    )
+    copy.fill(0)
+    expect(root).toEqual({
+      value: { value: transaction, bytes: transactionBytes },
+      offset: 3 + transactionBytes.byteLength,
+    })
+  })
+
+  it("reports failures inside it at buffer positions, under value", () => {
+    const decode = Borsh.decodePrefixSync(Frame, { maxBytes: 8 })
+    // The signer id's u32 length starts at buffer byte 3 and its 10 bytes run past maxBytes.
+    expect(failure(() => decode(buffer, 2)).message).toBe(
+      'Value exceeds maxBytes (8) at byte 7\n  at ["body"]["value"]["signerId"]',
+    )
+    const truncated = Uint8Array.of(0xee, 1, 3, 0, 0, 0, 0x61)
+    expect(failure(() => Borsh.decodePrefixSync(Frame)(truncated, 1)).message).toBe(
+      'Truncated input: need 3 bytes at byte 6\n  at ["body"]["value"]["signerId"]',
+    )
   })
 })

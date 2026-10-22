@@ -362,8 +362,8 @@ export interface withBytes<S extends Schema.Top> extends Schema.declareConstruct
  * such as strings with lone surrogates, are discarded, and a `schema` whose
  * encoding needs services cannot be sampled. Samples of `Schema.toType`,
  * `Schema.toEncoded` or `Schema.flip` applied to this schema still carry
- * `schema`'s bytes, so when `schema` has a transformation, encoding them fails
- * at `["bytes"]`.
+ * `schema`'s bytes. When a transformation in `schema` makes those differ from
+ * what the derived schema writes, encoding them fails at `["bytes"]`.
  *
  * **Example** (Verify a signature over the transaction's exact bytes)
  *
