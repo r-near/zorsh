@@ -235,7 +235,7 @@ const entries = [
   ),
 ]
 
-for (const entry of entries)
+for (const entry of entries) {
   describe(`borsh-rs ${entry.name}`, () => {
     it("generated values agree, reject prefixes and consume the whole frame", async () => {
       await assertProperty(
@@ -285,6 +285,7 @@ for (const entry of entries)
       )
     })
   })
+}
 
 it("matches Rust zero-sized visitation and malicious vector counts", async () => {
   for (const [id, schema, values, raws] of [
@@ -350,10 +351,15 @@ it("matches Rust zero-sized visitation and malicious vector counts", async () =>
     const codec = Borsh.toCodec(schema)
     for (const value of values) {
       let transport: unknown = value
-      if (id === "tuple_unit" || id === "array_unit_1") transport = [null]
-      if (id === "only") transport = { variant: "Only", value: null }
-      if (id === "vec_only" && Array.isArray(value))
+      if (id === "tuple_unit" || id === "array_unit_1") {
+        transport = [null]
+      }
+      if (id === "only") {
+        transport = { variant: "Only", value: null }
+      }
+      if (id === "vec_only" && Array.isArray(value)) {
         transport = value.map(() => ({ variant: "Only", value: null }))
+      }
       if (id === "vec_unit" || id === "vec_bytes0") {
         assert.ok(Array.isArray(value))
         transport = value.map(() => (id === "vec_unit" ? null : ""))
@@ -361,7 +367,9 @@ it("matches Rust zero-sized visitation and malicious vector counts", async () =>
       const ts = attempt(() => Schema.encodeUnknownSync(codec)(value))
       const rust = await oracle.request(id, "encode", { value: transport })
       assert.equal(ts.ok, rust.ok)
-      if (ts.ok && rust.ok) assert.equal(hex(ts.value), rust.hex)
+      if (ts.ok && rust.ok) {
+        assert.equal(hex(ts.value), rust.hex)
+      }
     }
     for (const raw of raws) {
       const ts = attempt(() => Schema.decodeSync(codec)(raw))
@@ -415,7 +423,9 @@ it("checks every enum discriminant and Option flag against Rust", async () => {
       const ts = attempt(() => Schema.decodeSync(codec)(raw))
       const rust = await oracle.request(id, "decode", { hex: hex(raw) })
       assert.equal(ts.ok, rust.ok, `${id} tag ${tag}`)
-      if (rust.ok) assert.equal(rust.hex, hex(raw))
+      if (rust.ok) {
+        assert.equal(rust.hex, hex(raw))
+      }
     }
   }
 })
@@ -429,7 +439,9 @@ it("matches Rust Result inactive branch visitation", async () => {
     const ts = attempt(() => Schema.encodeUnknownSync(codec)(value))
     const rust = await oracle.request("result_unit_vec_unit", "encode", { value: transport })
     assert.equal(ts.ok, rust.ok)
-    if (ts.ok && rust.ok) assert.equal(hex(ts.value), rust.hex)
+    if (ts.ok && rust.ok) {
+      assert.equal(hex(ts.value), rust.hex)
+    }
   }
   for (const raw of [Uint8Array.of(1), Uint8Array.of(0, 0, 0, 0, 0)]) {
     const ts = attempt(() => Schema.decodeSync(codec)(raw))

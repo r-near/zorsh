@@ -3,7 +3,9 @@ const mode = process.argv[2]
 for await (const line of createInterface({ input: process.stdin })) {
   const request: { id: string; schemaId: string; operation: string; value: unknown } =
     JSON.parse(line)
-  if (mode === "timeout") continue
+  if (mode === "timeout") {
+    continue
+  }
   if (mode === "crash") {
     process.stderr.write("oracle panic", () => process.exit(1))
     continue
@@ -39,7 +41,13 @@ for await (const line of createInterface({ input: process.stdin })) {
           ...(mode === "bad-shape" ? { unexpected: true } : {}),
         }
   process.stdout.write(JSON.stringify(response) + "\n")
-  if (mode === "trailing") setTimeout(() => process.stdout.write("x"), 10)
+  if (mode === "trailing") {
+    setTimeout(() => process.stdout.write("x"), 10)
+  }
 }
-if (mode === "nonzero") process.exitCode = 2
-if (mode === "hang-close") setInterval(() => {}, 1000)
+if (mode === "nonzero") {
+  process.exitCode = 2
+}
+if (mode === "hang-close") {
+  setInterval(() => {}, 1000)
+}

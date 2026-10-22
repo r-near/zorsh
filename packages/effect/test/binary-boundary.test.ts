@@ -36,8 +36,9 @@ it("rejects malformed values at the binary writer boundary", () => {
     [Borsh.I128, 1n << 127n, "Integer outside i128 range at byte 0"],
     [Borsh.U128, -1n, "Integer outside u128 range at byte 0"],
     [Borsh.I8, -129, "Integer outside i8 range at byte 0"],
-  ] as const)
+  ] as const) {
     expect(() => write(schema, value)).toThrow(expect.objectContaining({ message, path }))
+  }
 })
 
 it("requires own struct fields and preserves nested getter defects", () => {

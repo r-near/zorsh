@@ -76,9 +76,13 @@ describe("Native TypeScript Enum Support", () => {
 
       // The index for Twenty is 0, Thirty is 1, Fifty is 2 - regardless of their values
       let expectedIndex = -1
-      if (value === ExplicitNumericEnum.Twenty) expectedIndex = 0
-      else if (value === ExplicitNumericEnum.Thirty) expectedIndex = 1
-      else if (value === ExplicitNumericEnum.Fifty) expectedIndex = 2
+      if (value === ExplicitNumericEnum.Twenty) {
+        expectedIndex = 0
+      } else if (value === ExplicitNumericEnum.Thirty) {
+        expectedIndex = 1
+      } else if (value === ExplicitNumericEnum.Fifty) {
+        expectedIndex = 2
+      }
 
       expect(serialized[0]).toBe(expectedIndex)
     }
@@ -100,9 +104,13 @@ describe("Native TypeScript Enum Support", () => {
 
       // The serialized value should be the index: Red=0, Green=1, Blue=2
       let expectedIndex = -1
-      if (value === StringEnum.Red) expectedIndex = 0
-      else if (value === StringEnum.Green) expectedIndex = 1
-      else if (value === StringEnum.Blue) expectedIndex = 2
+      if (value === StringEnum.Red) {
+        expectedIndex = 0
+      } else if (value === StringEnum.Green) {
+        expectedIndex = 1
+      } else if (value === StringEnum.Blue) {
+        expectedIndex = 2
+      }
 
       expect(serialized[0]).toBe(expectedIndex)
     }

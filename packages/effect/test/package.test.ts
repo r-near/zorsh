@@ -19,10 +19,11 @@ function install(): string {
     "package/README.md",
     "package/package.json",
   ])
-  for (const entry of ["index", "Borsh"])
+  for (const entry of ["index", "Borsh"]) {
     expect(files).toEqual(
       expect.arrayContaining([`package/dist/${entry}.js`, `package/dist/${entry}.d.ts`]),
     )
+  }
   mkdirSync(artifacts, { recursive: true })
   const temp = mkdtempSync(join(artifacts, "effect-consumer-"))
   const target = join(temp, "node_modules/@zorsh/effect")
@@ -116,8 +117,9 @@ it("preserves packed declaration inference in NodeNext and Bundler consumers", (
         ["exec", "tsc", "--listFiles", "-p", join(temp, "tsconfig.json")],
         { cwd: root, encoding: "utf8", timeout: 30000 },
       )
-      for (const entry of ["index", "Borsh"])
+      for (const entry of ["index", "Borsh"]) {
         expect(files).toContain(join(temp, `node_modules/@zorsh/effect/dist/${entry}.d.ts`))
+      }
     }
   } finally {
     rmSync(temp, { recursive: true, force: true })

@@ -24,20 +24,30 @@ export function integer(bits: 8 | 16 | 32 | 64 | 128, signed: boolean): Layout {
       read: (r) => {
         const offset = r.advance(width)
         const view = r.view
-        if (bits === 8) return signed ? view.getInt8(offset) : view.getUint8(offset)
-        if (bits === 16) return signed ? view.getInt16(offset, true) : view.getUint16(offset, true)
+        if (bits === 8) {
+          return signed ? view.getInt8(offset) : view.getUint8(offset)
+        }
+        if (bits === 16) {
+          return signed ? view.getInt16(offset, true) : view.getUint16(offset, true)
+        }
         return signed ? view.getInt32(offset, true) : view.getUint32(offset, true)
       },
       write: (w, value) => {
-        if (typeof value !== "number" || !Number.isInteger(value))
+        if (typeof value !== "number" || !Number.isInteger(value)) {
           throw new BinaryError(w.offset, `Expected ${name}`)
-        if (value < minimum || value > maximum)
+        }
+        if (value < minimum || value > maximum) {
           throw new BinaryError(w.offset, `Integer outside ${name} range`)
+        }
         // Unsigned setters wrap negative values to the same two's complement bytes.
         const offset = w.advance(width)
-        if (bits === 8) w.view.setUint8(offset, value)
-        else if (bits === 16) w.view.setUint16(offset, value, true)
-        else w.view.setUint32(offset, value, true)
+        if (bits === 8) {
+          w.view.setUint8(offset, value)
+        } else if (bits === 16) {
+          w.view.setUint16(offset, value, true)
+        } else {
+          w.view.setUint32(offset, value, true)
+        }
       },
     }
   }
@@ -49,19 +59,25 @@ export function integer(bits: 8 | 16 | 32 | 64 | 128, signed: boolean): Layout {
     read: (r) => {
       const offset = r.advance(width)
       const view = r.view
-      if (bits === 64)
+      if (bits === 64) {
         return signed ? view.getBigInt64(offset, true) : view.getBigUint64(offset, true)
+      }
       const high = signed ? view.getBigInt64(offset + 8, true) : view.getBigUint64(offset + 8, true)
       return (high << 64n) | view.getBigUint64(offset, true)
     },
     write: (w, value) => {
-      if (typeof value !== "bigint") throw new BinaryError(w.offset, `Expected ${name}`)
-      if (value < minimum || value > maximum)
+      if (typeof value !== "bigint") {
+        throw new BinaryError(w.offset, `Expected ${name}`)
+      }
+      if (value < minimum || value > maximum) {
         throw new BinaryError(w.offset, `Integer outside ${name} range`)
+      }
       // BigUint64 setters take the value modulo 2^64, so signed halves need no special case.
       const offset = w.advance(width)
       w.view.setBigUint64(offset, value, true)
-      if (bits === 128) w.view.setBigUint64(offset + 8, value >> 64n, true)
+      if (bits === 128) {
+        w.view.setBigUint64(offset + 8, value >> 64n, true)
+      }
     },
   }
 }
@@ -73,7 +89,9 @@ export function float(bits: 32 | 64): Layout {
     read: (r) => {
       const offset = r.advance(bits / 8)
       const value = bits === 32 ? r.view.getFloat32(offset, true) : r.view.getFloat64(offset, true)
-      if (Number.isNaN(value)) throw new BinaryError(offset, "Borsh forbids NaN")
+      if (Number.isNaN(value)) {
+        throw new BinaryError(offset, "Borsh forbids NaN")
+      }
       return value
     },
     write: (w, value) => {
@@ -85,8 +103,11 @@ export function float(bits: 32 | 64): Layout {
         throw new BinaryError(w.offset, `Expected exact non-NaN f${bits}`)
       }
       const offset = w.advance(bits / 8)
-      if (bits === 32) w.view.setFloat32(offset, value, true)
-      else w.view.setFloat64(offset, value, true)
+      if (bits === 32) {
+        w.view.setFloat32(offset, value, true)
+      } else {
+        w.view.setFloat64(offset, value, true)
+      }
     },
   }
 }
@@ -98,13 +119,19 @@ export function bytes(length?: number): Layout {
     isZeroSized: length === 0,
     read: (r) => r.take(length ?? r.u32()).slice(),
     write: (w, value) => {
-      if (!(value instanceof Uint8Array)) throw new BinaryError(w.offset, "Expected Uint8Array")
-      if (length !== undefined && value.byteLength !== length)
+      if (!(value instanceof Uint8Array)) {
+        throw new BinaryError(w.offset, "Expected Uint8Array")
+      }
+      if (length !== undefined && value.byteLength !== length) {
         throw new BinaryError(w.offset, `Expected ${length} bytes`)
-      if (value.byteLength > 0xffff_ffff)
+      }
+      if (value.byteLength > 0xffff_ffff) {
         throw new BinaryError(w.offset, "Byte array exceeds u32 length")
+      }
       w.ensure(value.byteLength + (length === undefined ? 4 : 0))
-      if (length === undefined) w.u32(value.byteLength)
+      if (length === undefined) {
+        w.u32(value.byteLength)
+      }
       w.bytes(value)
     },
   }
@@ -117,7 +144,9 @@ export function string(): Layout {
     isZeroSized: false,
     read: (r) => r.string(r.u32()),
     write: (w, value) => {
-      if (typeof value !== "string") throw new BinaryError(w.offset, "Expected string")
+      if (typeof value !== "string") {
+        throw new BinaryError(w.offset, "Expected string")
+      }
       w.ensure(4)
       const length = utf8Length(value, w.maxBytes - w.offset - 4, w.offset)
       w.ensure(4 + length)
@@ -135,26 +164,37 @@ export function boolean(): Layout {
     read: (r) => {
       const offset = r.offset
       const value = r.u8()
-      if (value > 1) throw new BinaryError(offset, `Invalid bool tag ${value}`)
+      if (value > 1) {
+        throw new BinaryError(offset, `Invalid bool tag ${value}`)
+      }
       return value === 1
     },
     write: (w, value) => {
-      if (typeof value !== "boolean") throw new BinaryError(w.offset, "Expected boolean")
+      if (typeof value !== "boolean") {
+        throw new BinaryError(w.offset, "Expected boolean")
+      }
       w.u8(value ? 1 : 0)
     },
   }
 }
 
 function comparePrimitive(a: unknown, b: unknown): number {
-  if (typeof a === "number" && typeof b === "number") return Order.Number(a, b)
-  if (typeof a === "bigint" && typeof b === "bigint") return Order.BigInt(a, b)
-  if (typeof a === "boolean" && typeof b === "boolean") return Order.Boolean(a, b)
+  if (typeof a === "number" && typeof b === "number") {
+    return Order.Number(a, b)
+  }
+  if (typeof a === "bigint" && typeof b === "bigint") {
+    return Order.BigInt(a, b)
+  }
+  if (typeof a === "boolean" && typeof b === "boolean") {
+    return Order.Boolean(a, b)
+  }
   throw new BinaryError(0, "Expected ordered primitive")
 }
 
 function compareString(a: unknown, b: unknown): number {
-  if (typeof a !== "string" || typeof b !== "string")
+  if (typeof a !== "string" || typeof b !== "string") {
     throw new BinaryError(0, "Expected string key")
+  }
   let i = 0
   let j = 0
   for (
@@ -162,7 +202,9 @@ function compareString(a: unknown, b: unknown): number {
     left !== undefined && right !== undefined;
     left = a.codePointAt(i), right = b.codePointAt(j)
   ) {
-    if (left !== right) return left < right ? -1 : 1
+    if (left !== right) {
+      return left < right ? -1 : 1
+    }
     i += left > 0xffff ? 2 : 1
     j += right > 0xffff ? 2 : 1
   }

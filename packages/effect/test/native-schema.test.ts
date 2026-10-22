@@ -209,7 +209,9 @@ describe("native Effect schema composition", () => {
       expect(error.success).toBeInstanceOf(Schema.SchemaError)
       expect(error.success.message).toMatch(/^Truncated input: need 4 bytes at byte 0$/)
       expect(error.success.issue).toBeDefined()
-    } else throw new Error("Expected native schema failure")
+    } else {
+      throw new Error("Expected native schema failure")
+    }
   })
 
   it("renders binary failures as native pointer issues, like schema validation", () => {
@@ -219,7 +221,9 @@ describe("native Effect schema composition", () => {
       try {
         run()
       } catch (error) {
-        if (Schema.isSchemaError(error)) return error
+        if (Schema.isSchemaError(error)) {
+          return error
+        }
       }
       throw new Error("Expected SchemaError")
     }
@@ -230,7 +234,9 @@ describe("native Effect schema composition", () => {
     const leaf = (issue: SchemaIssue.Issue): SchemaIssue.Issue =>
       issue._tag === "Encoding" ? leaf(issue.issue) : issue
     const pointer = leaf(binary.issue)
-    if (!(pointer instanceof SchemaIssue.Pointer)) throw new Error("Expected Pointer")
+    if (!(pointer instanceof SchemaIssue.Pointer)) {
+      throw new Error("Expected Pointer")
+    }
     expect(pointer.path).toEqual(["items"])
     expect(pointer.issue).toBeInstanceOf(SchemaIssue.InvalidValue)
     const nested = failure(() => Schema.encodeSync(codec)({ owner: "\ud800", items: [] }))
@@ -254,7 +260,9 @@ describe("native Effect schema composition", () => {
     expect(() => Schema.decodeSync(bounded)(Uint8Array.of(7, 0))).toThrow(/maxBytes \(1\)/)
     expect(Schema.decodeSync(codec)(Uint8Array.of(7))).toEqual({ value: 7 })
     expect(Borsh.toCodec(schema.annotate({}))).not.toBe(codec)
-    for (let maxBytes = 2; maxBytes < 10; maxBytes++) Borsh.toCodec(schema, { maxBytes })
+    for (let maxBytes = 2; maxBytes < 10; maxBytes++) {
+      Borsh.toCodec(schema, { maxBytes })
+    }
     expect(Borsh.toCodec(schema, { maxBytes: 9 })).toBe(Borsh.toCodec(schema, { maxBytes: 9 }))
     expect(Borsh.toCodec(schema)).not.toBe(codec)
   })
@@ -320,7 +328,9 @@ describe("native Effect schema composition", () => {
         ),
       ),
     ]
-    for (const result of results) expect(Exit.findDefect(result)).toEqual(Result.succeed(defect))
+    for (const result of results) {
+      expect(Exit.findDefect(result)).toEqual(Result.succeed(defect))
+    }
     const bytes = Uint8Array.of(1)
     Object.defineProperty(bytes, "byteLength", {
       get() {
@@ -413,8 +423,9 @@ describe("unsupported encoded layouts and metadata", () => {
     expect(() => Borsh.toCodec(Schema.Union([Borsh.U8, Borsh.U16]))).toThrow(
       /\$: Union has no Borsh layout/,
     )
-    for (const schema of [Schema.Literal(1), Schema.Unknown, Schema.Null, Schema.Undefined])
+    for (const schema of [Schema.Literal(1), Schema.Unknown, Schema.Null, Schema.Undefined]) {
       expect(() => Borsh.toCodec(schema)).toThrow(/\$: Unsupported encoded/)
+    }
     for (const schema of [Schema.optionalKey(Borsh.U8), Schema.optional(Borsh.U8)]) {
       expect(() => Borsh.toCodec(schema)).toThrow(
         /^\$: Optional properties and elements have no Borsh layout on the encoded side; use Schema.Option for a Rust Option$/,
@@ -590,13 +601,16 @@ describe("native declarations", () => {
         Schema.Struct({ at: Schema.Array(Schema.Date) }),
         `$["at"][]: Declaration effect/schema/Date ${unsupported}`,
       ],
-    ] as const)
+    ] as const) {
       expect(() => Borsh.toCodec(schema)).toThrow(new Error(message))
+    }
   })
 
   it("looks up representation ids as own string keys only", () => {
     const run = Schema.Uint8Array.ast
-    if (run._tag !== "Declaration") throw new Error("Expected Declaration")
+    if (run._tag !== "Declaration") {
+      throw new Error("Expected Declaration")
+    }
     for (const id of ["toString", "constructor", "__proto__", 1]) {
       const ast = new SchemaAST.Declaration([], run.run, { representation: { id } })
       const name = typeof id === "string" ? `Declaration ${id}` : "Declaration"
@@ -632,7 +646,8 @@ describe("native declarations", () => {
       ],
       [Borsh.Bytes, fixedArray, "$: Fixed array layout requires a homogeneous encoded array"],
       [Schema.Date, fixedBytes, "$: Fixed bytes layout requires an encoded Uint8Array"],
-    ] as const)
+    ] as const) {
       expect(() => Borsh.toCodec(annotate(schema, layout))).toThrow(new Error(message))
+    }
   })
 })

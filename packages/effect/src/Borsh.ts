@@ -186,8 +186,9 @@ export const Unit = Schema.Tuple([])
  * @since 0.1.0
  */
 export function fixedBytes(length: number): Schema.Uint8Array {
-  if (!isU32Length(length))
+  if (!isU32Length(length)) {
     throw new Error("$: fixedBytes length must be a safe integer between 0 and 2^32 - 1")
+  }
   return withLayout(Bytes, {
     version: 1,
     kind: "fixedBytes",
@@ -254,7 +255,9 @@ function withExactLength<S extends Schema.Top>(schema: S, length: number): S["Re
 
 /** Whether a check, such as an earlier `fixedArray`, already enforces exactly `length` items. */
 function pinsLength(check: SchemaAST.Check<never>, length: number): boolean {
-  if (check._tag === "FilterGroup") return check.checks.some((inner) => pinsLength(inner, length))
+  if (check._tag === "FilterGroup") {
+    return check.checks.some((inner) => pinsLength(inner, length))
+  }
   const representation = check.annotations?.representation
   return (
     representation?.id === "effect/schema/isBetweenLength" &&
@@ -292,11 +295,13 @@ function pinsLength(check: SchemaAST.Check<never>, length: number): boolean {
  * @since 0.1.0
  */
 export function fixedArray(length: number): <S extends Schema.Top>(schema: S) => S["Rebuild"] {
-  if (!isU32Length(length))
+  if (!isU32Length(length)) {
     throw new Error("$: fixedArray length must be a safe integer between 0 and 2^32 - 1")
+  }
   return (schema) => {
-    if (homogeneousItem(encodedAST(schema)) === undefined)
+    if (homogeneousItem(encodedAST(schema)) === undefined) {
       throw new Error("$: fixedArray requires a homogeneous encoded array")
+    }
     const fixed = withLayout(schema, { version: 1, kind: "fixedArray", length })
     // Without a transformation the decoded value is the encoded array, so it can carry the length.
     return schema.ast.encoding === undefined &&
@@ -432,7 +437,9 @@ export interface Options {
 }
 
 function binaryFailure(error: unknown): SchemaIssue.Issue {
-  if (!(error instanceof BinaryError)) throw error
+  if (!(error instanceof BinaryError)) {
+    throw error
+  }
   const issue = new SchemaIssue.InvalidValue({ message: error.message })
   return error.path.length === 0 ? issue : new SchemaIssue.Pointer(error.path, issue)
 }
@@ -478,17 +485,19 @@ export function toCodec<S extends Schema.Constraint>(
   options?: Options,
 ): Schema.Codec<S["Type"], Uint8Array, S["DecodingServices"], S["EncodingServices"]> {
   const maxBytes = options?.maxBytes === undefined ? 16 * 1024 * 1024 : options.maxBytes
-  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
     throw new Error("$: maxBytes must be a positive safe integer")
+  }
   let entry = codecCache.get(schema)
   const cached = entry?.codecs.get(maxBytes)
-  if (cached !== undefined)
+  if (cached !== undefined) {
     return cached as Schema.Codec<
       S["Type"],
       Uint8Array,
       S["DecodingServices"],
       S["EncodingServices"]
     >
+  }
   if (entry === undefined) {
     entry = { layout: compile(encodedAST(schema)), codecs: new Map() }
     codecCache.set(schema, entry)
@@ -503,8 +512,9 @@ export function toCodec<S extends Schema.Constraint>(
             try: () => {
               const reader = new Reader(bytes, maxBytes)
               const value = layout.read(reader)
-              if (reader.offset !== bytes.byteLength)
+              if (reader.offset !== bytes.byteLength) {
                 throw new BinaryError(reader.offset, "Trailing bytes")
+              }
               return value
             },
             catch: binaryFailure,
@@ -522,7 +532,9 @@ export function toCodec<S extends Schema.Constraint>(
     ),
   )
   const codec = binary.pipe(Schema.decodeTo(schema))
-  if (codecs.size >= maxBytesCacheSize) codecs.delete(codecs.keys().next().value as number)
+  if (codecs.size >= maxBytesCacheSize) {
+    codecs.delete(codecs.keys().next().value as number)
+  }
   codecs.set(maxBytes, codec)
   return codec
 }

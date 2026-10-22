@@ -120,8 +120,9 @@ it("uses schema field order for nested structs and tuples, including _tag", () =
   const bytes = Uint8Array.of(1, 1, 2, 1, 0, 0, 0, 120, 1)
   expect(Schema.encodeSync(codec)(value)).toEqual(bytes)
   expect(Schema.decodeSync(codec)(bytes)).toEqual(value)
-  for (let cut = 0; cut < bytes.length; cut++)
+  for (let cut = 0; cut < bytes.length; cut++) {
     expect(() => Schema.decodeSync(codec)(bytes.subarray(0, cut))).toThrow(Schema.SchemaError)
+  }
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(...bytes, 0))).toThrow(/Trailing/)
 })
 
@@ -194,8 +195,9 @@ it("requires fixed encoded keys and positions and rejects mixed rests", () => {
     [Schema.TupleWithRest(Schema.Tuple([Borsh.U8]), [Borsh.U8]), `$: ${mixed}`],
     [Schema.TupleWithRest(Schema.Tuple([]), [Borsh.U8, Borsh.U8]), `$: ${mixed}`],
     [Schema.Struct({ items: Schema.NonEmptyArray(Borsh.U8) }), `$["items"]: ${mixed}`],
-  ] as const)
+  ] as const) {
     expect(() => Borsh.toCodec(schema)).toThrow(new Error(message))
+  }
 })
 
 it("retains native checks, brands and transformations inside containers", () => {
@@ -248,10 +250,12 @@ it("uses encoded AST order after native key remapping", () => {
 
 it("retains native empty-struct acceptance of non-nullish application values", () => {
   const codec = Borsh.toCodec(Schema.Struct({}))
-  for (const value of [1, false, "", [], {}])
+  for (const value of [1, false, "", [], {}]) {
     expect(Schema.encodeSync(codec)(value)).toEqual(new Uint8Array())
-  for (const value of [null, undefined])
+  }
+  for (const value of [null, undefined]) {
     expect(() => Schema.encodeUnknownSync(codec)(value)).toThrow(Schema.SchemaError)
+  }
 })
 
 it("treats empty strings and vectors as prefixed values rather than zero-sized Rust values", () => {
@@ -298,10 +302,14 @@ it("bounds compilation work for shared schema DAGs", () => {
   for (const depth of [6, 12]) {
     const Leaf = Schema.Struct({ value: Borsh.U8 })
     let shared: Schema.Constraint = Leaf
-    for (let i = 0; i < depth; i++) shared = Schema.Struct({ x: shared, y: shared })
+    for (let i = 0; i < depth; i++) {
+      shared = Schema.Struct({ x: shared, y: shared })
+    }
     Schema.toEncoded(shared)
     const ast = Schema.toEncoded(Leaf).ast
-    if (ast._tag !== "Objects") throw new Error("Expected struct AST")
+    if (ast._tag !== "Objects") {
+      throw new Error("Expected struct AST")
+    }
     const fields = ast.propertySignatures
     let visits = 0
     Object.defineProperty(ast, "propertySignatures", {

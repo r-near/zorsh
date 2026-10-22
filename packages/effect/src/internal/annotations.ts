@@ -38,7 +38,9 @@ export function isU32Length(value: unknown): value is number {
 export function parseDescriptor<D extends LayoutDescriptor>(value: D, path: string): D
 export function parseDescriptor(value: unknown, path: string): LayoutDescriptor | undefined
 export function parseDescriptor(value: unknown, path: string): LayoutDescriptor | undefined {
-  if (value === undefined) return undefined
+  if (value === undefined) {
+    return undefined
+  }
   if (
     typeof value !== "object" ||
     value === null ||
@@ -97,10 +99,11 @@ export function parseDescriptor(value: unknown, path: string): LayoutDescriptor 
             tag < 0 ||
             tag > 255 ||
             tags.has(tag)
-          )
+          ) {
             throw new Error(
               `${path}: Borsh enum discriminants must be unique integers from 0 to 255`,
             )
+          }
           tags.add(tag)
         }
         return Object.freeze({
@@ -119,8 +122,12 @@ export function descriptor(ast: SchemaAST.AST, path: string): LayoutDescriptor |
   const checks = [...(ast.checks ?? [])]
   for (let check = checks.pop(); check !== undefined; check = checks.pop()) {
     const next = parseDescriptor(check.annotations?.[key], path)
-    if (next !== undefined) found = merge(found, next, path)
-    if (check._tag === "FilterGroup") checks.push(...check.checks)
+    if (next !== undefined) {
+      found = merge(found, next, path)
+    }
+    if (check._tag === "FilterGroup") {
+      checks.push(...check.checks)
+    }
   }
   return found
 }
@@ -130,8 +137,9 @@ function merge(
   next: LayoutDescriptor,
   path: string,
 ): LayoutDescriptor {
-  if (found !== undefined && JSON.stringify(found) !== JSON.stringify(next))
+  if (found !== undefined && JSON.stringify(found) !== JSON.stringify(next)) {
     throw new Error(`${path}: Conflicting Borsh layout annotations`)
+  }
   return next
 }
 

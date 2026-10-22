@@ -71,20 +71,21 @@ for (const entry of [
     HashMap.fromIterable,
     mapEntries,
   ),
-])
+]) {
   it(`matches concrete Rust ${entry.id} for native maps`, async () => {
     for (const value of [
       [],
       [1, 255, 256, 257, 65535].reverse().map((key): [number, string] => [key, String(key)]),
-    ])
+    ]) {
       await check(value)
+    }
     await assertProperty(entry.arbitrary, check, { numRuns: 200, seed: 20261020 })
     const pairs = Borsh.toCodec(Schema.Array(Schema.Tuple([Borsh.U16, Schema.String])))
     const pair = Borsh.toCodec(Schema.Tuple([Borsh.U16, Schema.String]))
     for (const [upper, accepted] of [
       [65535, true],
       [1, false],
-    ] as const)
+    ] as const) {
       await checkMutations(
         [
           [0, ""],
@@ -92,6 +93,7 @@ for (const entry of [
         ],
         accepted,
       )
+    }
     await assertProperty(
       mapEntries.filter((entries) => entries.length >= 2),
       checkMutations,
@@ -104,8 +106,12 @@ for (const entry of [
         const ts = attempt(() => entry.decode(mutated))
         const rust = await oracle.request(entry.id, "decode", { hex: hex(mutated) })
         assert.equal(ts.ok, rust.ok)
-        if (index < 5) assert.equal(rust.ok, index === 0)
-        if (index === 5 && changedAccepted !== undefined) assert.equal(rust.ok, changedAccepted)
+        if (index < 5) {
+          assert.equal(rust.ok, index === 0)
+        }
+        if (index === 5 && changedAccepted !== undefined) {
+          assert.equal(rust.ok, changedAccepted)
+        }
         if (ts.ok && rust.ok) {
           assert.deepEqual(
             Array.from(ts.value)
@@ -135,6 +141,7 @@ for (const entry of [
       }
     }
   })
+}
 
 function sets<A>(
   id: string,
@@ -147,7 +154,7 @@ function sets<A>(
   for (const [schema, make] of [
     [Schema.ReadonlySet(item), (values: A[]) => new Set(values)],
     [Schema.HashSet(item), (values: A[]) => HashSet.fromIterable(values)],
-  ] as const)
+  ] as const) {
     it(`matches concrete Rust ${id} for native sets`, async () => {
       const codec = Borsh.toCodec(schema)
       const encode = Schema.encodeUnknownSync(codec)
@@ -205,8 +212,12 @@ function sets<A>(
           const ts = attempt(() => decode(mutated))
           const rust = await oracle.request(id, "decode", { hex: hex(mutated) })
           assert.equal(ts.ok, rust.ok)
-          if (index < 5) assert.equal(rust.ok, index === 0)
-          if (index === 5 && changedAccepted !== undefined) assert.equal(rust.ok, changedAccepted)
+          if (index < 5) {
+            assert.equal(rust.ok, index === 0)
+          }
+          if (index === 5 && changedAccepted !== undefined) {
+            assert.equal(rust.ok, changedAccepted)
+          }
           if (ts.ok && rust.ok) {
             assert.ok(Array.isArray(rust.value))
             assert.deepEqual(new Set(Array.from(ts.value, transport)), new Set(rust.value))
@@ -215,6 +226,7 @@ function sets<A>(
         }
       }
     })
+  }
 }
 sets(
   "set_string",
@@ -291,18 +303,20 @@ it("rejects strict duplicate/descending map and set frames and malformed lengths
       [Schema.ReadonlySet(Schema.Boolean), Schema.HashSet(Schema.Boolean)],
       ["020000000101", "020000000100", "0100000002"],
     ],
-  ] as const)
+  ] as const) {
     for (const raw of frames) {
       assert.deepEqual(
         await oracle.request(id, "decode", { hex: raw }),
         { ok: false },
         `${id}: ${raw}`,
       )
-      for (const schema of schemas)
+      for (const schema of schemas) {
         assert.equal(
           attempt(() => Schema.decodeSync(Borsh.toCodec(schema))(bytes(raw))).ok,
           false,
           `${id}: ${raw}`,
         )
+      }
     }
+  }
 })

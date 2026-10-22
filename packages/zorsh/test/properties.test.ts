@@ -107,7 +107,9 @@ function bytewise(a: Uint8Array, b: Uint8Array): number {
   const length = Math.min(a.length, b.length)
   for (let i = 0; i < length; i++) {
     const difference = (a[i] as number) - (b[i] as number)
-    if (difference !== 0) return difference
+    if (difference !== 0) {
+      return difference
+    }
   }
   return a.length - b.length
 }
