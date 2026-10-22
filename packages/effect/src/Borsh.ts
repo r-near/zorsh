@@ -169,17 +169,6 @@ export const Unit = Schema.Tuple([])
  * Other lengths fail the schema's length check. `length` must be an integer
  * from 0 through 2^32 - 1.
  *
- * **Example** (A 32-byte identifier)
- *
- * ```ts
- * import { Borsh } from "@zorsh/effect"
- * import { Schema } from "effect"
- *
- * const RequestId = Borsh.fixedBytes(32)
- * const bytes = Schema.encodeSync(Borsh.toCodec(RequestId))(new Uint8Array(32))
- * // bytes.length === 32
- * ```
- *
  * @category bytes
  * @since 0.1.0
  */
@@ -565,20 +554,6 @@ const optionsCacheSize = 8
  * option combinations per schema. The only wire limits are `maxBytes`,
  * `maxItems` and {@link maxLength}; every other check runs in the schema pass.
  *
- * **Example** (Encoding contract arguments)
- *
- * ```ts
- * import { Borsh } from "@zorsh/effect"
- * import { Schema } from "effect"
- *
- * const Transfer = Schema.Struct({ receiver: Schema.String, amount: Borsh.U128 })
- * const codec = Borsh.toCodec(Transfer)
- *
- * const bytes = Schema.encodeSync(codec)({ receiver: "alice.near", amount: 123n })
- * const transfer = Schema.decodeSync(codec)(bytes)
- * // { receiver: "alice.near", amount: 123n }
- * ```
- *
  * **Example** (Bounding untrusted input)
  *
  * ```ts
@@ -797,22 +772,6 @@ export function decodePrefixEffect<S extends Schema.Constraint>(
  * Like {@link decodePrefixEffect}, but synchronous: it throws
  * `Schema.SchemaError`, or a `RangeError` for an offset outside `bytes`. Like
  * `Schema.decodeSync`, it accepts only schemas without decoding services.
- *
- * **Example** (A message inside an envelope)
- *
- * ```ts
- * import { Borsh } from "@zorsh/effect"
- * import { Schema } from "effect"
- *
- * // A u32 tag, then one Borsh message, then an unrelated trailer.
- * const Message = Schema.Struct({ sender: Schema.String, amount: Borsh.U64 })
- * const decodeMessage = Borsh.decodePrefixSync(Message, { maxBytes: 64 * 1024 })
- *
- * const open = (packet: Uint8Array) => {
- *   const { value: message, offset: end } = decodeMessage(packet, 4)
- *   return { message, trailer: packet.subarray(end) }
- * }
- * ```
  *
  * @category decoding
  * @since 0.1.0

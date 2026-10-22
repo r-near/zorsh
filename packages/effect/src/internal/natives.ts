@@ -37,16 +37,10 @@ export function isLengthPrefixed(ast: SchemaAST.Declaration): boolean {
 }
 
 function representationId(ast: SchemaAST.Declaration): string | undefined {
-  const representation = ast.annotations?.representation
-  if (
-    typeof representation === "object" &&
-    representation !== null &&
-    "id" in representation &&
-    typeof representation.id === "string"
-  ) {
-    return representation.id
-  }
-  return undefined
+  // Hand-built declarations can carry a representation and id of any type.
+  const representation = ast.annotations?.representation as { readonly id?: unknown } | undefined
+  const id = representation?.id
+  return typeof id === "string" ? id : undefined
 }
 
 function option(ast: SchemaAST.Declaration, path: string, compile: Compile): Layout {
