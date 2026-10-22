@@ -7,7 +7,7 @@
  *
  * @since 0.1.0
  */
-import { Effect, Order, Schema, type SchemaAST, SchemaIssue, SchemaTransformation } from "effect"
+import { Effect, Order, Schema, SchemaAST, SchemaIssue, SchemaTransformation } from "effect"
 import { isU32Length, parseDescriptor, withLayout } from "./internal/annotations.js"
 import { compile, type Layout, rejectSuspensions } from "./internal/compiler.js"
 import { homogeneousItem } from "./internal/containers.js"
@@ -199,6 +199,23 @@ export function fixedBytes(length: number): Schema.Uint8Array {
   )
 }
 
+/** Filter annotations that describe the check itself rather than the schema it refines. */
+const checkKeys = new Set([
+  "expected",
+  "message",
+  "representation",
+  "toJsonSchema",
+  "toCode",
+  "arbitraryConstraint",
+  "~structural",
+])
+
+/** Effect resolves annotations from the last check, so the new check keeps the schema's. */
+function exactLength(ast: SchemaAST.AST, length: number) {
+  const kept = Object.entries({ ...SchemaAST.resolve(ast) }).filter(([key]) => !checkKeys.has(key))
+  return Schema.isBetweenLength(length, length, Object.fromEntries(kept))
+}
+
 /**
  * Rust `[T; N]`: gives a native array schema a fixed-length layout with no
  * count prefix.
@@ -237,7 +254,7 @@ export function fixedArray(length: number): <S extends Schema.Top>(schema: S) =>
     const fixed = withLayout(schema, { version: 1, kind: "fixedArray", length })
     // Without a transformation the decoded value is the encoded array, so it can carry the length.
     return schema.ast.encoding === undefined
-      ? fixed.check(Schema.isBetweenLength(length, length) as SchemaAST.Check<typeof fixed.Type>)
+      ? fixed.check(exactLength(fixed.ast, length) as SchemaAST.Check<typeof fixed.Type>)
       : fixed
   }
 }
