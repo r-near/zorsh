@@ -352,7 +352,17 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
  * names; every variant needs exactly one unique integer from 0 to 255. Pass
  * `{ tag: "kind" }` for unions tagged by another literal field. Values are
  * checked when the combinator is called, and missing or unknown keys throw
- * when it is applied to a schema.
+ * when it is applied to a schema. The map annotates the union itself, so a
+ * union rebuilt from its members needs it again. With `{ tag: "kind" }`,
+ * apply `Schema.toTaggedUnion("kind")` after this combinator, not before, to
+ * keep the union's helpers.
+ *
+ * A dataless single-variant enum is zero-sized in Rust unless it has a
+ * `#[repr]`, which only matters for vectors of it. Without a map it is treated
+ * as zero-sized, and with one as `#[repr(u8)]`, so `#[repr(u8)] enum E { Only }`
+ * takes `Borsh.discriminants({ Only: 0 })`. A `use_discriminant` single-variant
+ * enum without `#[repr]` is still zero-sized in Rust, so borsh-rs rejects
+ * vectors of it that this codec accepts.
  *
  * **Example** (Sparse discriminants)
  *

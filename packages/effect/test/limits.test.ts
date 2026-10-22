@@ -493,4 +493,17 @@ describe("untrusted input", () => {
       "Input exceeds maxItems (10000) at byte 0",
     )
   })
+
+  it("runs the package README Receipt example", () => {
+    const Receipt = Schema.Struct({
+      logs: Schema.Array(Schema.String.check(Borsh.maxLength(1024))).check(Borsh.maxLength(100)),
+      payload: Borsh.Bytes.check(Borsh.maxLength(64 * 1024)),
+    })
+    const codec = Borsh.toCodec(Receipt, { maxBytes: 256 * 1024, maxItems: 10_000 })
+    expect(() => Schema.decodeSync(codec)(Uint8Array.of(...u32(0xffff_ffff)))).toThrow(
+      /^Length 4294967295 exceeds maxLength \(100\) at byte 0\n {2}at \["logs"\]$/,
+    )
+    const value = { logs: ["ok"], payload: Uint8Array.of(1, 2) }
+    expect(Schema.decodeSync(codec)(Schema.encodeSync(codec)(value))).toEqual(value)
+  })
 })
