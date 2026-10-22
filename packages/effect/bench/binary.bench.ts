@@ -1,6 +1,7 @@
 import { createRequire } from "node:module"
 import { Option, Schema } from "effect"
 import { expect, test } from "vite-plus/test"
+import type { Borsh as BorshTypes } from "../src/index.js"
 
 // Measure the built packages through Node's own loader, bypassing Vite's module runner.
 // `vp run bench` rebuilds them first; running this file directly measures the existing dist.
@@ -106,6 +107,7 @@ const zbatch = { nonce: batch.nonce, actions: batch.actions.map(toZorshAction) }
 interface Case<A> {
   readonly name: string
   readonly schema: Schema.Codec<A, unknown>
+  readonly options?: BorshTypes.Options
   readonly value: A
   readonly zorsh: { serialize(value: never): Uint8Array; deserialize(bytes: Uint8Array): unknown }
   readonly zorshValue: unknown
@@ -137,8 +139,24 @@ for (const c of [
     zorsh: b.vec(b.string()),
     zorshValue: undefined,
   }),
+  // The early-check and maxItems paths, so their cost shows next to the plain cases above.
+  defineCase({
+    name: "Array(U32) with isMaxLength, 1000 items",
+    schema: Schema.Array(Borsh.U32).check(Schema.isMaxLength(100_000)),
+    value: Array.from({ length: 1000 }, (_, i) => i * 7919),
+    zorsh: b.vec(b.u32()),
+    zorshValue: undefined,
+  }),
+  defineCase({
+    name: "README Batch with maxItems, 100 actions",
+    schema: Batch,
+    options: { maxItems: 1_000_000 },
+    value: batch,
+    zorsh: ZBatch,
+    zorshValue: zbatch,
+  }),
 ]) {
-  const codec = Borsh.toCodec(c.schema)
+  const codec = Borsh.toCodec(c.schema, c.options)
   const encode = Schema.encodeSync(codec)
   const decode = Schema.decodeSync(codec)
   const bytes = encode(c.value)
@@ -152,7 +170,7 @@ for (const c of [
     await bench.compare(
       bench("@zorsh/effect", () => encode(c.value)),
       bench("@zorsh/effect, inline toCodec", () =>
-        Schema.encodeSync(Borsh.toCodec(c.schema))(c.value)),
+        Schema.encodeSync(Borsh.toCodec(c.schema, c.options))(c.value)),
       bench("@zorsh/zorsh", () => c.zorsh.serialize(zorshValue)),
       bench("Effect schema pass only", () => encodeSchema(c.value)),
     )
