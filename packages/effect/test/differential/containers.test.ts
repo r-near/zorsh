@@ -335,6 +335,40 @@ for (const entry of entries) {
   })
 }
 
+it("matches Rust for values within Borsh.maxLength", async () => {
+  const bounded = [
+    spec(
+      "vec_u16",
+      Schema.Array(Borsh.U16).check(Borsh.maxLength(8)),
+      fc.array(u16, { maxLength: 8 }),
+      (value) => value.map(String),
+    ),
+    // At most four code points, so at most 16 UTF-8 bytes.
+    spec(
+      "string",
+      Schema.String.check(Borsh.maxLength(16)),
+      fc.string({ unit: "binary", maxLength: 4 }),
+      (value) => value,
+    ),
+  ]
+  for (const entry of bounded) {
+    await assertProperty(
+      entry.arbitrary,
+      async ({ raw, transport }) => {
+        const encoded = await oracle.request(entry.id, "encode", { value: transport })
+        assert.ok(encoded.ok)
+        assert.equal(encoded.hex, hex(raw))
+        const decoded = await oracle.request(entry.id, "decode", { hex: hex(raw) })
+        assert.ok(decoded.ok)
+        assert.deepEqual(decoded.value, transport)
+        assert.deepEqual(entry.decode(raw).transport, transport)
+        assert.deepEqual(entry.decodePrefix(raw, 0), { transport, offset: raw.byteLength })
+      },
+      { numRuns: 200, seed: 20261022 },
+    )
+  }
+})
+
 it("matches Rust zero-sized visitation and malicious vector counts", async () => {
   for (const [id, schema, values, raws] of [
     ["array_unit_0", Borsh.fixedArray(Borsh.Unit, 0), [[]], [new Uint8Array(), Uint8Array.of(0)]],

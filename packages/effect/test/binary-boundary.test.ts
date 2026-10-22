@@ -3,11 +3,10 @@ import { expect, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { compile } from "../src/internal/compiler.js"
 import { Writer } from "../src/internal/io.js"
-import { noLimits } from "../src/internal/limits.js"
 
 function write(schema: Schema.Constraint, value: unknown) {
   const writer = new Writer(1024)
-  compile(Schema.toEncoded(schema).ast, noLimits).write(writer, value)
+  compile(Schema.toEncoded(schema).ast).write(writer, value)
   return writer.finish()
 }
 
@@ -23,6 +22,7 @@ it("rejects malformed values at the binary writer boundary", () => {
     [Schema.Boolean, 1, "Expected boolean at byte 0"],
     [Borsh.Bytes, [], "Expected Uint8Array at byte 0"],
     [Borsh.Bytes, oversizedBytes, "Byte array exceeds u32 length at byte 0"],
+    [Borsh.fixedBytes(2), [1, 2], "Expected Uint8Array at byte 0"],
     [Borsh.fixedBytes(2), Uint8Array.of(1), "Expected 2 bytes at byte 0"],
     [Schema.Struct({ value: Borsh.U8 }), null, "Expected object at byte 0"],
     [Schema.Struct({ value: Borsh.U8 }), {}, "Missing required field at byte 0", ["value"]],

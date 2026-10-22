@@ -373,7 +373,7 @@ describe("Borsh primitives", () => {
   it("enforces custom and default byte caps before allocating payloads", () => {
     const codec = Borsh.toCodec(Schema.String, { maxBytes: 8 })
     expect(Schema.encodeSync(codec)("éé").byteLength).toBe(8)
-    expect(() => Schema.encodeSync(codec)("ééa")).toThrow(/byte budget/)
+    expect(() => Schema.encodeSync(codec)("ééa")).toThrow(/Output exceeds maxBytes/)
     expect(() => Schema.decodeSync(codec)(Uint8Array.of(5, 0, 0, 0, 1, 2, 3, 4, 5))).toThrow(
       /Input exceeds maxBytes/,
     )
@@ -392,7 +392,7 @@ describe("Borsh primitives", () => {
     )
     expect(() =>
       Schema.encodeSync(Borsh.toCodec(Schema.String))("a".repeat(16 * 1024 * 1024)),
-    ).toThrow(/byte budget/)
+    ).toThrow(/Output exceeds maxBytes/)
     for (const maxBytes of [0, -1, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1]) {
       expect(() => Borsh.toCodec(Borsh.U8, { maxBytes })).toThrow(/positive safe integer/)
     }

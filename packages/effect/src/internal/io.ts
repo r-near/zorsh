@@ -1,17 +1,7 @@
-import type { SchemaAST } from "effect"
-
 /** Expected binary failures only. User schema defects never cross this catch boundary. */
 export class BinaryError extends Error {
   readonly path: PropertyKey[] = []
-  /**
-   * @param check The schema's own check, when the binary layer enforced it early, so the issue
-   * names the same filter the schema pass would.
-   */
-  constructor(
-    offset: number,
-    detail: string,
-    readonly check?: SchemaAST.Filter<unknown>,
-  ) {
+  constructor(offset: number, detail: string) {
     super(`${detail} at byte ${offset}`)
   }
 }
@@ -36,8 +26,6 @@ export interface ReaderOptions {
   readonly maxBytes: number
   /** Infinity when the codec has no maxItems. */
   readonly maxItems: number
-  /** Whether layouts enforce the schema's own length checks; false under `disableChecks`. */
-  readonly checks: boolean
 }
 
 export class Reader {
@@ -47,7 +35,6 @@ export class Reader {
   readonly view: DataView
   /** One past the last byte the value may use. */
   readonly end: number
-  readonly checks: boolean
   readonly maxBytes: number
   readonly maxItems: number
   private items: number
@@ -67,7 +54,6 @@ export class Reader {
     this.view = length === 0 ? emptyView : new DataView(input.buffer, input.byteOffset, length)
     this.limit = start === undefined ? Infinity : start + options.maxBytes
     this.end = Math.min(length, this.limit)
-    this.checks = options.checks
     this.maxBytes = options.maxBytes
     this.maxItems = options.maxItems
     this.items = options.maxItems
@@ -265,10 +251,20 @@ export class Writer {
   }
 }
 
-/** Count and validate before encoding; stop as soon as the budget is exceeded. */
-export function utf8Length(value: string, budget: number, offset: number): number {
+/** A Borsh.maxLength bound, checked at its length prefix before anything after it. */
+export function checkMaxLength(length: number, maxLength: number, offset: number): void {
+  if (length > maxLength) {
+    throw new BinaryError(offset, `Length ${length} exceeds maxLength (${maxLength})`)
+  }
+}
+
+/**
+ * The UTF-8 length of value, or -1 if it has a lone UTF-16 surrogate, which UTF-8 cannot encode.
+ * Counting stops once the length passes stop, so the result is then only known to exceed it.
+ */
+export function utf8Length(value: string, stop = Infinity): number {
   let length = 0
-  for (let i = 0; i < value.length; i++) {
+  for (let i = 0; i < value.length && length <= stop; i++) {
     const code = value.charCodeAt(i)
     if (code < 0x80) {
       length++
@@ -278,16 +274,13 @@ export function utf8Length(value: string, budget: number, offset: number): numbe
       // A high surrogate must pair with a low one. Past the end, charCodeAt is NaN and fails too.
       const next = value.charCodeAt(++i)
       if (!(next >= 0xdc00 && next <= 0xdfff)) {
-        throw new BinaryError(offset, "Lone UTF-16 surrogate")
+        return -1
       }
       length += 4
     } else if (code >= 0xdc00 && code <= 0xdfff) {
-      throw new BinaryError(offset, "Lone UTF-16 surrogate")
+      return -1
     } else {
       length += 3
-    }
-    if (length > budget || length > 0xffff_ffff) {
-      throw new BinaryError(offset, "UTF-8 string exceeds byte budget")
     }
   }
   return length

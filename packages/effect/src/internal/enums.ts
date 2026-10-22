@@ -1,5 +1,5 @@
 import { SchemaAST } from "effect"
-import { descriptor, type EnumDescriptor } from "./annotations.js"
+import { descriptor, type EnumDescriptor, rejectMaxLength } from "./annotations.js"
 import type { Compile, Layout } from "./compiler.js"
 import { compileObject, defineField } from "./containers.js"
 import { BinaryError, prepend, type Reader } from "./io.js"
@@ -74,6 +74,8 @@ function taggedVariants(
         `${path}: Enum tag ${JSON.stringify(tag)} must be a required string literal; set another key with Borsh.discriminants(map, { tag })`,
       )
     }
+    // The tag field is never compiled on its own, so check it here.
+    rejectMaxLength(tagType, `${path}[${JSON.stringify(tag)}]`)
     return { label: tagType.literal, member }
   })
 }
@@ -119,10 +121,12 @@ function tsEnumVariants(
   return variants
 }
 
+/** Variants are compiled here rather than through compile, so check what it would. */
 function assertPlainVariant(member: SchemaAST.AST, path: string): void {
   if (member.context?.isOptional || descriptor(member, path) !== undefined) {
     throw new Error(`${path}: Enum variants must be required and have no layout annotations`)
   }
+  rejectMaxLength(member, path)
 }
 
 function uniqueLabels(variants: ReadonlyArray<UnnumberedVariant>, path: string): Set<string> {

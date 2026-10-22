@@ -1,7 +1,6 @@
 import { Order } from "effect"
 import type { Layout } from "./compiler.js"
-import { BinaryError, type Reader, utf8Length } from "./io.js"
-import { type CountGuard, guardedRead } from "./limits.js"
+import { BinaryError, checkMaxLength, utf8Length } from "./io.js"
 
 type IntegerBits = 8 | 16 | 32 | 64 | 128
 
@@ -123,55 +122,73 @@ export function float(bits: 32 | 64): Layout {
   }
 }
 
-/**
- * Rust Vec<u8> with a u32 length prefix, or [u8; N] when length is given. Only the prefixed form
- * has a count for a guard to check.
- */
-export function bytes(length?: number, guard?: CountGuard): Layout {
-  const read =
-    guard === undefined
-      ? (r: Reader) => r.take(length ?? r.u32()).slice()
-      : guardedRead(guard, (r, count) => r.take(count).slice())
+/** Rust Vec<u8>: a u32 length, then the bytes. */
+export function bytes(maxLength: number): Layout {
   return {
-    minBytes: length ?? 4,
-    isZeroSized: length === 0,
-    read,
+    minBytes: 4,
+    isZeroSized: false,
+    read: (r) => {
+      const offset = r.offset
+      const length = r.u32()
+      checkMaxLength(length, maxLength, offset)
+      return r.take(length).slice()
+    },
     write: (w, value) => {
       if (!(value instanceof Uint8Array)) {
         throw new BinaryError(w.offset, "Expected Uint8Array")
       }
-      if (length !== undefined && value.byteLength !== length) {
-        throw new BinaryError(w.offset, `Expected ${length} bytes`)
-      }
-      if (value.byteLength > 0xffff_ffff) {
+      const length = value.byteLength
+      if (length > 0xffff_ffff) {
         throw new BinaryError(w.offset, "Byte array exceeds u32 length")
       }
-      // Reserve the prefix with the payload, so an oversized array fails at the prefix offset. Both
-      // shapes reserve here, reading byteLength as often as the checks above expect.
-      const prefixBytes = length === undefined ? 4 : 0
-      w.ensure(value.byteLength + prefixBytes)
-      if (length === undefined) {
-        w.u32(value.byteLength)
+      checkMaxLength(length, maxLength, w.offset)
+      // Reserve the prefix with the payload, so an oversized array fails at the prefix offset.
+      w.ensure(4 + length)
+      w.u32(length)
+      w.bytes(value)
+    },
+  }
+}
+
+/** Rust [u8; N]: exactly length bytes, with no prefix. */
+export function fixedBytes(length: number): Layout {
+  return {
+    minBytes: length,
+    isZeroSized: length === 0,
+    read: (r) => r.take(length).slice(),
+    write: (w, value) => {
+      if (!(value instanceof Uint8Array)) {
+        throw new BinaryError(w.offset, "Expected Uint8Array")
+      }
+      if (value.byteLength !== length) {
+        throw new BinaryError(w.offset, `Expected ${length} bytes`)
       }
       w.bytes(value)
     },
   }
 }
 
-export function string(): Layout {
+export function string(maxLength: number): Layout {
   return {
     compare: compareString,
     minBytes: 4,
     isZeroSized: false,
-    read: (r) => r.string(r.u32()),
+    read: (r) => {
+      const offset = r.offset
+      const length = r.u32()
+      checkMaxLength(length, maxLength, offset)
+      return r.string(length)
+    },
     write: (w, value) => {
       if (typeof value !== "string") {
         throw new BinaryError(w.offset, "Expected string")
       }
-      // Check room for the prefix first, so fewer than 4 bytes left reports maxBytes rather than
-      // the string budget.
-      w.ensure(4)
-      const length = utf8Length(value, w.maxBytes - w.offset - 4, w.offset)
+      const offset = w.offset
+      const length = utf8Length(value)
+      if (length < 0) {
+        throw new BinaryError(offset, "Lone UTF-16 surrogate")
+      }
+      checkMaxLength(length, maxLength, offset)
       w.ensure(4 + length)
       w.u32(length)
       w.string(value, length)

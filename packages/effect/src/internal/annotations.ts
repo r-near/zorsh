@@ -28,6 +28,38 @@ declare module "effect/Schema" {
 
 export type EnumDescriptor = Extract<LayoutDescriptor, { readonly kind: "enum" }>
 
+/** The representation id of `Borsh.maxLength`. */
+export const maxLengthId = "@zorsh/effect/maxLength"
+
+/** The smallest Borsh.maxLength bound among ast's checks, groups included, if it has any. */
+export function maxLengthOf(ast: SchemaAST.AST): number | undefined {
+  let smallest: number | undefined
+  for (const check of filters(ast.checks ?? [])) {
+    const representation = check.annotations?.representation
+    if (representation?.id === maxLengthId) {
+      const { maxLength } = representation.payload as { readonly maxLength: number }
+      smallest = Math.min(smallest ?? maxLength, maxLength)
+    }
+  }
+  return smallest
+}
+
+/** Every filter, including those in groups. */
+function filters(
+  checks: ReadonlyArray<SchemaAST.Check<unknown>>,
+): Array<SchemaAST.Filter<unknown>> {
+  return checks.flatMap((check) => (check._tag === "FilterGroup" ? filters(check.checks) : [check]))
+}
+
+/** Throw if ast carries Borsh.maxLength, for a node whose layout has no length prefix. */
+export function rejectMaxLength(ast: SchemaAST.AST, path: string): void {
+  if (maxLengthOf(ast) !== undefined) {
+    throw new Error(
+      `${path}: Borsh.maxLength requires a length-prefixed layout (string, bytes, vector, map or set)`,
+    )
+  }
+}
+
 /** Rust collection and array lengths: a safe integer that fits in a u32. */
 export function isU32Length(value: unknown): value is number {
   return (
