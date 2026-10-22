@@ -104,6 +104,17 @@ function toZorshAction(action: typeof Action.Type) {
 }
 const zbatch = { nonce: batch.nonce, actions: batch.actions.map(toZorshAction) }
 
+// Every action keeps its exact bytes, so the cost of withBytes shows next to the plain Batch.
+const BatchWithBytes = Schema.Struct({
+  nonce: Borsh.U64,
+  actions: Schema.Array(Borsh.withBytes(Action)),
+})
+const encodeAction = Schema.encodeSync(Borsh.toCodec(Action))
+const batchWithBytes: typeof BatchWithBytes.Type = {
+  nonce: batch.nonce,
+  actions: batch.actions.map((action) => ({ value: action, bytes: encodeAction(action) })),
+}
+
 interface Case<A> {
   readonly name: string
   readonly schema: Schema.Codec<A, unknown>
@@ -146,6 +157,13 @@ for (const c of [
     value: Array.from({ length: 1000 }, (_, i) => i * 7919),
     zorsh: b.vec(b.u32()),
     zorshValue: undefined,
+  }),
+  defineCase({
+    name: "README Batch with withBytes actions, 100 actions",
+    schema: BatchWithBytes,
+    value: batchWithBytes,
+    zorsh: ZBatch,
+    zorshValue: zbatch,
   }),
   defineCase({
     name: "README Batch with maxItems, 100 actions",

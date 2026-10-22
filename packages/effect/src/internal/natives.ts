@@ -154,6 +154,61 @@ function result(ast: SchemaAST.Declaration, path: string, compile: Compile): Lay
   }
 }
 
+/** The representation id of `Borsh.withBytes`. */
+export const withBytesId = "@zorsh/effect/withBytes"
+
+/** The shape `Borsh.withBytes` decodes to and encodes from, on either side of its schema. */
+export interface ValueWithBytes<A> {
+  readonly value: A
+  readonly bytes: Uint8Array
+}
+
+/** Own properties only, as for any struct field, so an inherited `bytes` is never trusted. */
+export function isValueWithBytes(input: unknown): input is ValueWithBytes<unknown> {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    Object.hasOwn(input, "value") &&
+    Object.hasOwn(input, "bytes") &&
+    Reflect.get(input, "bytes") instanceof Uint8Array
+  )
+}
+
+/** The layout of the wrapped schema, also keeping the exact span its value was read from. */
+function withBytes(ast: SchemaAST.Declaration, path: string, compile: Compile): Layout {
+  const [inner] = parameters(ast, 1, "withBytes", path)
+  const value = compile(inner, `${path}["value"]`)
+  // No compare: as a map key or set member it fails at construction, like any unordered key.
+  return {
+    minBytes: value.minBytes,
+    isZeroSized: value.isZeroSized,
+    read: (r) => {
+      const start = r.offset
+      try {
+        // The reader's input is a plain view, so slice copies rather than aliasing the caller.
+        return { value: value.read(r), bytes: r.input.slice(start, r.offset) }
+      } catch (error) {
+        throw prepend(error, "value")
+      }
+    },
+    write: (w, input) => {
+      if (!isValueWithBytes(input)) {
+        throw new BinaryError(w.offset, "Expected value with bytes")
+      }
+      const start = w.offset
+      try {
+        value.write(w, input.value)
+      } catch (error) {
+        throw prepend(error, "value")
+      }
+      const difference = w.firstDifference(start, input.bytes)
+      if (difference !== undefined) {
+        throw prepend(new BinaryError(difference, "Bytes do not match the encoded value"), "bytes")
+      }
+    },
+  }
+}
+
 interface CollectionAdapter {
   readonly name: string
   readonly arity: 1 | 2
@@ -318,4 +373,5 @@ const natives: Readonly<Record<string, Native>> = {
   "effect/schema/ReadonlySet": readonlySet,
   "effect/schema/HashMap": hashMap,
   "effect/schema/HashSet": hashSet,
+  [withBytesId]: withBytes,
 }

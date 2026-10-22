@@ -7,13 +7,24 @@
  *
  * @since 0.1.0
  */
-import { Effect, Order, Schema, SchemaAST, SchemaIssue, SchemaTransformation } from "effect"
+import {
+  Effect,
+  Formatter,
+  Order,
+  Schema,
+  SchemaAST,
+  SchemaGetter,
+  SchemaIssue,
+  SchemaParser,
+  SchemaTransformation,
+} from "effect"
 import { isU32Length, parseDescriptor, withLayout } from "./internal/annotations.js"
 import { compile, type Layout, prepare } from "./internal/compiler.js"
 import { homogeneousItem } from "./internal/containers.js"
 import { enumVariants } from "./internal/enums.js"
 import { BinaryError, Reader, type ReaderOptions, Writer } from "./internal/io.js"
 import type { DeferredChecks } from "./internal/limits.js"
+import { isValueWithBytes, type ValueWithBytes, withBytesId } from "./internal/natives.js"
 import { integerRange } from "./internal/primitives.js"
 
 function integer(bits: 8 | 16 | 32, signed: boolean) {
@@ -310,6 +321,144 @@ export function fixedArray(length: number): <S extends Schema.Top>(schema: S) =>
       ? withExactLength(fixed, length)
       : fixed
   }
+}
+
+/**
+ * The schema returned by {@link withBytes}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface withBytes<S extends Schema.Top> extends Schema.declareConstructor<
+  { readonly value: S["Type"]; readonly bytes: Uint8Array },
+  { readonly value: S["Encoded"]; readonly bytes: Uint8Array },
+  readonly [S],
+  { readonly value: S["Iso"]; readonly bytes: Uint8Array }
+> {
+  readonly Rebuild: withBytes<S>
+  readonly schema: S
+}
+
+/**
+ * Keeps the exact Borsh bytes of a value next to the decoded value.
+ *
+ * **Details**
+ *
+ * The wire layout is the layout of `schema`, with nothing added. Decoding
+ * returns `{ value, bytes }`, where `bytes` is a copy of the span that `value`
+ * was read from: hash or verify a signature over it, or store or forward it
+ * unchanged. Failures inside `value` are reported under `["value"]`.
+ *
+ * Encoding writes `value`, never `bytes`, and fails at `["bytes"]` unless that
+ * reproduces `bytes` exactly, naming the output offset where they first
+ * differ. Borsh decoding is strict, so a decoded value always re-encodes to its
+ * bytes unless `schema` substitutes a value while decoding, as a lossy
+ * transformation or decoding middleware can. To build a new outgoing value,
+ * encode it with `schema` itself, which writes the same bytes.
+ *
+ * `bytes` is copied, never a view into the decoded input, so it stays valid
+ * when the caller reuses its buffer. Samples from `Arbitrary.schema` carry the
+ * bytes `schema` encodes their value to. Samples that `schema` cannot encode,
+ * such as strings with lone surrogates, are discarded, and a `schema` whose
+ * encoding needs services cannot be sampled. Samples of `Schema.toType`,
+ * `Schema.toEncoded` or `Schema.flip` applied to this schema are still encoded
+ * with `schema`, so when it has a transformation they can be discarded, or
+ * carry bytes that differ from what the derived schema writes and so fail to
+ * encode at `["bytes"]`.
+ *
+ * **Example** (Verify a signature over the transaction's exact bytes)
+ *
+ * ```ts
+ * import { Borsh } from "@zorsh/effect"
+ * import { Schema } from "effect"
+ *
+ * const Transaction = Schema.Struct({ receiverId: Schema.String, nonce: Borsh.U64 })
+ * const SignedTransaction = Schema.Struct({
+ *   transaction: Borsh.withBytes(Transaction),
+ *   signature: Borsh.fixedBytes(64),
+ * })
+ *
+ * const signed = Schema.decodeSync(Borsh.toCodec(SignedTransaction))(input)
+ * verify(signed.signature, sha256(signed.transaction.bytes))
+ * signed.transaction.value.receiverId
+ * ```
+ *
+ * @category containers
+ * @since 0.1.0
+ */
+export function withBytes<S extends Schema.Top>(schema: S): withBytes<S> {
+  const declaration = Schema.declareConstructor<
+    ValueWithBytes<S["Type"]>,
+    ValueWithBytes<S["Encoded"]>,
+    ValueWithBytes<S["Iso"]>
+  >()(
+    [schema],
+    ([value]) =>
+      (input, ast, options) => {
+        if (!isValueWithBytes(input)) {
+          return Effect.fail(new SchemaIssue.InvalidType(ast, input, options))
+        }
+        return Effect.mapBothEager(SchemaParser.decodeUnknownEffect(value)(input.value, options), {
+          onSuccess: (decoded) => ({ value: decoded, bytes: input.bytes }),
+          onFailure: (issue) =>
+            new SchemaIssue.Composite(
+              ast,
+              [new SchemaIssue.Pointer(["value"], issue)],
+              input,
+              options,
+            ),
+        })
+      },
+    {
+      representation: { id: withBytesId, payload: null },
+      expected: "a value with its Borsh bytes",
+      toCode: ({ typeParameters: [value] }) => ({
+        runtime: `Borsh.withBytes(${value?.runtime})`,
+        Type: `{ readonly value: ${value?.Type}; readonly bytes: Uint8Array }`,
+        importDeclarations: [`import { Borsh } from "@zorsh/effect"`],
+      }),
+      // JSON and other canonical codecs see a plain struct, with `bytes` in Effect's usual form.
+      toCodec: ([value]) =>
+        Schema.link<ValueWithBytes<S["Encoded"]>>()(
+          Schema.Struct({ value, bytes: Schema.Uint8Array }),
+          SchemaTransformation.passthrough(),
+        ),
+      toCodecArbitrary: ({ typeParameters: [value] }) => sampleWithBytes(schema, value),
+      toEquivalence:
+        ([value]) =>
+        (left, right) =>
+          sameBytes(left.bytes, right.bytes) && value(left.value, right.value),
+      toFormatter:
+        ([value]) =>
+        ({ value: item, bytes }) =>
+          `{ "value": ${value(item)}, "bytes": ${Formatter.format(bytes)} }`,
+    },
+  )
+  return Schema.make<withBytes<S>>(declaration.ast, { schema })
+}
+
+/**
+ * Generates `value` from the hook's type-side parameter and derives `bytes` by encoding it with
+ * `schema`. The hook cannot tell this schema from `Schema.toType`, `toEncoded` or `flip` applied
+ * to it, so it always describes this one; the encode check rejects bytes that do not match.
+ */
+function sampleWithBytes(schema: Schema.Top, parameter: Schema.Codec<unknown>): SchemaAST.Link {
+  // Arbitrary links cannot require services, so a schema that needs them dies when sampled.
+  const encode = SchemaParser.encodeUnknownEffect(
+    toCodec(schema) as Schema.Codec<unknown, Uint8Array>,
+  )
+  return Schema.link<ValueWithBytes<unknown>>()(parameter, {
+    // A failure discards the sample, so samples that cannot be encoded never carry wrong bytes.
+    decode: SchemaGetter.transformEffect((value) =>
+      Effect.map(encode(value), (bytes) => ({ value, bytes })),
+    ),
+    // Arbitrary only generates through the link, from the parameter to `{ value, bytes }`.
+    encode: SchemaGetter.forbiddenEncoding,
+  })
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength && left.every((byte, i) => byte === right[i])
 }
 
 /** TS enum member names, found through wrappers that keep the encoded (or flipped type) side. */

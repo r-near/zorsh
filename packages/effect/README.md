@@ -274,7 +274,7 @@ const fixtures = Effect.runSync(
 ).map((request) => Schema.encodeSync(requestCodec)(request))
 ```
 
-Samples follow the decoded type and its checks. `fixedBytes(n)` samples exactly `n` bytes and an untransformed `fixedArray(n)` exactly `n` items. Effect has no binary32 generator, so `F32` samples integers within ±2^24, which are exact; refinements of `F32` must admit such an integer.
+Samples follow the decoded type and its checks. `withBytes(schema)` samples carry the bytes `schema` encodes their value to: samples it cannot encode, such as strings with lone surrogates, are discarded, and a schema whose encoding needs services cannot be sampled. Samples of `Schema.toType`, `Schema.toEncoded` or `Schema.flip` applied to it are still encoded with `schema`, so when it has a transformation they can be discarded, or carry bytes that differ from what the derived schema writes and so fail to encode at `["bytes"]`. `fixedBytes(n)` samples exactly `n` bytes and an untransformed `fixedArray(n)` exactly `n` items. Effect has no binary32 generator, so `F32` samples integers within ±2^24, which are exact; refinements of `F32` must admit such an integer.
 
 Raw `Schema.String` samples can contain lone UTF-16 surrogates, which Borsh strings reject. Narrow strings to the business values the contract expects, as with `receiver` and `method` above, or check `String.prototype.isWellFormed` as with `memo`, which TypeScript types with `lib` ES2024 or later. A bare `Schema.Literal` has no Borsh layout, so encode it to `Schema.String`. Vectors of zero-sized values, such as `Schema.Array(Borsh.Unit)`, sample but cannot be encoded.
 
@@ -349,6 +349,27 @@ const trailer = packet.subarray(end)
 `maxBytes` caps the bytes the value may use, not the length of the buffer. As soon as a read's length or count shows that the value cannot fit, it fails with `Value exceeds maxBytes (65536) at byte …`, however short the buffer is, so a streaming caller can stop waiting for more input. A `Truncated …` failure only means the buffer ended before the current read; with more input, a later field might still exceed `maxBytes`. Once the buffer holds `maxBytes` bytes after the offset, a failure is never `Truncated`, so waiting for more input always ends. `maxItems` is a budget per call. Byte offsets in errors are positions in the buffer. Decoding middleware on the schema, such as `Schema.catchDecoding`, can recover from schema-pass failures but, unlike with `toCodec`, not from binary ones, because a value that was never read has no end to return as `offset`. `decodePrefixEffect` needs the schema's decoding services, as `Schema.decodeEffect` does; `decodePrefixSync` accepts only schemas without them and throws `Schema.SchemaError`.
 
 The offset defaults to 0 and must be an integer from 0 through `buffer.byteLength`; any other offset is a defect rather than a decoding failure: a `TypeError` if it is not a number, such as parse options passed second, and a `RangeError` otherwise. A buffer that is not a `Uint8Array` is a `TypeError`. A schema that always encodes to zero bytes, such as `Borsh.Unit`, an empty struct, `fixedBytes(0)` or `fixedArray(0)`, throws when the decoder is built, because a decoding loop over it would never advance. Every other schema reads at least one byte per value, including enums with one dataless variant, which Rust treats as zero-sized but Borsh still writes as a one-byte tag.
+
+## Keeping the exact bytes
+
+Signatures and hashes cover the bytes a message arrived as. `Borsh.withBytes(schema)` decodes to `{ value, bytes }`, where `bytes` is a copy of the exact span `value` was read from:
+
+```ts
+const SignedTransaction = Schema.Struct({
+  transaction: Borsh.withBytes(Transaction),
+  signature: Borsh.fixedBytes(64),
+})
+const signed = Schema.decodeSync(Borsh.toCodec(SignedTransaction))(input)
+
+verify(signed.signature, sha256(signed.transaction.bytes))
+store.put(signed.transaction.value.hash, signed.transaction.bytes) // as received
+```
+
+It adds nothing to the wire format, and works in any position: a struct field, vector items, an Option or Result payload, an enum variant field or a map value. Each gets its own span, so `Schema.Option(Borsh.withBytes(S))` leaves out the Option tag, while `Borsh.withBytes(Schema.Option(S))` includes it. `bytes` never shares the input's buffer, so it stays valid when the caller reuses that buffer. Failures inside are reported under `["value"]`, and length checks and `maxItems` apply inside as usual.
+
+Encoding writes `value`, never `bytes`, then fails at `["bytes"]` unless the result is exactly `bytes`, naming the output offset where they first differ. This never sends bytes that disagree with `value`: changing `value` without updating `bytes` fails rather than sending stale bytes. Borsh decoding is strict, so a decoded value always re-encodes to its bytes unless `schema` substitutes a value while decoding, as a lossy transformation or decoding middleware can. To build a new outgoing value, encode it with `schema` itself, which writes the same bytes. `withBytes` cannot be a map key or set member.
+
+JSON codecs and JSON Schema treat it as a struct of `value` and base64 `bytes`, and equivalence compares both.
 
 ## Binary format and limits
 
