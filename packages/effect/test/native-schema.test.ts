@@ -38,15 +38,18 @@ describe("native Effect schema composition", () => {
       expect(() => Schema.encodeSync(codec)(invalid)).toThrow(Schema.SchemaError)
       expect(() => Schema.decodeSync(codec)(Uint8Array.of(invalid, 0))).toThrow(Schema.SchemaError)
     }
-    // Borsh.U16's first check carries its layout, so reusing it on U8 conflicts.
+    // An integer's first check carries its layout, so reusing it elsewhere can conflict.
+    const [u8] = Borsh.U8.ast.checks ?? []
     const [u16] = Borsh.U16.ast.checks ?? []
-    if (u16 === undefined) {
-      throw new Error("Expected Borsh.U16 to have checks")
+    if (u8 === undefined || u16 === undefined) {
+      throw new Error("Expected Borsh integers to have checks")
     }
-    const conflicting = Borsh.U8.check(u16)
-    expect(() => Borsh.toCodec(Schema.Array(conflicting))).toThrow(
-      new Error("$[]: Conflicting Borsh layout annotations"),
-    )
+    expect(Schema.encodeSync(Borsh.toCodec(Borsh.U8.check(u8)))(7)).toEqual(Uint8Array.of(7))
+    for (const conflicting of [Borsh.U8.check(u16), Borsh.F32.check(u8)]) {
+      expect(() => Borsh.toCodec(Schema.Array(conflicting))).toThrow(
+        new Error("$[]: Conflicting Borsh layout annotations"),
+      )
+    }
   })
 
   it("supports a finite template-literal application type on an integer wire schema", () => {

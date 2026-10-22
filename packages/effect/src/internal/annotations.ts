@@ -1,4 +1,4 @@
-import { Equal, Schema, type SchemaAST } from "effect"
+import { Schema, type SchemaAST } from "effect"
 
 /** Private: only this package's constructors write it, through withLayout. */
 const key = "@zorsh/effect/borsh/layout"
@@ -88,10 +88,31 @@ function merge(
   next: LayoutAnnotation,
   path: string,
 ): LayoutAnnotation {
-  if (found !== undefined && !Equal.equals(found, next)) {
+  if (found !== undefined && !isSameLayout(found, next)) {
     throw new Error(`${path}: Conflicting Borsh layout annotations`)
   }
   return next
+}
+
+/**
+ * Layouts are flat records apart from an enum's discriminant map. Compared by hand, because Effect's
+ * Equal would treat a label such as "~effect/Equal" as its protocol method.
+ */
+function isSameLayout(left: LayoutAnnotation, right: LayoutAnnotation): boolean {
+  if (left.kind === "enum" && right.kind === "enum") {
+    return left.tag === right.tag && isSameRecord(left.discriminants, right.discriminants)
+  }
+  return isSameRecord(left, right)
+}
+
+function isSameRecord(left: object, right: object): boolean {
+  const keys = Object.keys(left)
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every(
+      (key) => Object.hasOwn(right, key) && Reflect.get(left, key) === Reflect.get(right, key),
+    )
+  )
 }
 
 export function withLayout<S extends Schema.Top>(

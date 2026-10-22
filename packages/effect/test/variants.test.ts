@@ -366,6 +366,12 @@ it("rejects malformed enums and discriminant maps", () => {
   expect(
     Schema.encodeSync(Borsh.toCodec(tagged.pipe(Borsh.discriminants({ A: 0, B: 1 }))))("B"),
   ).toEqual(Uint8Array.of(1))
+  // Labels are compared as plain keys, even ones that name Effect's equality protocols.
+  const protocol = Borsh.discriminants({ "~effect/Equal": 3, "~effect/Hash": 17 })
+  const protocolLabels = Schema.Literals(["~effect/Equal", "~effect/Hash"]).pipe(protocol, protocol)
+  expect(Schema.encodeSync(Borsh.toCodec(protocolLabels))("~effect/Equal")).toEqual(
+    Uint8Array.of(3),
+  )
   // Labels are untyped, so these mistakes surface when the map is applied.
   enum Direction {
     Up = 1,
@@ -467,7 +473,7 @@ it("keeps enum metadata on a schema ending in a filter group and rejects conflic
   )
 })
 
-it("rejects a suspended enum variant without forcing it", () => {
+it("rejects a suspended enum or enum variant without forcing it", () => {
   let forced = false
   const suspended = Schema.suspend(() => {
     forced = true
@@ -477,6 +483,7 @@ it("rejects a suspended enum variant without forcing it", () => {
   const message = new Error("$: Suspend/recursive schemas are unsupported")
   expect(() => Borsh.toCodec(union)).toThrow(message)
   expect(() => union.pipe(Borsh.discriminants({ A: 0, B: 1 }))).toThrow(message)
+  expect(() => suspended.pipe(Borsh.discriminants({ B: 0 }))).toThrow(message)
   expect(forced).toBe(false)
 })
 
