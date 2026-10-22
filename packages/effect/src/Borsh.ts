@@ -200,10 +200,7 @@ export function fixedBytes(length: number): Schema.Uint8Array {
   )
 }
 
-/**
- * Annotations not copied to the length check: those describing a check itself,
- * and JSON Schema keywords that would repeat in its fragment.
- */
+/** Annotations describing a check itself, which the length check keeps as its own. */
 const checkKeys = new Set([
   "expected",
   "message",
@@ -212,6 +209,12 @@ const checkKeys = new Set([
   "toCode",
   "arbitraryConstraint",
   "~structural",
+])
+
+/** Annotations JSON Schema emits from the schema and again from every check that carries them. */
+const jsonSchemaKeys = [
+  "title",
+  "description",
   "default",
   "examples",
   "readOnly",
@@ -220,14 +223,27 @@ const checkKeys = new Set([
   "contentEncoding",
   "contentMediaType",
   "contentSchema",
-])
+]
 
-/** Effect resolves annotations from the last check, so the new check keeps the schema's. */
-function exactLength(ast: SchemaAST.AST, length: number) {
-  // `.check()` with no checks leaves an empty array, which `SchemaAST.resolve` does not handle.
-  const resolved = ast.checks?.length ? SchemaAST.resolve(ast) : ast.annotations
-  const kept = Object.entries({ ...resolved }).filter(([key]) => !checkKeys.has(key))
-  return Schema.isBetweenLength(length, length, Object.fromEntries(kept))
+/**
+ * Appends an exact-length check. Effect resolves annotations from the last
+ * check, so the schema's annotations move onto the new one. JSON Schema
+ * keywords are cleared where they were, so they are emitted once.
+ */
+function withExactLength<S extends Schema.Top>(schema: S, length: number): S["Rebuild"] {
+  const checks = schema.ast.checks
+  // `.check()` with no checks leaves an empty array, which `resolve` and `annotate` do not handle.
+  const emptyChecks = checks !== undefined && checks.length === 0
+  const annotations = (emptyChecks ? schema.ast.annotations : SchemaAST.resolve(schema.ast)) ?? {}
+  const moved = Object.entries(annotations).filter(([key]) => !checkKeys.has(key))
+  const lengthCheck = Schema.isBetweenLength(length, length, Object.fromEntries(moved))
+  if (emptyChecks) {
+    return schema.check(lengthCheck as SchemaAST.Check<S["Type"]>)
+  }
+  const cleared = jsonSchemaKeys.filter((key) => key in annotations).map((key) => [key, undefined])
+  return schema
+    .annotate(Object.fromEntries(cleared))
+    .check(lengthCheck as SchemaAST.Check<S["Type"]>) as S["Rebuild"]
 }
 
 /** Whether a check, such as an earlier `fixedArray`, already enforces exactly `length` items. */
@@ -279,7 +295,7 @@ export function fixedArray(length: number): <S extends Schema.Top>(schema: S) =>
     // Without a transformation the decoded value is the encoded array, so it can carry the length.
     return schema.ast.encoding === undefined &&
       !schema.ast.checks?.some((check) => pinsLength(check, length))
-      ? fixed.check(exactLength(fixed.ast, length) as SchemaAST.Check<typeof fixed.Type>)
+      ? withExactLength(fixed, length)
       : fixed
   }
 }

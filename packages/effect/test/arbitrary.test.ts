@@ -122,12 +122,21 @@ it("keeps schema annotations when fixedArray adds its length check", () => {
   const schema = Schema.Array(Borsh.U8).pipe(
     Schema.overrideToFormatter(() => () => "<redacted>"),
     Schema.overrideToEquivalence(() => (a, b) => a.length === b.length),
-    Schema.annotate({ identifier: "Triple", description: "Three bytes", examples: [[1, 2, 3]] }),
+    Schema.annotate({
+      identifier: "Triple",
+      title: "Triple",
+      description: "Three bytes",
+      examples: [[1, 2, 3]],
+      default: [0, 0, 0],
+    }),
     Borsh.fixedArray(3),
   )
   expect(Schema.resolveAnnotations(schema)).toMatchObject({
     identifier: "Triple",
+    title: "Triple",
     description: "Three bytes",
+    examples: [[1, 2, 3]],
+    default: [0, 0, 0],
     expected: "a value with a length of 3",
   })
   expect(Schema.toFormatter(schema)([1, 2, 3])).toBe("<redacted>")
@@ -136,10 +145,27 @@ it("keeps schema annotations when fixedArray adds its length check", () => {
     Triple: {
       type: "array",
       items: { type: "integer", minimum: 0, maximum: 255 },
+      title: "Triple",
       description: "Three bytes",
       examples: [[1, 2, 3]],
-      allOf: [{ minItems: 3, maxItems: 3, description: "Three bytes" }],
+      default: [0, 0, 0],
+      minItems: 3,
+      maxItems: 3,
     },
+  })
+  // An earlier check's annotations move to the length check too.
+  const checked = Schema.Array(Borsh.U8)
+    .check(Schema.isMinLength(1, { description: "Non-empty", format: "bytes" }))
+    .pipe(Borsh.fixedArray(3))
+  expect(Schema.resolveAnnotations(checked)).toMatchObject({
+    description: "Non-empty",
+    format: "bytes",
+  })
+  expect(Schema.toJsonSchemaDocument(checked).schema).toEqual({
+    type: "array",
+    items: { type: "integer", minimum: 0, maximum: 255 },
+    minItems: 1,
+    allOf: [{ minItems: 3, maxItems: 3, description: "Non-empty", format: "bytes" }],
   })
   const codec = Borsh.toCodec(schema)
   expect(() => Schema.encodeUnknownSync(codec)("x")).toThrow(/^Expected Triple$/)
