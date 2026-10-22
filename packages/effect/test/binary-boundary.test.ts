@@ -6,7 +6,7 @@ import { Writer } from "../src/internal/io.js"
 
 function write(schema: Schema.Constraint, value: unknown) {
   const writer = new Writer(1024)
-  compile(Schema.toEncoded(schema).ast, false).write(writer, value)
+  compile(Schema.toEncoded(schema).ast).write(writer, value)
   return writer.finish()
 }
 

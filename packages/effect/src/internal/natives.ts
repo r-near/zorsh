@@ -5,18 +5,12 @@ import { bytes } from "./primitives.js"
 
 const uint8ArrayId = "effect/schema/Uint8Array"
 
-type Native = (
-  ast: SchemaAST.Declaration,
-  path: string,
-  compile: Compile,
-  countItems: boolean,
-) => Layout
+type Native = (ast: SchemaAST.Declaration, path: string, compile: Compile) => Layout
 
 export function compileDeclaration(
   ast: SchemaAST.Declaration,
   path: string,
   compile: Compile,
-  countItems: boolean,
 ): Layout {
   const id = representationId(ast)
   // Own keys only, so an id such as "constructor" cannot select an Object.prototype member.
@@ -27,7 +21,7 @@ export function compileDeclaration(
       `${path}: ${subject} has no Borsh layout; decode it from a Borsh-encodable schema with Schema.decodeTo`,
     )
   }
-  return native(ast, path, compile, countItems)
+  return native(ast, path, compile)
 }
 
 /** The declaration fixedBytes may annotate. */
@@ -208,12 +202,7 @@ interface CollectionAdapter {
  * Rust BTreeMap/BTreeSet, also for Hash collections: a u32 count, then strictly increasing keys.
  */
 function collectionLayout(adapter: CollectionAdapter) {
-  return (
-    ast: SchemaAST.Declaration,
-    path: string,
-    compile: Compile,
-    countItems: boolean,
-  ): Layout => {
+  return (ast: SchemaAST.Declaration, path: string, compile: Compile): Layout => {
     const [key, value] = parameters(ast, adapter.arity, adapter.name, path)
     const keyLayout = compile(key, `${path}["key"]`)
     const compare = keyLayout.compare
@@ -254,13 +243,6 @@ function collectionLayout(adapter: CollectionAdapter) {
       }
       return adapter.make(entries)
     }
-    const expectCollection = (w: Writer, value: unknown) => {
-      const collection = adapter.get(value)
-      if (collection === undefined || collection.size > 0xffff_ffff) {
-        throw new BinaryError(w.offset, "Expected native collection with u32 length")
-      }
-      return collection
-    }
     const writeEntries = (w: Writer, collection: Collection) => {
       w.ensure(4 + (collection.size === 0 ? 0 : collection.size * minEntryBytes))
       // Sorted into Rust order, so the increasing check below only rejects keys Rust deems equal.
@@ -285,10 +267,6 @@ function collectionLayout(adapter: CollectionAdapter) {
         throw prepend(prepend(error, part), i)
       }
     }
-    const write = (w: Writer, value: unknown) => writeEntries(w, expectCollection(w, value))
-    if (!countItems) {
-      return { minBytes: 4, isZeroSized: false, read: (r) => readEntries(r, r.u32()), write }
-    }
     return {
       minBytes: 4,
       isZeroSized: false,
@@ -299,7 +277,10 @@ function collectionLayout(adapter: CollectionAdapter) {
         return readEntries(r, count)
       },
       write: (w, value) => {
-        const collection = expectCollection(w, value)
+        const collection = adapter.get(value)
+        if (collection === undefined || collection.size > 0xffff_ffff) {
+          throw new BinaryError(w.offset, "Expected native collection with u32 length")
+        }
         w.charge(collection.size, w.offset)
         writeEntries(w, collection)
       },

@@ -311,7 +311,7 @@ describe("encoding", () => {
       expect(failure(() => encode(input)).message).toBe("Expected a value with its Borsh bytes")
     }
     // The schema pass rejects these first, so only a layout used on its own sees them.
-    const layout = compile(Schema.toEncoded(Borsh.withBytes(Borsh.U8)).ast, false)
+    const layout = compile(Schema.toEncoded(Borsh.withBytes(Borsh.U8)).ast)
     expect(() => layout.write(new Writer(16), { bytes: new Uint8Array(0) })).toThrow(
       "Expected value with bytes at byte 0",
     )

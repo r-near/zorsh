@@ -90,12 +90,7 @@ function homogeneousItem(ast: SchemaAST.AST): SchemaAST.AST | undefined {
   return undefined
 }
 
-export function compileArrays(
-  ast: SchemaAST.Arrays,
-  path: string,
-  compile: Compile,
-  countItems: boolean,
-): Layout {
+export function compileArrays(ast: SchemaAST.Arrays, path: string, compile: Compile): Layout {
   if (ast.rest.length === 0) {
     return tuple(ast.elements.map((item, i) => compile(item, `${path}[${i}]`)))
   }
@@ -105,7 +100,7 @@ export function compileArrays(
       `${path}: Mixed tuple rests have no Borsh layout; move the rest into its own Schema.Array element, or use Schema.Array with Schema.isMinLength`,
     )
   }
-  return vector(compile(rest, `${path}[]`), countItems)
+  return vector(compile(rest, `${path}[]`))
 }
 
 function tuple(items: ReadonlyArray<Layout>): Layout {
@@ -143,34 +138,10 @@ function tuple(items: ReadonlyArray<Layout>): Layout {
 }
 
 /** Rust Vec<T>. Zero-sized items are rejected when visited, as borsh-rs does. */
-function vector(item: Layout, countItems: boolean): Layout {
+function vector(item: Layout): Layout {
   const rejectZeroSizedItem = (offset: number) => {
     if (item.isZeroSized) {
       throw new BinaryError(offset, "Borsh forbids vectors of zero-sized values")
-    }
-  }
-  // Without maxItems these are the hot-path closures, so charging stays out of them.
-  if (!countItems) {
-    return {
-      minBytes: 4,
-      isZeroSized: false,
-      read: (r) => {
-        rejectZeroSizedItem(r.offset)
-        const count = r.u32()
-        // Each item needs at least minBytes, so reject an impossible count before allocating.
-        if (count > Math.floor((r.end - r.offset) / item.minBytes)) {
-          throw r.pastEnd(r.offset, count * item.minBytes, "Truncated vector payload")
-        }
-        return readItems(r, item, count)
-      },
-      write: (w, value) => {
-        rejectZeroSizedItem(w.offset)
-        if (!Array.isArray(value) || value.length > 0xffff_ffff) {
-          throw new BinaryError(w.offset, "Expected array with u32 length")
-        }
-        w.u32(value.length)
-        writeItems(w, item, value)
-      },
     }
   }
   return {
@@ -181,6 +152,7 @@ function vector(item: Layout, countItems: boolean): Layout {
       const offset = r.offset
       const count = r.u32()
       r.charge(count, offset)
+      // Each item needs at least minBytes, so reject an impossible count before allocating.
       if (count > Math.floor((r.end - r.offset) / item.minBytes)) {
         throw r.pastEnd(r.offset, count * item.minBytes, "Truncated vector payload")
       }
@@ -198,13 +170,12 @@ function vector(item: Layout, countItems: boolean): Layout {
   }
 }
 
-/** Rust [T; N], without a count prefix. With maxItems, every read and write charges all N items. */
+/** Rust [T; N], without a count prefix. Every read and write charges all N items to maxItems. */
 export function fixedArray(
   ast: SchemaAST.AST,
   length: number,
   path: string,
   compile: Compile,
-  countItems: boolean,
 ): Layout {
   const rest = homogeneousItem(ast)
   if (rest === undefined) {
@@ -213,46 +184,31 @@ export function fixedArray(
   const item = compile(rest, `${path}[]`)
   // Nested fixed arrays can multiply past 2^53, so clamp to stay a safe integer.
   const minBytes = length === 0 ? 0 : Math.min(Number.MAX_SAFE_INTEGER, length * item.minBytes)
-  const read = (r: Reader) => {
-    if (minBytes > r.end - r.offset) {
-      throw r.pastEnd(r.offset, minBytes, "Truncated fixed array payload")
-    }
-    return readItems(r, item, length)
-  }
-  const isFixedArray = (value: unknown): value is readonly unknown[] =>
-    Array.isArray(value) && value.length === length
-  const write = (w: Writer, value: unknown) => {
-    if (!isFixedArray(value)) {
-      throw new BinaryError(w.offset, `Expected fixed array of length ${length}`)
-    }
-    w.ensure(minBytes)
-    let i = 0
-    try {
-      for (; i < length; i++) {
-        item.write(w, value[i])
-      }
-    } catch (error) {
-      throw prepend(error, i)
-    }
-  }
-  const isZeroSized = length === 0 || item.isZeroSized
-  if (!countItems) {
-    return { minBytes, isZeroSized, read, write }
-  }
-  // Zero-sized items cost no bytes, so maxItems is the only bound on how many a read visits.
   return {
     minBytes,
-    isZeroSized,
+    isZeroSized: length === 0 || item.isZeroSized,
     read: (r) => {
+      // Zero-sized items cost no bytes, so maxItems is the only bound on how many a read visits.
       r.charge(length, r.offset)
-      return read(r)
+      if (minBytes > r.end - r.offset) {
+        throw r.pastEnd(r.offset, minBytes, "Truncated fixed array payload")
+      }
+      return readItems(r, item, length)
     },
     write: (w, value) => {
-      // A value of the wrong shape fails in write with its own message, before any charge.
-      if (isFixedArray(value)) {
-        w.charge(length, w.offset)
+      if (!Array.isArray(value) || value.length !== length) {
+        throw new BinaryError(w.offset, `Expected fixed array of length ${length}`)
       }
-      write(w, value)
+      w.charge(length, w.offset)
+      w.ensure(minBytes)
+      let i = 0
+      try {
+        for (; i < length; i++) {
+          item.write(w, value[i])
+        }
+      } catch (error) {
+        throw prepend(error, i)
+      }
     },
   }
 }

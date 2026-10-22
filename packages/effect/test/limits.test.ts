@@ -87,7 +87,7 @@ describe("maxItems", () => {
       disableChecks: true,
     })
     expect(() => shape([1])).toThrow("Expected fixed array of length 3 at byte 0")
-    const vector = compile(Schema.toEncoded(Schema.Array(Borsh.U8)).ast, true)
+    const vector = compile(Schema.toEncoded(Schema.Array(Borsh.U8)).ast)
     expect(() => vector.write(new Writer(64, 0), {})).toThrow("Expected array with u32 length")
     expect(() => vector.write(new Writer(64, 0), [1])).toThrow("Output exceeds maxItems (0)")
   })

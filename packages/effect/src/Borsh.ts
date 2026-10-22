@@ -540,9 +540,7 @@ function binaryFailure(error: unknown): SchemaIssue.Issue {
 }
 
 interface CodecCacheEntry {
-  readonly encoded: SchemaAST.AST
-  /** Keyed by whether collections charge maxItems; each variant compiles on first use. */
-  readonly layouts: Map<boolean, Layout>
+  readonly layout: Layout
   /** Keyed by `maxBytes`, or `maxBytes/maxItems` when maxItems is set. */
   readonly codecs: Map<number | string, unknown>
 }
@@ -628,9 +626,7 @@ export function toCodec<S extends Schema.Constraint>(
       S["EncodingServices"]
     >
   }
-  const codec = binaryCodec(layoutOf(entry, maxItems !== undefined), maxBytes, maxItems).pipe(
-    Schema.decodeTo(schema),
-  )
+  const codec = binaryCodec(entry.layout, maxBytes, maxItems).pipe(Schema.decodeTo(schema))
   // Maps iterate in insertion order, so this evicts the oldest options.
   if (entry.codecs.size >= optionsCacheSize) {
     entry.codecs.delete(entry.codecs.keys().next().value as number | string)
@@ -662,24 +658,9 @@ function cacheEntry(schema: Schema.Constraint): CodecCacheEntry {
   if (cached !== undefined) {
     return cached
   }
-  const entry: CodecCacheEntry = {
-    encoded: encodedAST(schema),
-    layouts: new Map(),
-    codecs: new Map(),
-  }
+  const entry: CodecCacheEntry = { layout: compile(encodedAST(schema)), codecs: new Map() }
   codecCache.set(schema, entry)
   return entry
-}
-
-/** Without maxItems, collections compile to layouts that do no counting at all. */
-function layoutOf(entry: CodecCacheEntry, countItems: boolean): Layout {
-  const cached = entry.layouts.get(countItems)
-  if (cached !== undefined) {
-    return cached
-  }
-  const layout = compile(entry.encoded, countItems)
-  entry.layouts.set(countItems, layout)
-  return layout
 }
 
 /** Bytes to the schema's encoded value and back; toCodec layers the schema itself on top. */
@@ -742,7 +723,7 @@ type PrefixReader = (bytes: Uint8Array, offset: number) => Prefix<unknown>
 
 function prefixReader(schema: Schema.Constraint, options: Options | undefined): PrefixReader {
   const { maxBytes, maxItems } = validLimits(options)
-  const layout = layoutOf(cacheEntry(schema), maxItems !== undefined)
+  const layout = cacheEntry(schema).layout
   // Every layout whose length can vary starts with a length prefix or a tag, so a minimum of zero
   // bytes means the value always encodes to none, and a loop decoding it would never advance.
   if (layout.minBytes === 0) {

@@ -75,8 +75,7 @@ function children(
   return []
 }
 
-/** countItems: whether collections charge their counts against the codec's maxItems budget. */
-export function compile(root: SchemaAST.AST, countItems: boolean): Layout {
+export function compile(root: SchemaAST.AST): Layout {
   // A node reused across the schema compiles once.
   const memo = new Map<SchemaAST.AST, Layout>()
   const compileCached: Compile = (ast, path) => {
@@ -84,7 +83,7 @@ export function compile(root: SchemaAST.AST, countItems: boolean): Layout {
     if (cached !== undefined) {
       return cached
     }
-    const layout = compileNode(ast, path, compileCached, countItems)
+    const layout = compileNode(ast, path, compileCached)
     memo.set(ast, layout)
     return layout
   }
@@ -92,12 +91,7 @@ export function compile(root: SchemaAST.AST, countItems: boolean): Layout {
 }
 
 /** An explicit layout annotation owns its node; natives and AST tags apply only without one. */
-function compileNode(
-  ast: SchemaAST.AST,
-  path: string,
-  compile: Compile,
-  countItems: boolean,
-): Layout {
+function compileNode(ast: SchemaAST.AST, path: string, compile: Compile): Layout {
   if (ast.context?.isOptional) {
     throw new Error(
       `${path}: Optional properties and elements have no Borsh layout on the encoded side; use Schema.Option for a Rust Option`,
@@ -105,11 +99,11 @@ function compileNode(
   }
   const layout = descriptor(ast, path)
   if (layout !== undefined) {
-    return compileDescriptor(ast, layout, path, compile, countItems)
+    return compileDescriptor(ast, layout, path, compile)
   }
   switch (ast._tag) {
     case "Declaration":
-      return compileDeclaration(ast, path, compile, countItems)
+      return compileDeclaration(ast, path, compile)
     case "Union":
     case "Enum":
       return compileEnum(ast, undefined, path, compile)
@@ -120,7 +114,7 @@ function compileNode(
     case "Objects":
       return compileObject(ast, path, compile)
     case "Arrays":
-      return compileArrays(ast, path, compile, countItems)
+      return compileArrays(ast, path, compile)
     case "Number":
     case "BigInt":
       throw new Error(
@@ -139,7 +133,6 @@ function compileDescriptor(
   layout: LayoutDescriptor,
   path: string,
   compile: Compile,
-  countItems: boolean,
 ): Layout {
   switch (layout.kind) {
     case "integer": {
@@ -161,7 +154,7 @@ function compileDescriptor(
       }
       return bytes(layout.length)
     case "fixedArray":
-      return fixedArray(ast, layout.length, path, compile, countItems)
+      return fixedArray(ast, layout.length, path, compile)
     case "enum":
       return compileEnum(ast, layout, path, compile)
   }
