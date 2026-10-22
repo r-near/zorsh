@@ -1,6 +1,6 @@
 {
   "name": "@zorsh/effect",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Borsh binary codecs derived from native Effect 4 schemas, with inferred TypeScript types for Rust contract arguments and results.",
   "keywords": [
     "binary",

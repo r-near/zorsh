@@ -1,5 +1,0 @@
----
-"@zorsh/effect": minor
----
-
-Bound work on untrusted input with limits you set explicitly. A new `maxItems` option caps the total number of vector, fixed-array, map and set items per operation, nested ones included, charged as soon as each length is known. It has no default limit and applies to encoding too. `Borsh.maxLength(n)` bounds one length prefix, whatever it counts: vector items, the UTF-8 bytes of a string, the bytes of `Borsh.Bytes`, map entries or set members. It is an ordinary Effect check, so `Schema.is`, `make` and Arbitrary samples agree with it, and the binary layer also enforces it right after reading a length and before writing one, failing with `Length N exceeds maxLength (M)`, the path and the byte offset, even under `disableChecks`. Put it on the encoded side, before any transformation; on a layout without a length prefix, `toCodec` throws. Effect's own length and size checks, such as `Schema.isMaxLength`, are never read as wire limits; they run in the schema pass like any other check. The README gains an "Untrusted input" section.
