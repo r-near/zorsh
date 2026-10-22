@@ -58,18 +58,17 @@ export function isU32Length(value: unknown): value is number {
 export function parseDiscriminants(
   map: Readonly<Record<string, number>>,
 ): Readonly<Record<string, number>> {
+  // Read the map once, so a getter cannot pass validation and then store something else.
+  const entries = Object.entries(map)
   const seen = new Set<number>()
-  for (const discriminant of Object.values(map)) {
-    if (!isU8(discriminant) || seen.has(discriminant)) {
+  for (const [, discriminant] of entries) {
+    const isU8 = Number.isInteger(discriminant) && discriminant >= 0 && discriminant <= 255
+    if (!isU8 || seen.has(discriminant)) {
       throw new Error("$: Borsh enum discriminants must be unique integers from 0 to 255")
     }
     seen.add(discriminant)
   }
-  return Object.freeze({ ...map })
-}
-
-function isU8(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 255
+  return Object.freeze(Object.fromEntries(entries))
 }
 
 export function layoutAnnotation(ast: SchemaAST.AST, path: string): LayoutAnnotation | undefined {

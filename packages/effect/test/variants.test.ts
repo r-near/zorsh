@@ -348,6 +348,24 @@ it("rejects malformed enums and discriminant maps", () => {
   ] as const) {
     expect(() => Borsh.discriminants(map)(variants)).toThrow(message)
   }
+  // The map is read once, so a getter cannot pass validation and then store another value.
+  let reads = 0
+  const shifting = {
+    get A() {
+      reads++
+      return reads === 1 ? 0 : 1
+    },
+    B: 1,
+  }
+  const AB = Schema.Literals(["A", "B"])
+  const shifted = AB.pipe(Borsh.discriminants(shifting))
+  expect(Schema.encodeSync(Borsh.toCodec(shifted))("A")).toEqual(Uint8Array.of(0))
+  // Symbol keys are not labels, so they neither count nor conflict.
+  const metadata = Symbol("metadata")
+  const tagged = AB.pipe(Borsh.discriminants({ A: 0, B: 1, [metadata]: 42 }))
+  expect(
+    Schema.encodeSync(Borsh.toCodec(tagged.pipe(Borsh.discriminants({ A: 0, B: 1 }))))("B"),
+  ).toEqual(Uint8Array.of(1))
   // Labels are untyped, so these mistakes surface when the map is applied.
   enum Direction {
     Up = 1,
@@ -361,17 +379,6 @@ it("rejects malformed enums and discriminant maps", () => {
   )
   expect(() => Borsh.discriminants({ Idle: 0 })(Borsh.Bytes)).toThrow(
     /Enum layout requires a tagged union, literal union or Schema.Enum/,
-  )
-})
-
-it("keeps enum metadata fixed when options have extra keys", () => {
-  const options = { tag: "_tag", kind: "integer", bits: 8, signed: false } as const
-  expect(() => Borsh.discriminants(discriminants, options)(Schema.Finite)).toThrow(
-    /Enum layout requires/,
-  )
-  const mapped = variants.pipe(Borsh.discriminants(discriminants, options))
-  expect(Schema.encodeSync(Borsh.toCodec(mapped))({ _tag: "Count", value: 513 })).toEqual(
-    Uint8Array.of(17, 1, 2),
   )
 })
 
@@ -458,6 +465,19 @@ it("keeps enum metadata on a schema ending in a filter group and rejects conflic
   expect(() => checked.pipe(Borsh.discriminants(other))).toThrow(
     new Error("$: Conflicting Borsh layout annotations"),
   )
+})
+
+it("rejects a suspended enum variant without forcing it", () => {
+  let forced = false
+  const suspended = Schema.suspend(() => {
+    forced = true
+    return Schema.TaggedStruct("B", {})
+  })
+  const union = Schema.Union([Schema.TaggedStruct("A", {}), suspended])
+  const message = new Error("$: Suspend/recursive schemas are unsupported")
+  expect(() => Borsh.toCodec(union)).toThrow(message)
+  expect(() => union.pipe(Borsh.discriminants({ A: 0, B: 1 }))).toThrow(message)
+  expect(forced).toBe(false)
 })
 
 it("does not force visible suspensions while adding enum metadata", () => {

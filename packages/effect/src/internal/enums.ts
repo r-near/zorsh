@@ -26,6 +26,10 @@ export function enumVariants(
   layout: EnumAnnotation | undefined,
   path: string,
 ): ReadonlyArray<EnumVariant> {
+  // Variants are classified before they are compiled, so a suspended one is reported here.
+  if (ast._tag === "Union" && ast.types.some(SchemaAST.isSuspend)) {
+    throw new Error(`${path}: Suspend/recursive schemas are unsupported`)
+  }
   const tag = layout === undefined ? "_tag" : layout.tag
   const isTaggedUnion =
     ast._tag === "Union" && ast.types.length > 0 && ast.types.every(SchemaAST.isObjects)

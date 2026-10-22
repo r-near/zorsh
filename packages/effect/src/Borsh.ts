@@ -238,9 +238,13 @@ export interface withBytes<S extends Schema.Top> extends Schema.declareConstruct
  * returns `{ value, bytes }`, where `bytes` is a copy of the span `value` was
  * read from, safe to keep after the input buffer is reused. Encoding writes
  * `value`, never `bytes`, and fails at `["bytes"]`, with the first differing
- * offset, unless that reproduces `bytes` exactly. To build a new outgoing
- * value, encode it with `schema` itself, which writes the same bytes.
- * `Arbitrary.schema` samples carry the bytes `schema` encodes their value to.
+ * offset, unless that reproduces `bytes` exactly. A decoded value always
+ * re-encodes to its bytes unless `schema` substitutes a value while decoding,
+ * as a lossy transformation or decoding middleware can. To build a new
+ * outgoing value, encode it with `schema` itself, which writes the same bytes.
+ * `Arbitrary.schema` samples carry the bytes `schema` encodes their value to,
+ * so samples of `Schema.toType`, `toEncoded` or `flip` applied to this schema
+ * can fail to encode when `schema` has a transformation.
  *
  * **Example** (Verify a signature over the transaction's exact bytes)
  *
@@ -288,6 +292,11 @@ export function withBytes<S extends Schema.Top>(schema: S): withBytes<S> {
     {
       representation: { id: withBytesId, payload: null },
       expected: "a value with its Borsh bytes",
+      toCode: ({ typeParameters: [value] }) => ({
+        runtime: `Borsh.withBytes(${value?.runtime})`,
+        Type: `{ readonly value: ${value?.Type}; readonly bytes: Uint8Array }`,
+        importDeclarations: [`import { Borsh } from "@zorsh/effect"`],
+      }),
       // JSON and other canonical codecs see a plain struct, with `bytes` in Effect's usual form.
       toCodec: ([value]) =>
         Schema.link<ValueWithBytes<S["Encoded"]>>()(

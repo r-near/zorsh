@@ -1,4 +1,13 @@
-import { Arbitrary, Context, Effect, Option, Result, Schema, SchemaTransformation } from "effect"
+import {
+  Arbitrary,
+  Context,
+  Effect,
+  Option,
+  Result,
+  Schema,
+  SchemaRepresentation,
+  SchemaTransformation,
+} from "effect"
 import { describe, expect, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { compile } from "../src/internal/compiler.js"
@@ -370,6 +379,19 @@ describe("schema", () => {
       bytes: "AQEC",
     })
     expect(Schema.decodeSync(json)(Schema.encodeSync(json)(value))).toEqual(value)
+  })
+
+  it("generates code that rebuilds it", () => {
+    const document = SchemaRepresentation.toCodeDocument(
+      SchemaRepresentation.toMultiDocument(Schema.toRepresentation(Borsh.withBytes(Schema.String))),
+    )
+    const [code] = document.codes
+    expect(code?.runtime).toMatch(/^Borsh\.withBytes\(Schema\.String\)/)
+    expect(code?.Type).toBe("{ readonly value: string; readonly bytes: Uint8Array }")
+    expect(document.artifacts).toContainEqual({
+      _tag: "Import",
+      importDeclaration: 'import { Borsh } from "@zorsh/effect"',
+    })
   })
 })
 
