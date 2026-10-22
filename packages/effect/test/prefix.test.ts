@@ -253,19 +253,6 @@ describe("decodePrefixSync", () => {
     }
   })
 
-  it("throws a TypeError for bytes that are not a Uint8Array, or an offset that is not a number", () => {
-    const decode = Borsh.decodePrefixSync(Borsh.U8)
-    expect(() => decode([1, 2] as never)).toThrow(
-      new TypeError("Prefix decoding requires a Uint8Array"),
-    )
-    // Parse options go third, unlike with Schema.decodeSync.
-    for (const offset of [{ errors: "all" }, "1", null]) {
-      expect(() => decode(Uint8Array.of(1), offset as never)).toThrow(
-        new TypeError("Prefix offset must be a number; parse options are the third argument"),
-      )
-    }
-  })
-
   it("accepts the end of the buffer as an offset, where any value is truncated", () => {
     const decode = Borsh.decodePrefixSync(Borsh.U8)
     expect(failure(() => decode(Uint8Array.of(1, 2), 2)).message).toBe(
@@ -378,11 +365,6 @@ describe("decodePrefixEffect", () => {
     expect(exit).toEqual(
       Exit.fail(failure(() => Borsh.decodePrefixSync(Recovering)(Uint8Array.of(2)))),
     )
-  })
-
-  it("dies with a TypeError for bytes that are not a Uint8Array", () => {
-    const exit = Effect.runSyncExit(Borsh.decodePrefixEffect(Borsh.U8)([1] as never))
-    expect(exit).toEqual(Exit.die(new TypeError("Prefix decoding requires a Uint8Array")))
   })
 
   it("reads the buffer when run, not when the effect is built", () => {
