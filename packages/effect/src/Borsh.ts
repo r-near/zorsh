@@ -7,7 +7,7 @@
  *
  * @since 0.1.0
  */
-import { Effect, Schema, type SchemaAST, SchemaIssue, SchemaTransformation } from "effect"
+import { Effect, Order, Schema, SchemaAST, SchemaIssue, SchemaTransformation } from "effect"
 import { isU32Length, parseDescriptor, withLayout } from "./internal/annotations.js"
 import { compile, type Layout, rejectSuspensions } from "./internal/compiler.js"
 import { homogeneousItem } from "./internal/containers.js"
@@ -116,12 +116,22 @@ export const I128 = bigInteger(128, true)
  * little endian. Infinities and signed zero are allowed; NaN is rejected.
  * Round explicitly with `Math.fround`.
  *
+ * Effect's native arbitrary has no binary32 generator, so derived samples are
+ * integers within ±2^24, which binary32 represents exactly. Refinements must
+ * admit such an integer for sampling.
+ *
  * @category floats
  * @since 0.1.0
  */
 export const F32 = withLayout(Schema.Number, { version: 1, kind: "float", bits: 32 }).check(
   Schema.makeFilter((n) => !Number.isNaN(n) && Object.is(Math.fround(n), n), {
     expected: "an exactly representable binary32 number",
+    arbitraryConstraint: {
+      order: Order.Number,
+      number: "integer",
+      minimum: -(2 ** 24),
+      maximum: 2 ** 24,
+    },
   }),
 )
 /**
@@ -185,7 +195,70 @@ export function fixedBytes(length: number): Schema.Uint8Array {
   }).check(
     Schema.makeFilter((bytes) => bytes.byteLength === length, {
       expected: `exactly ${length} bytes`,
+      arbitraryConstraint: { minLength: length, maxLength: length },
     }),
+  )
+}
+
+/** Annotations describing a check itself, which the length check keeps as its own. */
+const checkKeys = new Set([
+  "expected",
+  "message",
+  "representation",
+  "toJsonSchema",
+  "toCode",
+  "arbitraryConstraint",
+  "~structural",
+])
+
+/** Annotations JSON Schema emits from the schema and again from every check that carries them. */
+const jsonSchemaKeys = [
+  "title",
+  "description",
+  "default",
+  "examples",
+  "readOnly",
+  "writeOnly",
+  "format",
+  "contentEncoding",
+  "contentMediaType",
+  "contentSchema",
+]
+
+/**
+ * Appends an exact-length check. Effect resolves annotations from the last
+ * check, so the schema's annotations move onto the new one. JSON Schema
+ * keywords are cleared where they were, so they are emitted once.
+ */
+function withExactLength<S extends Schema.Top>(schema: S, length: number): S["Rebuild"] {
+  const checks = schema.ast.checks
+  // `.check()` with no checks leaves an empty array, which `resolve` and `annotate` do not handle.
+  const emptyChecks = checks !== undefined && checks.length === 0
+  const annotations = (emptyChecks ? schema.ast.annotations : SchemaAST.resolve(schema.ast)) ?? {}
+  if (emptyChecks) {
+    // The schema's own annotations cannot be cleared here, so JSON Schema keywords stay on it.
+    // Effect could not resolve this schema's annotations before the check was added either.
+    const kept = Object.entries(annotations).filter(
+      ([key]) => !checkKeys.has(key) && !jsonSchemaKeys.includes(key),
+    )
+    const lengthCheck = Schema.isBetweenLength(length, length, Object.fromEntries(kept))
+    return schema.check(lengthCheck as SchemaAST.Check<S["Type"]>)
+  }
+  const moved = Object.entries(annotations).filter(([key]) => !checkKeys.has(key))
+  const lengthCheck = Schema.isBetweenLength(length, length, Object.fromEntries(moved))
+  const cleared = jsonSchemaKeys.filter((key) => key in annotations).map((key) => [key, undefined])
+  return schema
+    .annotate(Object.fromEntries(cleared))
+    .check(lengthCheck as SchemaAST.Check<S["Type"]>) as S["Rebuild"]
+}
+
+/** Whether a check, such as an earlier `fixedArray`, already enforces exactly `length` items. */
+function pinsLength(check: SchemaAST.Check<never>, length: number): boolean {
+  if (check._tag === "FilterGroup") return check.checks.some((inner) => pinsLength(inner, length))
+  const representation = check.annotations?.representation
+  return (
+    representation?.id === "effect/schema/isBetweenLength" &&
+    JSON.stringify(representation.payload) === JSON.stringify({ minimum: length, maximum: length })
   )
 }
 
@@ -197,9 +270,12 @@ export function fixedBytes(length: number): Schema.Uint8Array {
  *
  * The schema's encoded side must be a homogeneous array, such as
  * `Schema.Array(item)`; other shapes throw when the combinator is applied. The
- * codec requires exactly `length` items. The schema is otherwise unchanged, so
- * transformations to application types are kept and no check is added to the
- * decoded value. `length` must be an integer from 0 through 2^32 - 1.
+ * codec requires exactly `length` items. A schema without a transformation,
+ * such as a checked or branded `Schema.Array(item)`, also gets a native
+ * exact-length check. A transformed schema is otherwise unchanged, so its
+ * application type is kept and no check is added to the decoded value; apply
+ * `fixedArray` before the transformation instead. `length` must be an integer
+ * from 0 through 2^32 - 1.
  *
  * **Example** (Three u16 values)
  *
@@ -221,7 +297,12 @@ export function fixedArray(length: number): <S extends Schema.Top>(schema: S) =>
   return (schema) => {
     if (homogeneousItem(encodedAST(schema)) === undefined)
       throw new Error("$: fixedArray requires a homogeneous encoded array")
-    return withLayout(schema, { version: 1, kind: "fixedArray", length })
+    const fixed = withLayout(schema, { version: 1, kind: "fixedArray", length })
+    // Without a transformation the decoded value is the encoded array, so it can carry the length.
+    return schema.ast.encoding === undefined &&
+      !schema.ast.checks?.some((check) => pinsLength(check, length))
+      ? withExactLength(fixed, length)
+      : fixed
   }
 }
 
