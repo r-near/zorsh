@@ -77,7 +77,7 @@ const RecipientAmount = Schema.Tuple([Schema.String, Borsh.U128])
 const recipientAmount = Schema.encodeSync(Borsh.toCodec(RecipientAmount))(["alice.near", 123n])
 ```
 
-An array writes a u32 item count followed by its items, like Rust `Vec<T>`. For a nonempty vector, use `Schema.Array(item).check(Schema.isMinLength(1))`. `Borsh.fixedArray(3)` applies the Rust `[T; 3]` layout to a homogeneous native encoded array. The codec requires exactly three items and writes no count prefix. The helper rejects other schema shapes at construction. An exact-length native check alone still describes a vector. The helper preserves the schema, including array-to-application transformations; it does not add a check to the decoded application value. A tuple writes its elements in order without a prefix. `Borsh.Unit` is `Schema.Tuple([])`, representing Rust `()` with no bytes.
+An array writes a u32 item count followed by its items, like Rust `Vec<T>`. For a nonempty vector, use `Schema.Array(item).check(Schema.isMinLength(1))`. `Borsh.fixedArray(3)` applies the Rust `[T; 3]` layout to a homogeneous native encoded array. The codec requires exactly three items and writes no count prefix. The helper rejects other schema shapes at construction. An exact-length native check alone still describes a vector. Without a transformation, the helper also adds a native exact-length check, so other lengths fail Schema validation. It preserves array-to-application transformations and adds no check to their decoded value; see [Generating fixtures](#generating-fixtures) for that case. A tuple writes its elements in order without a prefix. `Borsh.Unit` is `Schema.Tuple([])`, representing Rust `()` with no bytes.
 
 ### Structs
 
@@ -252,6 +252,52 @@ const program = Effect.gen(function* () {
 ```
 
 Both operations expose `Schema.SchemaError` in the error channel. Synchronous helpers throw that error. Binary failures are native issues with a path and the byte offset, so they render like other Schema errors, for example `Truncated vector payload at byte 12` followed by `at ["actions"]`. Unsupported layouts and invalid options throw when `toCodec` is constructed. Codecs are memoized by schema identity and `maxBytes`, so repeated `toCodec` calls with the same schema object are cheap; a structurally equal but separately constructed schema compiles again. User transformations and validators retain their native Effect behavior, including defects.
+
+## Generating fixtures
+
+Effect's `Arbitrary.schema` derives sample values from Borsh schemas, for property tests or fixtures:
+
+```ts
+import { Arbitrary } from "effect"
+
+const Request = Schema.Struct({
+  receiver: Schema.String.check(Schema.isPattern(/^[a-z0-9]+\.near$/)),
+  method: Schema.Literal("sign").pipe(Schema.encodeTo(Schema.String)),
+  memo: Schema.String.check(
+    Schema.makeFilter((s) => s.isWellFormed(), { expected: "well-formed Unicode" }),
+  ),
+  amount: Borsh.U128,
+})
+const requestCodec = Borsh.toCodec(Request)
+const fixtures = Effect.runSync(
+  Arbitrary.sampleEffect(Arbitrary.schema(Request), { count: 100, seed: 42 }),
+).map((request) => Schema.encodeSync(requestCodec)(request))
+```
+
+Samples follow the decoded type and its checks. `fixedBytes(n)` samples exactly `n` bytes and an untransformed `fixedArray(n)` exactly `n` items. Effect has no binary32 generator, so `F32` samples integers within ±2^24, which are exact.
+
+Raw `Schema.String` samples can contain lone UTF-16 surrogates, which Borsh strings reject. Narrow strings to the business values the contract expects, as with `receiver` and `method` above, or check `String.prototype.isWellFormed` (ES2024) as with `memo`. A bare `Schema.Literal` has no Borsh layout, so encode it to `Schema.String`. Vectors of zero-sized values, such as `Schema.Array(Borsh.Unit)`, sample but cannot be encoded.
+
+`fixedArray` cannot check the decoded value of a transformed array. Check the encoded array before the transformation, so other lengths fail Schema validation, and give the decoded type a fixed shape, so samples encode to `n` items:
+
+```ts
+import { SchemaTransformation } from "effect"
+
+const Range = Schema.Array(Borsh.U32)
+  .check(Schema.isBetweenLength(2, 2))
+  .pipe(
+    Schema.decodeTo(
+      Schema.Struct({ start: Borsh.U32, end: Borsh.U32 }),
+      SchemaTransformation.transform({
+        decode: ([start = 0, end = 0]) => ({ start, end }),
+        encode: ({ start, end }) => [start, end],
+      }),
+    ),
+    Borsh.fixedArray(2),
+  )
+```
+
+The encoded check governs validation; the decoded type governs generation.
 
 ## Binary format and limits
 
