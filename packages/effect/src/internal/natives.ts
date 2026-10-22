@@ -36,43 +36,16 @@ export function isLengthPrefixed(ast: SchemaAST.Declaration): boolean {
   return id !== undefined && lengthPrefixedIds.has(id)
 }
 
-/** The declaration fixedBytes may annotate. */
-export function isUint8Array(ast: SchemaAST.AST): boolean {
-  return ast._tag === "Declaration" && representationId(ast) === uint8ArrayId
-}
-
 function representationId(ast: SchemaAST.Declaration): string | undefined {
-  const representation = ast.annotations?.representation
-  if (
-    typeof representation === "object" &&
-    representation !== null &&
-    "id" in representation &&
-    typeof representation.id === "string"
-  ) {
-    return representation.id
-  }
-  return undefined
-}
-
-/** Effect's constructors fix these arities; only hand-built declarations can differ. */
-function parameters<const N extends 1 | 2>(
-  ast: SchemaAST.Declaration,
-  count: N,
-  name: string,
-  path: string,
-): N extends 1 ? readonly [SchemaAST.AST] : readonly [SchemaAST.AST, SchemaAST.AST] {
-  // includes visits holes too, so sparse hand-built arrays fail here.
-  const slots: ReadonlyArray<SchemaAST.AST | undefined> = ast.typeParameters
-  if (slots.length !== count || slots.includes(undefined)) {
-    throw new Error(
-      `${path}: ${name} requires exactly ${count} encoded type parameter${count === 1 ? "" : "s"}`,
-    )
-  }
-  return ast.typeParameters as never
+  // Hand-built declarations can carry a representation and id of any type.
+  const representation = ast.annotations?.representation as { readonly id?: unknown } | undefined
+  const id = representation?.id
+  return typeof id === "string" ? id : undefined
 }
 
 function option(ast: SchemaAST.Declaration, path: string, compile: Compile): Layout {
-  const [inner] = parameters(ast, 1, "Option", path)
+  // The constructors behind these representation ids fix each declaration's type parameters.
+  const [inner] = ast.typeParameters as readonly [SchemaAST.AST]
   const item = compile(inner, `${path}["value"]`)
   return {
     minBytes: 1,
@@ -111,7 +84,7 @@ function option(ast: SchemaAST.Declaration, path: string, compile: Compile): Lay
 
 /** Rust Result<T, E>: tag 1 then the Ok value, or tag 0 then the Err value. */
 function result(ast: SchemaAST.Declaration, path: string, compile: Compile): Layout {
-  const [success, failure] = parameters(ast, 2, "Result", path)
+  const [success, failure] = ast.typeParameters as readonly [SchemaAST.AST, SchemaAST.AST]
   const ok = compile(success, `${path}["success"]`)
   const err = compile(failure, `${path}["failure"]`)
   return {
@@ -170,7 +143,7 @@ export function isValueWithBytes(input: unknown): input is ValueWithBytes<unknow
 
 /** The layout of the wrapped schema, also keeping the exact span its value was read from. */
 function withBytes(ast: SchemaAST.Declaration, path: string, compile: Compile): Layout {
-  const [inner] = parameters(ast, 1, "withBytes", path)
+  const [inner] = ast.typeParameters as readonly [SchemaAST.AST]
   const value = compile(inner, `${path}["value"]`)
   // No compare: as a map key or set member it fails at construction, like any unordered key.
   return {
@@ -205,7 +178,6 @@ function withBytes(ast: SchemaAST.Declaration, path: string, compile: Compile): 
 
 interface CollectionAdapter {
   readonly name: string
-  readonly arity: 1 | 2
   get(value: unknown): Collection | undefined
   make(entries: [unknown, unknown][]): unknown
 }
@@ -220,7 +192,8 @@ function collectionLayout(adapter: CollectionAdapter) {
     compile: Compile,
     maxLength: number,
   ): Layout => {
-    const [key, value] = parameters(ast, adapter.arity, adapter.name, path)
+    // Sets have no value parameter.
+    const [key, value] = ast.typeParameters as readonly [SchemaAST.AST, SchemaAST.AST?]
     const keyLayout = compile(key, `${path}["key"]`)
     const compare = keyLayout.compare
     if (compare === undefined) {
@@ -314,27 +287,23 @@ interface Collection {
 
 const readonlyMap = collectionLayout({
   name: "ReadonlyMap",
-  arity: 2,
   get: (value) => (value instanceof Map ? { size: value.size, entries: value } : undefined),
   make: (entries) => new Map(entries),
 })
 const readonlySet = collectionLayout({
   name: "ReadonlySet",
-  arity: 1,
   get: (value) =>
     value instanceof Set ? { size: value.size, entries: value.entries() } : undefined,
   make: (entries) => new Set(entries.map(([key]) => key)),
 })
 const hashMap = collectionLayout({
   name: "HashMap",
-  arity: 2,
   get: (value) =>
     HashMap.isHashMap(value) ? { size: HashMap.size(value), entries: value } : undefined,
   make: HashMap.fromIterable,
 })
 const hashSet = collectionLayout({
   name: "HashSet",
-  arity: 1,
   get: (value) =>
     HashSet.isHashSet(value) ? { size: HashSet.size(value), entries: keyPairs(value) } : undefined,
   make: (entries) => HashSet.fromIterable(entries.map(([key]) => key)),

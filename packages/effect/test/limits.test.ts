@@ -373,6 +373,34 @@ describe("Borsh.maxLength", () => {
     expect(Schema.decodeSync(Borsh.toCodec(Upper), { disableChecks: true })(bytes)).toBe("AB")
   })
 
+  it("is only an ordinary check on a union with a transformed member", () => {
+    // Effect keeps such a union's checks off its encoded side, as for any transformation.
+    const Letters = Schema.Union([
+      Schema.Literal("a"),
+      Schema.Literal("b").pipe(
+        Schema.decodeTo(
+          Schema.Literal("bb"),
+          SchemaTransformation.transform({
+            decode: () => "bb" as const,
+            encode: () => "b" as const,
+          }),
+        ),
+      ),
+    ]).check(Borsh.maxLength(1))
+    const codec = Borsh.toCodec(Letters)
+    expect(Schema.decodeSync(codec)(Uint8Array.of(0))).toBe("a")
+    expect(() => Schema.decodeSync(codec)(Uint8Array.of(1))).toThrow(
+      "Expected a Borsh length of at most 1",
+    )
+    expect(() => Schema.encodeSync(codec)("bb")).toThrow("Expected a Borsh length of at most 1")
+    expect(Schema.is(Letters)("bb")).toBe(false)
+    expect(Schema.decodeSync(codec, { disableChecks: true })(Uint8Array.of(1))).toBe("bb")
+    // Without the transformation the bound sits on the enum's encoded side, where it is misplaced.
+    expect(() => Borsh.toCodec(Schema.Literals(["a", "b"]).check(Borsh.maxLength(1)))).toThrow(
+      "$: Borsh.maxLength requires a length-prefixed layout",
+    )
+  })
+
   it("throws at construction on layouts without a length prefix, and on invalid bounds", () => {
     const bound = Borsh.maxLength(2) as never
     const misplaced = [

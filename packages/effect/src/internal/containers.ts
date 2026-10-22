@@ -83,8 +83,8 @@ export function defineField(target: object, name: PropertyKey, value: unknown): 
 }
 
 /** The item of a plain `ReadonlyArray<T>`, with no leading or trailing elements. */
-export function homogeneousItem(ast: SchemaAST.AST): SchemaAST.AST | undefined {
-  if (ast._tag === "Arrays" && ast.elements.length === 0 && ast.rest.length === 1) {
+export function homogeneousItem(ast: SchemaAST.Arrays): SchemaAST.AST | undefined {
+  if (ast.elements.length === 0 && ast.rest.length === 1) {
     return ast.rest[0]
   }
   return undefined
@@ -179,15 +179,13 @@ function vector(item: Layout, maxLength: number): Layout {
 
 /** Rust [T; N], without a count prefix. Every read and write charges all N items to maxItems. */
 export function fixedArray(
-  ast: SchemaAST.AST,
+  ast: SchemaAST.Arrays,
   length: number,
   path: string,
   compile: Compile,
 ): Layout {
-  const rest = homogeneousItem(ast)
-  if (rest === undefined) {
-    throw new Error(`${path}: Fixed array layout requires a homogeneous encoded array`)
-  }
+  // Borsh.fixedArray builds Schema.Array(item), so rest holds exactly the item.
+  const [rest] = ast.rest as [SchemaAST.AST]
   const item = compile(rest, `${path}[]`)
   // Nested fixed arrays can multiply past 2^53, so clamp to stay a safe integer.
   const minBytes = length === 0 ? 0 : Math.min(Number.MAX_SAFE_INTEGER, length * item.minBytes)

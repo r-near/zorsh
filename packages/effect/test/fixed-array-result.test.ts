@@ -1,4 +1,4 @@
-import { Context, Effect, Exit, Result, Schema, SchemaAST, SchemaTransformation } from "effect"
+import { Context, Effect, Exit, Result, Schema, SchemaTransformation } from "effect"
 import { expect, expectTypeOf, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 import { compile } from "../src/internal/compiler.js"
@@ -32,25 +32,12 @@ it("writes fixed arrays without a prefix and enforces their binary length", () =
   expect(Schema.encodeSync(Borsh.toCodec(vector))([7])).toEqual(Uint8Array.of(1, 0, 0, 0, 7))
 })
 
-it("rejects invalid fixed-array lengths and conflicting layout metadata", () => {
+it("rejects invalid fixed-array lengths", () => {
   for (const length of [-1, 0.5, NaN, Infinity, 0x1_0000_0000]) {
     expect(() => Borsh.fixedArray(Borsh.U8, length)).toThrow(
       /fixedArray length must be a safe integer/,
     )
   }
-  const key = "@zorsh/effect/borsh/layout"
-  const schema = Borsh.fixedArray(Borsh.U8, 1)
-  expect(() =>
-    Borsh.toCodec(schema.annotate({ [key]: { version: 1, kind: "fixedArray", length: 2 } })),
-  ).toThrow(/Conflicting Borsh layout annotations/)
-  expect(() =>
-    Borsh.toCodec(Schema.String.annotate({ [key]: { version: 1, kind: "fixedArray", length: 1 } })),
-  ).toThrow(/Fixed array layout requires a homogeneous encoded array/)
-  expect(() =>
-    Borsh.toCodec(
-      Schema.Array(Borsh.U8).annotate({ [key]: { version: 1, kind: "fixedArray", length: -1 } }),
-    ),
-  ).toThrow(/Invalid Borsh layout annotation/)
   const huge = Borsh.fixedArray(Borsh.fixedArray(Borsh.U16, 0xffff_ffff), 0xffff_ffff)
   expect(compile(Schema.toEncoded(huge).ast).minBytes).toBe(Number.MAX_SAFE_INTEGER)
   expect(() => Schema.decodeSync(Borsh.toCodec(huge))(new Uint8Array())).toThrow(
@@ -199,32 +186,6 @@ it("retains nested Result paths, payload transformations and inactive branch non
   ).toThrow(/Invalid bool tag 2 at byte 2\n {2}at \[1\]\["success"\]$/)
 })
 
-it("validates Result arity and explicitly annotated fixed-array shapes", () => {
-  const ast = Schema.Result(Borsh.U8, Borsh.Unit).ast
-  const sparse: SchemaAST.AST[] = []
-  sparse[1] = Borsh.Unit.ast
-  for (const parameters of [
-    [],
-    [Borsh.U8.ast],
-    [Borsh.U8.ast, Borsh.Unit.ast, Borsh.U8.ast],
-    sparse,
-  ]) {
-    expect(() => compile(new SchemaAST.Declaration(parameters, ast.run, ast.annotations))).toThrow(
-      /^\$: Result requires exactly 2 encoded type parameters$/,
-    )
-  }
-  const key = "@zorsh/effect/borsh/layout"
-  for (const schema of [
-    Schema.Tuple([]),
-    Schema.NonEmptyArray(Borsh.U8),
-    Schema.TupleWithRest(Schema.Tuple([]), [Borsh.U8, Borsh.U16]),
-  ]) {
-    expect(() =>
-      Borsh.toCodec(schema.annotate({ [key]: { version: 1, kind: "fixedArray", length: 1 } })),
-    ).toThrow(/Fixed array layout requires a homogeneous encoded array/)
-  }
-})
-
 it("keeps native array checks and fixed-item error paths", () => {
   const schema = Borsh.fixedArray(Borsh.U8, 1).check(Schema.isMinLength(2))
   const codec = Borsh.toCodec(schema)
@@ -290,7 +251,7 @@ it("rejects fixed-array Suspend when deriving the codec, without evaluating its 
   })
   const schema = Borsh.fixedArray(item, 2)
   expect(() => Borsh.toCodec(schema)).toThrow(
-    /\$\.rest\[0\]: Suspend\/recursive schemas are unsupported/,
+    new Error("$[]: Suspend/recursive schemas are unsupported"),
   )
   expect(calls).toBe(0)
 })

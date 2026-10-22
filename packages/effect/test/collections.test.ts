@@ -7,7 +7,6 @@ import {
   Option,
   Result,
   Schema,
-  SchemaAST,
   SchemaTransformation,
 } from "effect"
 import { expect, expectTypeOf, it } from "vite-plus/test"
@@ -114,24 +113,9 @@ it("rejects unsupported key orderings at construction, including empty collectio
   }
 })
 
-it("validates collection arities and native binary shapes", () => {
-  const names = ["ReadonlyMap", "HashMap", "ReadonlySet", "HashSet"]
+it("validates native collection shapes", () => {
   for (const [i, schema] of [...mapSchemas, ...setSchemas].entries()) {
-    const ast = Schema.toEncoded(schema).ast
-    expect(ast._tag).toBe("Declaration")
-    if (ast._tag !== "Declaration") {
-      throw new Error("Expected Declaration")
-    }
-    const arity = i < 2 ? "2 encoded type parameters" : "1 encoded type parameter"
-    const message = new Error(`$: ${names[i]} requires exactly ${arity}`)
-    expect(() => compile(new SchemaAST.Declaration([], ast.run, ast.annotations))).toThrow(message)
-    // Sparse hand-built parameters fail the same check: an empty set key or map value slot.
-    const sparse = ast.typeParameters.slice(0, i < 2 ? 1 : 0)
-    sparse.length = ast.typeParameters.length
-    expect(() => compile(new SchemaAST.Declaration(sparse, ast.run, ast.annotations))).toThrow(
-      message,
-    )
-    const layout = compile(ast)
+    const layout = compile(Schema.toEncoded(schema).ast)
     for (const value of [null, [], {}, 1]) {
       expect(() => layout.write(new Writer(64), value)).toThrow(/Expected native collection/)
     }

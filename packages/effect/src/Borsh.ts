@@ -20,8 +20,8 @@ import {
   SchemaParser,
   SchemaTransformation,
 } from "effect"
-import { isU32Length, maxLengthId, parseDescriptor, withLayout } from "./internal/annotations.js"
-import { compile, type Layout, prepare } from "./internal/compiler.js"
+import { isU32Length, maxLengthId, parseDiscriminants, withLayout } from "./internal/annotations.js"
+import { compile, type Layout } from "./internal/compiler.js"
 import { enumVariants } from "./internal/enums.js"
 import { BinaryError, Reader, type ReaderOptions, utf8Length, Writer } from "./internal/io.js"
 import { isValueWithBytes, type ValueWithBytes, withBytesId } from "./internal/natives.js"
@@ -29,27 +29,15 @@ import { integerRange } from "./internal/primitives.js"
 
 function integer(bits: 8 | 16 | 32, signed: boolean) {
   const { minimum, maximum } = integerRange(bits, signed)
-  return withLayout(Schema.Int, {
-    version: 1,
-    kind: "integer",
-    bits,
-    signed,
-  }).check(Schema.isBetween({ minimum: Number(minimum), maximum: Number(maximum) }))
+  return withLayout(Schema.Int, { kind: "integer", bits, signed }).check(
+    Schema.isBetween({ minimum: Number(minimum), maximum: Number(maximum) }),
+  )
 }
 
 function bigInteger(bits: 64 | 128, signed: boolean): Schema.BigInt {
-  return withLayout(Schema.BigInt, {
-    version: 1,
-    kind: "integer",
-    bits,
-    signed,
-  }).check(Schema.isBetweenBigInt(integerRange(bits, signed)))
-}
-
-/** Reject Suspend, with its path, before deriving the encoded AST. */
-function encodedAST(schema: Schema.Constraint): SchemaAST.AST {
-  prepare(schema.ast)
-  return Schema.toEncoded(schema).ast
+  return withLayout(Schema.BigInt, { kind: "integer", bits, signed }).check(
+    Schema.isBetweenBigInt(integerRange(bits, signed)),
+  )
 }
 
 /**
@@ -135,7 +123,7 @@ export const I128 = bigInteger(128, true)
  * @category floats
  * @since 0.1.0
  */
-export const F32 = withLayout(Schema.Number, { version: 1, kind: "float", bits: 32 }).check(
+export const F32 = withLayout(Schema.Number, { kind: "float", bits: 32 }).check(
   Schema.makeFilter((n) => !Number.isNaN(n) && Object.is(Math.fround(n), n), {
     expected: "an exactly representable binary32 number",
     arbitraryConstraint: {
@@ -153,11 +141,9 @@ export const F32 = withLayout(Schema.Number, { version: 1, kind: "float", bits: 
  * @category floats
  * @since 0.1.0
  */
-export const F64 = withLayout(Schema.Number, {
-  version: 1,
-  kind: "float",
-  bits: 64,
-}).check(Schema.makeFilter((n) => !Number.isNaN(n), { expected: "a non-NaN number" }))
+export const F64 = withLayout(Schema.Number, { kind: "float", bits: 64 }).check(
+  Schema.makeFilter((n) => !Number.isNaN(n), { expected: "a non-NaN number" }),
+)
 
 /**
  * Rust `Vec<u8>`: a u32 byte length followed by the bytes. This is
@@ -180,19 +166,8 @@ export const Unit = Schema.Tuple([])
  *
  * **Details**
  *
- * The schema checks the byte length, so encoding and decoding reject other
- * sizes. `length` must be an integer from 0 through 2^32 - 1.
- *
- * **Example** (A 32-byte identifier)
- *
- * ```ts
- * import { Borsh } from "@zorsh/effect"
- * import { Schema } from "effect"
- *
- * const RequestId = Borsh.fixedBytes(32)
- * const bytes = Schema.encodeSync(Borsh.toCodec(RequestId))(new Uint8Array(32))
- * // bytes.length === 32
- * ```
+ * Other lengths fail the schema's length check. `length` must be an integer
+ * from 0 through 2^32 - 1.
  *
  * @category bytes
  * @since 0.1.0
@@ -201,11 +176,9 @@ export function fixedBytes(length: number): Schema.Uint8Array {
   if (!isU32Length(length)) {
     throw new Error("$: fixedBytes length must be a safe integer between 0 and 2^32 - 1")
   }
-  return withLayout(Bytes, {
-    version: 1,
-    kind: "fixedBytes",
-    length,
-  }).check(Schema.isBetweenLength(length, length))
+  return withLayout(Bytes, { kind: "fixedBytes", length }).check(
+    Schema.isBetweenLength(length, length),
+  )
 }
 
 /**
@@ -214,11 +187,8 @@ export function fixedBytes(length: number): Schema.Uint8Array {
  * **Details**
  *
  * The schema is a native `Schema.Array(item)` with an exact-length check, so
- * other lengths fail Schema validation, samples have `length` items and JSON
- * Schema gets `minItems` and `maxItems`. Annotate, brand or transform the
- * result like any other array schema; as with any checked schema, later
- * annotations attach to the length check. `length` must be an integer from 0
- * through 2^32 - 1.
+ * other lengths fail validation and samples have `length` items. `length`
+ * must be an integer from 0 through 2^32 - 1.
  *
  * **Example** (Rust `[u16; 3]`)
  *
@@ -238,7 +208,7 @@ export function fixedArray<S extends Schema.Constraint>(item: S, length: number)
   if (!isU32Length(length)) {
     throw new Error("$: fixedArray length must be a safe integer between 0 and 2^32 - 1")
   }
-  return withLayout(Schema.Array(item), { version: 1, kind: "fixedArray", length }).check(
+  return withLayout(Schema.Array(item), { kind: "fixedArray", length }).check(
     Schema.isBetweenLength(length, length),
   )
 }
@@ -265,26 +235,16 @@ export interface withBytes<S extends Schema.Top> extends Schema.declareConstruct
  * **Details**
  *
  * The wire layout is the layout of `schema`, with nothing added. Decoding
- * returns `{ value, bytes }`, where `bytes` is a copy of the span that `value`
- * was read from: hash or verify a signature over it, or store or forward it
- * unchanged. Failures inside `value` are reported under `["value"]`.
- *
- * Encoding writes `value`, never `bytes`, and fails at `["bytes"]` unless that
- * reproduces `bytes` exactly, naming the output offset where they first
- * differ. Borsh decoding is strict, so a decoded value always re-encodes to its
- * bytes unless `schema` substitutes a value while decoding, as a lossy
- * transformation or decoding middleware can. To build a new outgoing value,
- * encode it with `schema` itself, which writes the same bytes.
- *
- * `bytes` is copied, never a view into the decoded input, so it stays valid
- * when the caller reuses its buffer. Samples from `Arbitrary.schema` carry the
- * bytes `schema` encodes their value to. Samples that `schema` cannot encode,
- * such as strings with lone surrogates, are discarded, and a `schema` whose
- * encoding needs services cannot be sampled. Samples of `Schema.toType`,
- * `Schema.toEncoded` or `Schema.flip` applied to this schema are still encoded
- * with `schema`, so when it has a transformation they can be discarded, or
- * carry bytes that differ from what the derived schema writes and so fail to
- * encode at `["bytes"]`.
+ * returns `{ value, bytes }`, where `bytes` is a copy of the span `value` was
+ * read from, safe to keep after the input buffer is reused. Encoding writes
+ * `value`, never `bytes`, and fails at `["bytes"]`, with the first differing
+ * offset, unless that reproduces `bytes` exactly. A decoded value always
+ * re-encodes to its bytes unless `schema` substitutes a value while decoding,
+ * as a lossy transformation or decoding middleware can. To build a new
+ * outgoing value, encode it with `schema` itself, which writes the same bytes.
+ * `Arbitrary.schema` samples carry the bytes `schema` encodes their value to,
+ * so samples of `Schema.toType`, `toEncoded` or `flip` applied to this schema
+ * can fail to encode when `schema` has a transformation.
  *
  * **Example** (Verify a signature over the transaction's exact bytes)
  *
@@ -381,67 +341,6 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.byteLength === right.byteLength && left.every((byte, i) => byte === right[i])
 }
 
-/** TS enum member names, found through wrappers that keep the encoded (or flipped type) side. */
-type EnumNames<S, Side extends "Encoded" | "Type" = "Encoded"> = S extends {
-  readonly enums: infer E
-}
-  ? `${Extract<keyof E, string | number>}`
-  : S extends { readonly from: infer F; readonly to: infer T }
-    ? EnumNames<Side extends "Encoded" ? F : T, Side>
-    : S extends Schema.Top & { readonly schema: infer I extends Schema.Top }
-      ? [S[Side], I[Side]] extends [I[Side], S[Side]]
-        ? EnumNames<I, Side>
-        : Side extends "Encoded"
-          ? [S[Side], I["Type"]] extends [I["Type"], S[Side]]
-            ? EnumNames<I, "Type">
-            : never
-          : never
-      : never
-// The labels a discriminant map must cover: TS enum names, literal values or variant tags.
-type EnumLabels<S extends Schema.Top, Tag extends string> = [EnumNames<S>] extends [never]
-  ? S["Encoded"] extends infer E
-    ? E extends SchemaAST.LiteralValue
-      ? Tag extends "_tag"
-        ? `${E}`
-        : never
-      : E extends { readonly [K in Tag]: infer L }
-        ? Extract<L, string>
-        : never
-    : never
-  : Tag extends "_tag"
-    ? EnumNames<S>
-    : never
-// The keys of a discriminant map, or only its required keys.
-type MapLabels<D, Required = false> = `${Extract<
-  { [K in keyof D]-?: Required extends true ? ({} extends Pick<D, K> ? never : K) : K }[keyof D],
-  string | number
->}`
-// True only for a single string literal, not `string` or a union.
-type SingleTag<Tag extends string> = string extends Tag
-  ? false
-  : [Tag] extends [infer T]
-    ? T extends unknown
-      ? [Tag] extends [T]
-        ? true
-        : false
-      : never
-    : never
-// A type error naming the problem unless Tag is one literal and the map covers exactly the labels.
-type ExactDiscriminants<S extends Schema.Top, D, Tag extends string> = [SingleTag<Tag>] extends [
-  true,
-]
-  ? ExactLabels<S, D, Tag>
-  : { readonly "Borsh discriminants tag must be one string literal": Tag }
-type ExactLabels<S extends Schema.Top, D, Tag extends string> = [
-  Exclude<EnumLabels<S, Tag>, MapLabels<D, true>>,
-  Exclude<MapLabels<D>, EnumLabels<S, Tag>>,
-] extends [never, never]
-  ? unknown
-  : {
-      readonly "Missing Borsh discriminants": Exclude<EnumLabels<S, Tag>, MapLabels<D, true>>
-      readonly "Unknown Borsh discriminants": Exclude<MapLabels<D>, EnumLabels<S, Tag>>
-    }
-
 /**
  * Rust `#[borsh(use_discriminant = true)]`: assigns explicit u8 discriminants
  * to an enum schema.
@@ -450,10 +349,10 @@ type ExactLabels<S extends Schema.Top, D, Tag extends string> = [
  *
  * Without this, each variant's discriminant is its declaration index. Keys are
  * the encoded `_tag` values, literal values as strings, or TS enum member
- * names; every variant needs exactly one unique integer from 0 to 255. Missing
- * and unknown keys are type errors. Pass `{ tag: "kind" }` for unions tagged by
- * another literal field. Values are checked when the combinator is called and
- * labels when it is applied to a schema.
+ * names; every variant needs exactly one unique integer from 0 to 255. Pass
+ * `{ tag: "kind" }` for unions tagged by another literal field. Values are
+ * checked when the combinator is called, and missing or unknown keys throw
+ * when it is applied to a schema.
  *
  * **Example** (Sparse discriminants)
  *
@@ -472,24 +371,17 @@ type ExactLabels<S extends Schema.Top, D, Tag extends string> = [
  * @category enums
  * @since 0.1.0
  */
-export function discriminants<
-  const D extends Readonly<Record<string, number>>,
-  Tag extends string = "_tag",
->(
-  map: D,
-  options?: { readonly tag?: Tag | undefined },
-): <S extends Schema.Top>(schema: S & ExactDiscriminants<S, D, Tag>) => S["Rebuild"] {
-  const layout = parseDescriptor(
-    {
-      version: 1,
-      kind: "enum",
-      tag: options?.tag ?? "_tag",
-      discriminants: map,
-    },
-    "$",
-  )
+export function discriminants(
+  map: Readonly<Record<string, number>>,
+  options?: { readonly tag?: string | undefined },
+): <S extends Schema.Top>(schema: S) => S["Rebuild"] {
+  const layout = {
+    kind: "enum",
+    tag: options?.tag ?? "_tag",
+    discriminants: parseDiscriminants(map),
+  } as const
   return (schema) => {
-    enumVariants(encodedAST(schema), layout, "$")
+    enumVariants(Schema.toEncoded(schema).ast, layout, "$")
     return withLayout(schema, layout)
   }
 }
@@ -511,24 +403,20 @@ type LengthPrefixed =
  * **Details**
  *
  * Put it on the encoded side, before any transformation, as in
- * `Schema.String.check(Borsh.maxLength(1024))`. Decoding fails as soon as it
- * reads a larger length, before reading anything after it, and encoding fails
- * before writing the length, with `Length 2000 exceeds maxLength (1024)`, the
- * path and the byte offset. Like `maxBytes`, it is part of the codec, so it
- * also applies under `disableChecks`, and decoding middleware nested in the
- * schema, such as a field's `Schema.catchDecoding`, cannot recover from it. As
- * with truncated input, only middleware on the schema's root can.
+ * `Schema.String.check(Borsh.maxLength(1024))`. Decoding fails right after
+ * reading a larger length, and encoding before writing one, with
+ * `Length 2000 exceeds maxLength (1024)`, the path and the byte offset. Like
+ * `maxBytes`, it applies under `disableChecks`, and decoding middleware inside
+ * the schema, such as a field's `Schema.catchDecoding`, cannot recover from it.
  *
- * Effect also runs it as an ordinary check, so `Schema.is`, `make`, Arbitrary
- * samples and encoding agree with the wire. A string with a lone UTF-16
- * surrogate has no UTF-8 length and fails with "Lone UTF-16 surrogate".
- * `annotations` shape that schema-pass failure, not the wire one. After a
- * transformation, `maxLength` is only an ordinary check. On a layout without a
- * length prefix, such as `fixedBytes`, `fixedArray`, a tuple, a struct or an
- * enum, {@link toCodec} throws. The smallest of several bounds applies. It
- * bounds the count on the wire, so a map or set whose keys merge as they decode
- * can fail it while holding fewer entries. `n` must be an integer from 0
- * through 2^32 - 1.
+ * Effect also runs it as an ordinary check, so `Schema.is`, `make` and
+ * Arbitrary samples agree with the wire; `annotations` shape that failure. A
+ * string with a lone UTF-16 surrogate fails it. After a transformation,
+ * including on a union with a transformed member, it is only an ordinary
+ * check. On a layout without a length prefix, such as `fixedBytes`, a tuple, a
+ * struct or an enum, {@link toCodec} throws. The smallest of several bounds
+ * applies. Maps and sets are bounded by their count on the wire, before keys
+ * that decode equal merge. `n` must be an integer from 0 through 2^32 - 1.
  *
  * **Example** (Bounded strings and vectors)
  *
@@ -607,18 +495,14 @@ function prefixedLength(value: unknown, stop: number): number {
  *
  * **Untrusted input**
  *
- * The binary layer checks every length prefix against the bytes that remain,
- * so no string or byte array allocates past the input, but small items, such
- * as unit enum variants or `Option.none()`, let one input byte become one
- * decoded value. Set `maxBytes` and `maxItems` to the largest message you
- * expect, and bound single length prefixes with {@link maxLength}: vector
- * items, string UTF-8 bytes, `Borsh.Bytes` length, map entries and set
- * members. With both options set, decoding the binary layout of a schema does
- * work and allocates memory in proportion to `maxBytes` plus `maxItems`,
- * whatever the input claims. That bound covers only the binary layer: checks,
- * filters and transformations in the schema pass are the schema's own code
- * and can do any amount of work. Effect's own checks, such as
- * `Schema.isMaxLength`, run there, after the binary layer has read the value.
+ * Every length prefix is checked against the bytes that remain, but small
+ * items such as unit variants or `Option.none()` turn one input byte into one
+ * value. Set `maxBytes` and `maxItems`, and bound single length prefixes with
+ * {@link maxLength}. With both options set, decoding the binary layout does
+ * work and allocates memory in proportion to `maxBytes` plus `maxItems`. That
+ * bound covers only the binary layer: checks, filters and transformations in
+ * the schema pass, Effect's own `Schema.isMaxLength` included, are the
+ * schema's own code and can do any amount of work.
  *
  * @category models
  * @since 0.1.0
@@ -633,14 +517,13 @@ export interface Options {
    */
   readonly maxBytes?: number | undefined
   /**
-   * Maximum number of collection items per operation, nested ones included,
-   * as a non-negative safe integer. This is one budget for the whole value,
-   * not a limit per collection: every vector or fixed-array item, map entry
-   * and set member counts once, however deeply it is nested. Byte arrays and
-   * strings do not count, because `maxBytes` bounds them. A collection is
-   * charged as soon as its length is known, before any of its items is read,
-   * and the budget applies to encoding too, so anything a codec encodes it can
-   * also decode. Default: no limit.
+   * Maximum number of collection items per operation, as a non-negative safe
+   * integer. It is one budget for the whole value: every vector or
+   * fixed-array item, map entry and set member counts once, however deeply it
+   * is nested. Strings and byte arrays don't count; `maxBytes` bounds them.
+   * Each collection is charged when its length is read, and encoding is
+   * bounded too, so anything a codec encodes it can also decode. Default: no
+   * limit.
    *
    * @since 0.1.0
    */
@@ -674,30 +557,11 @@ const optionsCacheSize = 8
  *
  * The binary layout is compiled from the encoded side of the schema, and the
  * schema's own checks, brands, transformations and services still apply.
- * Unsupported layouts and invalid options throw here, at construction. Decoding
- * must consume the whole input. Binary failures are `Schema.SchemaError`s whose
- * issue names the path and byte offset. Codecs are memoized by schema identity,
- * `maxBytes` and `maxItems`, keeping up to 8 option combinations per schema.
- *
- * The only limits on the wire are the ones you write: `maxBytes` and
- * `maxItems` in {@link Options}, and {@link maxLength} on a length prefix.
- * Every other check, including Effect's own `Schema.isMaxLength` and
- * `isMaxSize`, runs in the schema pass after the binary layer has read the
- * value.
- *
- * **Example** (Encoding contract arguments)
- *
- * ```ts
- * import { Borsh } from "@zorsh/effect"
- * import { Schema } from "effect"
- *
- * const Transfer = Schema.Struct({ receiver: Schema.String, amount: Borsh.U128 })
- * const codec = Borsh.toCodec(Transfer)
- *
- * const bytes = Schema.encodeSync(codec)({ receiver: "alice.near", amount: 123n })
- * const transfer = Schema.decodeSync(codec)(bytes)
- * // { receiver: "alice.near", amount: 123n }
- * ```
+ * Unsupported layouts and invalid options throw here. Decoding must consume
+ * the whole input, and binary failures are `Schema.SchemaError`s naming the
+ * path and byte offset. Codecs are memoized by schema and options, up to 8
+ * option combinations per schema. The only wire limits are `maxBytes`,
+ * `maxItems` and {@link maxLength}; every other check runs in the schema pass.
  *
  * **Example** (Bounding untrusted input)
  *
@@ -766,7 +630,10 @@ function cacheEntry(schema: Schema.Constraint): CodecCacheEntry {
   if (cached !== undefined) {
     return cached
   }
-  const entry: CodecCacheEntry = { layout: compile(encodedAST(schema)), codecs: new Map() }
+  const entry: CodecCacheEntry = {
+    layout: compile(Schema.toEncoded(schema).ast),
+    codecs: new Map(),
+  }
   codecCache.set(schema, entry)
   return entry
 }
@@ -807,16 +674,6 @@ function binaryCodec(layout: Layout, maxBytes: number, maxItems = Infinity) {
 /**
  * A value decoded from the start of a byte range, with the offset just past it.
  *
- * **Example** (Reading the rest of a packet)
- *
- * ```ts
- * import { Borsh } from "@zorsh/effect"
- *
- * const decodeId = Borsh.decodePrefixSync(Borsh.U32)
- * const { value: id, offset } = decodeId(Uint8Array.of(7, 0, 0, 0, 0xff))
- * // id: 7, offset: 4
- * ```
- *
  * @category models
  * @since 0.1.0
  */
@@ -841,14 +698,7 @@ function prefixReader(schema: Schema.Constraint, options: Options | undefined): 
   }
   const readerOptions: ReaderOptions = { maxBytes, maxItems: maxItems ?? Infinity }
   return (bytes, offset) => {
-    // Not BinaryErrors: invalid arguments are caller bugs, so they are defects.
-    if (!(bytes instanceof Uint8Array)) {
-      throw new TypeError("Prefix decoding requires a Uint8Array")
-    }
-    // Schema.decodeSync takes parse options second, so this is an easy slip.
-    if (typeof offset !== "number") {
-      throw new TypeError("Prefix offset must be a number; parse options are the third argument")
-    }
+    // Not a BinaryError: an offset outside the input is a caller bug, so it is a defect.
     const isValidOffset = Number.isSafeInteger(offset) && offset >= 0 && offset <= bytes.byteLength
     if (!isValidOffset) {
       throw new RangeError(
@@ -870,25 +720,18 @@ function binarySchemaError(error: unknown): Schema.SchemaError {
  *
  * **Details**
  *
- * It uses the same layout, limits, schema pass and errors as {@link toCodec},
- * but stops after one value instead of requiring the whole input. `maxBytes`
- * caps the bytes this value may use, not the length of `bytes`: as soon as a
- * read's length or count shows that the value cannot fit, it fails with
- * "Value exceeds maxBytes", however short `bytes` is. "Truncated" only means
- * `bytes` ended before the current read. Byte offsets in errors are positions
- * in `bytes`. Binary failures carry the same issue `toCodec`
- * reports, without the `Encoding` wrappers of its codec. Decoding middleware
- * on the schema, such as `Schema.catchDecoding`, can recover from schema-pass
- * failures but not from binary ones, unlike with `toCodec`, because a value
- * that was never read has no end to return as `offset`.
+ * It shares the layout, limits, schema pass and errors of {@link toCodec}, but
+ * stops after one value. Error offsets are positions in `bytes`. `maxBytes`
+ * caps the bytes the value may use, not `bytes`: a read whose length or count
+ * shows the value cannot fit fails with "Value exceeds maxBytes" however short
+ * `bytes` is, while "Truncated" means `bytes` ended first. Decoding middleware
+ * on the schema can recover from schema-pass failures but not binary ones,
+ * which leave no `offset` to return.
  *
- * `offset` defaults to 0 and must be an integer from 0 through
- * `bytes.byteLength`. Any other offset is a defect, not a `SchemaError`: a
- * `TypeError` if it is not a number and a `RangeError` otherwise. A `bytes`
- * that is not a `Uint8Array` is a `TypeError` defect too. A schema that always
- * encodes to zero bytes, such as `Borsh.Unit`, an empty struct or
- * `fixedArray(item, 0)`, throws at construction, because a loop decoding it
- * would never advance. Every other schema reads at least one byte per value.
+ * `offset` defaults to 0; an offset outside `bytes` is a `RangeError` defect,
+ * not a `SchemaError`. A schema that always encodes to zero bytes, such as
+ * `Borsh.Unit`, throws at construction, because a decoding loop would never
+ * advance.
  *
  * **Example** (Concatenated frames)
  *
@@ -935,26 +778,9 @@ export function decodePrefixEffect<S extends Schema.Constraint>(
 }
 
 /**
- * Like {@link decodePrefixEffect}, but synchronous; it throws
- * `Schema.SchemaError`, or a `TypeError` or `RangeError` for invalid
- * arguments. Like
+ * Like {@link decodePrefixEffect}, but synchronous: it throws
+ * `Schema.SchemaError`, or a `RangeError` for an offset outside `bytes`. Like
  * `Schema.decodeSync`, it accepts only schemas without decoding services.
- *
- * **Example** (A message inside an envelope)
- *
- * ```ts
- * import { Borsh } from "@zorsh/effect"
- * import { Schema } from "effect"
- *
- * // A u32 tag, then one Borsh message, then an unrelated trailer.
- * const Message = Schema.Struct({ sender: Schema.String, amount: Borsh.U64 })
- * const decodeMessage = Borsh.decodePrefixSync(Message, { maxBytes: 64 * 1024 })
- *
- * const open = (packet: Uint8Array) => {
- *   const { value: message, offset: end } = decodeMessage(packet, 4)
- *   return { message, trailer: packet.subarray(end) }
- * }
- * ```
  *
  * @category decoding
  * @since 0.1.0

@@ -1,5 +1,5 @@
 import { SchemaAST } from "effect"
-import { descriptor, type EnumDescriptor, rejectMaxLength } from "./annotations.js"
+import { type EnumAnnotation, rejectMaxLength } from "./annotations.js"
 import type { Compile, Layout } from "./compiler.js"
 import { compileObject, defineField } from "./containers.js"
 import { BinaryError, prepend, type Reader } from "./io.js"
@@ -23,9 +23,15 @@ const explicitDiscriminantsHint =
 /** Read Rust enum variants with declaration-order or explicit discriminants. */
 export function enumVariants(
   ast: SchemaAST.AST,
-  layout: EnumDescriptor | undefined,
+  layout: EnumAnnotation | undefined,
   path: string,
 ): ReadonlyArray<EnumVariant> {
+  // Enums are classified before anything is compiled, so a suspended one is reported here.
+  const isSuspended =
+    SchemaAST.isSuspend(ast) || (ast._tag === "Union" && ast.types.some(SchemaAST.isSuspend))
+  if (isSuspended) {
+    throw new Error(`${path}: Suspend/recursive schemas are unsupported`)
+  }
   const tag = layout === undefined ? "_tag" : layout.tag
   const isTaggedUnion =
     ast._tag === "Union" && ast.types.length > 0 && ast.types.every(SchemaAST.isObjects)
@@ -82,7 +88,7 @@ function taggedVariants(
 
 function literalVariants(
   members: ReadonlyArray<SchemaAST.Literal>,
-  layout: EnumDescriptor | undefined,
+  layout: EnumAnnotation | undefined,
   path: string,
 ): ReadonlyArray<UnnumberedVariant> {
   const variants = members.map((member) => {
@@ -99,7 +105,7 @@ function literalVariants(
 
 function tsEnumVariants(
   ast: SchemaAST.Enum,
-  layout: EnumDescriptor | undefined,
+  layout: EnumAnnotation | undefined,
   path: string,
 ): ReadonlyArray<UnnumberedVariant> {
   const variants = ast.enums.map(([label, value]) => ({ label, value }))
@@ -123,8 +129,8 @@ function tsEnumVariants(
 
 /** Variants are compiled here rather than through compile, so check what it would. */
 function assertPlainVariant(member: SchemaAST.AST, path: string): void {
-  if (member.context?.isOptional || descriptor(member, path) !== undefined) {
-    throw new Error(`${path}: Enum variants must be required and have no layout annotations`)
+  if (member.context?.isOptional) {
+    throw new Error(`${path}: Enum variants must be required`)
   }
   rejectMaxLength(member, path)
 }
@@ -163,7 +169,7 @@ function withDiscriminants(
 
 export function compileEnum(
   ast: SchemaAST.AST,
-  layout: EnumDescriptor | undefined,
+  layout: EnumAnnotation | undefined,
   path: string,
   compile: Compile,
 ): Layout {
