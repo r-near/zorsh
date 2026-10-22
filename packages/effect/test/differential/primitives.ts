@@ -68,10 +68,15 @@ for (const [id, bits, signed, schema] of [
   const edges = new Set([min, min + 1n, max - 1n, max, 0n, 1n])
   for (let bit = 8; bit < bits; bit += 8) {
     const carry = 1n << BigInt(bit)
-    for (const value of [carry - 1n, carry, carry + 1n, -carry - 1n, -carry, -carry + 1n])
-      if (value >= min && value <= max) edges.add(value)
+    for (const value of [carry - 1n, carry, carry + 1n, -carry - 1n, -carry, -carry + 1n]) {
+      if (value >= min && value <= max) {
+        edges.add(value)
+      }
+    }
   }
-  if (signed) edges.add(-1n)
+  if (signed) {
+    edges.add(-1n)
+  }
   primitives.push(
     spec(
       id,
@@ -80,9 +85,11 @@ for (const [id, bits, signed, schema] of [
       [...edges].map(String),
       (v) => (bits <= 32 ? Number(string(v)) : BigInt(string(v))),
       (v) => {
-        if (bits <= 32)
+        if (bits <= 32) {
           assert.ok(typeof v === "number" && Number.isSafeInteger(v) && !Object.is(v, -0))
-        else assert.ok(typeof v === "bigint")
+        } else {
+          assert.ok(typeof v === "bigint")
+        }
         return String(v)
       },
       bits / 8,
@@ -181,7 +188,7 @@ for (const [id, schema, fixed] of [
   ["bytes", Borsh.Bytes, undefined],
   ["bytes32", Borsh.fixedBytes(32), 32],
   ["bytes0", Borsh.fixedBytes(0), 0],
-] as const)
+] as const) {
   primitives.push(
     spec(
       id,
@@ -196,6 +203,7 @@ for (const [id, schema, fixed] of [
       fixed,
     ),
   )
+}
 primitives.push(
   spec(
     "unit",
@@ -222,22 +230,26 @@ export function normalizeOracle(entry: Primitive, value: unknown) {
     assert.equal(BigInt(result).toString(), result)
     return result
   }
-  if (entry.id === "bool") return boolean(value)
+  if (entry.id === "bool") {
+    return boolean(value)
+  }
   if (entry.id === "unit") {
     assert.equal(value, null)
     return null
   }
   const result = string(value)
-  if (entry.id === "string")
+  if (entry.id === "string") {
     assert.equal(
       new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
         Buffer.from(result, "utf8"),
       ),
       result,
     )
-  else {
+  } else {
     assert.match(result, /^(?:[0-9a-f]{2})*$/)
-    if (entry.width !== undefined) assert.equal(result.length, entry.width * 2)
+    if (entry.width !== undefined) {
+      assert.equal(result.length, entry.width * 2)
+    }
   }
   return result
 }
@@ -245,7 +257,9 @@ export function attempt<A>(operation: () => A): { ok: true; value: A } | { ok: f
   try {
     return { ok: true, value: operation() }
   } catch (error) {
-    if (!(error instanceof Schema.SchemaError)) throw error
+    if (!(error instanceof Schema.SchemaError)) {
+      throw error
+    }
     return { ok: false }
   }
 }
@@ -254,13 +268,16 @@ export function utf8Frame(value: string, invalid: boolean) {
   const output = new Uint8Array(4 + payload.length + Number(invalid))
   new DataView(output.buffer).setUint32(0, output.length - 4, true)
   output.set(payload, 4)
-  if (invalid) output[output.length - 1] = 0x80
+  if (invalid) {
+    output[output.length - 1] = 0x80
+  }
   return output
 }
 export function rawArbitrary(entry: Primitive) {
   const generic = fc.uint8Array({ maxLength: 96 })
-  if (entry.width !== undefined)
+  if (entry.width !== undefined) {
     return fc.oneof(generic, fc.uint8Array({ minLength: entry.width, maxLength: entry.width }))
+  }
   const headers = fc
     .tuple(fc.uint8Array({ maxLength: 128 }), fc.integer({ min: 0, max: 3 }))
     .map(([payload, mode]) => {

@@ -5,8 +5,8 @@ import { createRequire } from "node:module"
 import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { it } from "vite-plus/test"
-import type * as Public from "../src/index.js"
 import type * as Binary from "../src/binary-io.js"
+import type * as Public from "../src/index.js"
 
 const root = resolve(__dirname, "../../..")
 it("packed public package preserves CJS, ESM, deep paths and types", async () => {
@@ -48,8 +48,9 @@ it("packed public package preserves CJS, ESM, deep paths and types", async () =>
     const fixture = readFileSync(join(__dirname, "fixtures/consumer.mts"), "utf8")
       .replaceAll('"../../src/index.js"', '"@zorsh/zorsh"')
       .replaceAll('"../../src/', '"@zorsh/zorsh/dist/src/')
-    for (const extension of ["cts", "mts", "ts"])
+    for (const extension of ["cts", "mts", "ts"]) {
       writeFileSync(join(temp, `consumer.${extension}`), fixture)
+    }
     for (const [module, moduleResolution, files] of [
       ["NodeNext", "NodeNext", ["consumer.cts", "consumer.mts"]],
       ["ESNext", "Bundler", ["consumer.ts"]],

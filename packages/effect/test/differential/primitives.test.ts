@@ -48,7 +48,9 @@ async function decodeParity(entry: Primitive, raw: Uint8Array) {
   assert.deepEqual(backing, before, "decode mutated input")
   const rust = await oracle.request(entry.id, "decode", { hex: hex(raw) })
   assert.equal(ts.ok, rust.ok, "raw acceptance differs")
-  if (!ts.ok || !rust.ok) return false
+  if (!ts.ok || !rust.ok) {
+    return false
+  }
   assert.deepEqual(
     entry.normalize(ts.value),
     normalizeOracle(entry, rust.value),
@@ -73,10 +75,14 @@ async function valueParity(
 ) {
   let value = entry.fromTransport(transport)
   const offset = value instanceof Uint8Array ? offsetView(value) : undefined
-  if (offset) value = offset.view
+  if (offset) {
+    value = offset.view
+  }
   const before = offset?.backing.slice()
   const ts = attempt(() => entry.encode(value))
-  if (offset) assert.deepEqual(offset.backing, before, "encode mutated input")
+  if (offset) {
+    assert.deepEqual(offset.backing, before, "encode mutated input")
+  }
   const rust = await oracle.request(entry.id, "encode", { value: transport })
   assert.equal(ts.ok, rust.ok, "encode acceptance differs")
   if (!ts.ok || !rust.ok) {
@@ -99,10 +105,11 @@ async function valueParity(
   assert.equal(hex(entry.encode(decoded)), rust.hex)
   const suffixed = new Uint8Array([...rustBytes, ...suffix])
   assert.equal(attempt(() => entry.decode(suffixed)).ok, false, "accepted suffix")
-  if (suffixed.length <= 65536)
+  if (suffixed.length <= 65536) {
     assert.deepEqual(await oracle.request(entry.id, "decode", { hex: hex(suffixed) }), {
       ok: false,
     })
+  }
   if (rustBytes.length) {
     const prefix = rustBytes.subarray(0, selector % rustBytes.length)
     assert.equal(attempt(() => entry.decode(prefix)).ok, false, "accepted proper prefix")
@@ -148,14 +155,21 @@ describe.each(primitives)("borsh-rs $id", (entry) => {
     await assertProperty(rawArbitrary(entry), (raw) => decodeParity(entry, raw), parameters)
   }, 120000)
   it("edges and every proper prefix", async () => {
-    for (const value of entry.examples) await valueParity(entry, value)
-    const value =
-      entry.id === "string" ? "é😀" : entry.id === "bytes" ? "000102ff" : entry.examples[0]
+    for (const value of entry.examples) {
+      await valueParity(entry, value)
+    }
+    let value: unknown = entry.examples[0]
+    if (entry.id === "string") {
+      value = "é😀"
+    } else if (entry.id === "bytes") {
+      value = "000102ff"
+    }
     const encoded = await oracle.request(entry.id, "encode", { value })
     assert.ok(encoded.ok)
     const raw = bytes(encoded.hex)
-    for (let cut = 0; cut < raw.length; cut++)
+    for (let cut = 0; cut < raw.length; cut++) {
       assert.equal(await decodeParity(entry, raw.subarray(0, cut)), false)
+    }
   })
 })
 
@@ -163,7 +177,7 @@ it("rejects malformed tags, NaNs, UTF-8 and length headers", async () => {
   for (const entry of primitives) {
     const invalid =
       entry.id === "bool" ? [Uint8Array.of(2), Uint8Array.of(128), Uint8Array.of(255)] : []
-    if (entry.id.startsWith("f"))
+    if (entry.id.startsWith("f")) {
       for (const value of entry.examples) {
         assert.ok(
           value !== null &&
@@ -176,6 +190,7 @@ it("rejects malformed tags, NaNs, UTF-8 and length headers", async () => {
           !Number.isNaN(floatFromBits(value, entry.width ?? 0)),
         )
       }
+    }
     if (entry.id === "string") {
       for (const payload of [
         [0xc0, 0xaf],
@@ -183,17 +198,24 @@ it("rejects malformed tags, NaNs, UTF-8 and length headers", async () => {
         [0xf4, 0x90, 0x80, 0x80],
         [0x80],
         [0xe2, 0x82],
-      ])
+      ]) {
         invalid.push(Uint8Array.of(payload.length, 0, 0, 0, ...payload))
-      for (const value of ["", "\uFEFF", "é", "😀", "\u{10ffff}", "a\0e\u0301"])
-        for (const malformed of [false, true])
+      }
+      for (const value of ["", "\uFEFF", "é", "😀", "\u{10ffff}", "a\0e\u0301"]) {
+        for (const malformed of [false, true]) {
           assert.equal(await decodeParity(entry, utf8Frame(value, malformed)), !malformed)
-      for (const value of ["\uD800", "a\uDC00", "\uD800x", "\uD800\uD800"])
+        }
+      }
+      for (const value of ["\uD800", "a\uDC00", "\uD800x", "\uD800\uD800"]) {
         assert.equal(attempt(() => entry.encode(value)).ok, false)
+      }
     }
-    if (entry.id === "string" || entry.id === "bytes")
+    if (entry.id === "string" || entry.id === "bytes") {
       invalid.push(Uint8Array.of(255, 255, 255, 255))
-    for (const raw of invalid) assert.equal(await decodeParity(entry, raw), false)
+    }
+    for (const raw of invalid) {
+      assert.equal(await decodeParity(entry, raw), false)
+    }
   }
 })
 it("compares the 64 KiB envelope", async () => {

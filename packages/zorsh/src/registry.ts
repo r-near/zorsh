@@ -44,7 +44,13 @@ export const registry = new TypeRegistry()
 
 /** Numeric comparison for `number` and `bigint` values. */
 function compareNumeric(a: number | bigint, b: number | bigint): number {
-  return a < b ? -1 : a > b ? 1 : 0
+  if (a < b) {
+    return -1
+  }
+  if (a > b) {
+    return 1
+  }
+  return 0
 }
 
 /**
@@ -60,7 +66,9 @@ function compareStrings(a: string, b: string): number {
   while (i < a.length && j < b.length) {
     const [codePointA, lengthA] = codePointAt(a, i)
     const [codePointB, lengthB] = codePointAt(b, j)
-    if (codePointA !== codePointB) return codePointA - codePointB
+    if (codePointA !== codePointB) {
+      return codePointA - codePointB
+    }
     i += lengthA
     j += lengthB
   }
@@ -76,7 +84,9 @@ function codePointAt(value: string, index: number): [codePoint: number, length: 
       return [(unit - 0xd800) * 0x400 + (next - 0xdc00) + 0x10000, 2]
     }
   }
-  if (unit >= 0xd800 && unit <= 0xdfff) return [0xfffd, 1]
+  if (unit >= 0xd800 && unit <= 0xdfff) {
+    return [0xfffd, 1]
+  }
   return [unit, 1]
 }
 
@@ -85,7 +95,9 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
   const length = Math.min(a.length, b.length)
   for (let i = 0; i < length; i++) {
     const difference = (a[i] as number) - (b[i] as number)
-    if (difference !== 0) return difference
+    if (difference !== 0) {
+      return difference
+    }
   }
   return a.length - b.length
 }
@@ -100,7 +112,9 @@ function compareSequences(
   const length = Math.min(a.length, b.length)
   for (let i = 0; i < length; i++) {
     const result = handler.compare(a[i], b[i], options)
-    if (result !== 0) return result
+    if (result !== 0) {
+      return result
+    }
   }
   return a.length - b.length
 }
@@ -285,14 +299,18 @@ interface StructFields {
 
 registry.register<Record<string, unknown>, StructFields>("struct", {
   write: (writer, value, fields) => {
-    if (!fields) return
+    if (!fields) {
+      return
+    }
     for (const [field, def] of Object.entries(fields)) {
       const handler = registry.getHandler(def.type)
       handler.write(writer, value[field], def.options)
     }
   },
   read: (reader, fields) => {
-    if (!fields) return {}
+    if (!fields) {
+      return {}
+    }
     const result: Record<string, unknown> = {}
     for (const [field, def] of Object.entries(fields)) {
       const handler = registry.getHandler(def.type)
@@ -301,11 +319,15 @@ registry.register<Record<string, unknown>, StructFields>("struct", {
     return result
   },
   compare: (a, b, fields) => {
-    if (!fields) return 0
+    if (!fields) {
+      return 0
+    }
     for (const [field, def] of Object.entries(fields)) {
       const handler = registry.getHandler(def.type)
       const result = handler.compare(a[field], b[field], def.options)
-      if (result !== 0) return result
+      if (result !== 0) {
+        return result
+      }
     }
     return 0
   },
@@ -319,7 +341,9 @@ interface VecOptions<T> {
 
 registry.register<unknown[], VecOptions<unknown>>("vec", {
   write: (writer, value, options) => {
-    if (!options) return
+    if (!options) {
+      return
+    }
     const { elementType, elementOptions } = options
 
     const length = value.length
@@ -331,7 +355,9 @@ registry.register<unknown[], VecOptions<unknown>>("vec", {
     }
   },
   read: (reader, options) => {
-    if (!options) return []
+    if (!options) {
+      return []
+    }
     const { elementType, elementOptions } = options
     const length = reader.readUint32()
     const handler = registry.getHandler(elementType)
@@ -344,7 +370,9 @@ registry.register<unknown[], VecOptions<unknown>>("vec", {
     return items
   },
   compare: (a, b, options) => {
-    if (!options) return 0
+    if (!options) {
+      return 0
+    }
     const { elementType, elementOptions } = options
     return compareSequences(a, b, registry.getHandler(elementType), elementOptions)
   },
@@ -368,7 +396,9 @@ function canonicalSetElements(value: Set<unknown>, options: SetOptions<unknown>)
 
 registry.register<Set<unknown>, SetOptions<unknown>>("set", {
   write: (writer, value, options) => {
-    if (!options) return
+    if (!options) {
+      return
+    }
     const { elementType, elementOptions } = options
     const array = canonicalSetElements(value, options)
     writer.writeUint32(array.length)
@@ -378,7 +408,9 @@ registry.register<Set<unknown>, SetOptions<unknown>>("set", {
     }
   },
   read: (reader, options) => {
-    if (!options) return new Set()
+    if (!options) {
+      return new Set()
+    }
     const { elementType, elementOptions } = options
     const length = reader.readUint32()
     const handler = registry.getHandler<unknown>(elementType)
@@ -389,7 +421,9 @@ registry.register<Set<unknown>, SetOptions<unknown>>("set", {
     return items
   },
   compare: (a, b, options) => {
-    if (!options) return 0
+    if (!options) {
+      return 0
+    }
     const { elementType, elementOptions } = options
     return compareSequences(
       canonicalSetElements(a, options),
@@ -423,7 +457,9 @@ function canonicalMapEntries(
 
 registry.register<Map<unknown, unknown>, MapOptions<unknown, unknown>>("map", {
   write: (writer, value, options) => {
-    if (!options) return
+    if (!options) {
+      return
+    }
     const { keyType, keyOptions, valueType, valueOptions } = options
     const entries = canonicalMapEntries(value, options)
     writer.writeUint32(entries.length)
@@ -435,7 +471,9 @@ registry.register<Map<unknown, unknown>, MapOptions<unknown, unknown>>("map", {
     }
   },
   read: (reader, options) => {
-    if (!options) return new Map()
+    if (!options) {
+      return new Map()
+    }
     const { keyType, keyOptions, valueType, valueOptions } = options
     const length = reader.readUint32()
     const keyHandler = registry.getHandler<unknown>(keyType)
@@ -449,7 +487,9 @@ registry.register<Map<unknown, unknown>, MapOptions<unknown, unknown>>("map", {
     return entries
   },
   compare: (a, b, options) => {
-    if (!options) return 0
+    if (!options) {
+      return 0
+    }
     const { keyType, keyOptions, valueType, valueOptions } = options
     const keyHandler = registry.getHandler<unknown>(keyType)
     const valueHandler = registry.getHandler<unknown>(valueType)
@@ -460,9 +500,13 @@ registry.register<Map<unknown, unknown>, MapOptions<unknown, unknown>>("map", {
       const [keyA, valueA] = entriesA[i] as [unknown, unknown]
       const [keyB, valueB] = entriesB[i] as [unknown, unknown]
       const keyResult = keyHandler.compare(keyA, keyB, keyOptions)
-      if (keyResult !== 0) return keyResult
+      if (keyResult !== 0) {
+        return keyResult
+      }
       const valueResult = valueHandler.compare(valueA, valueB, valueOptions)
-      if (valueResult !== 0) return valueResult
+      if (valueResult !== 0) {
+        return valueResult
+      }
     }
     return entriesA.length - entriesB.length
   },
@@ -476,7 +520,9 @@ interface OptionOptions<T> {
 
 registry.register<unknown | null, OptionOptions<unknown>>("option", {
   write: (writer, value, options) => {
-    if (!options) return
+    if (!options) {
+      return
+    }
     const { valueType, valueOptions } = options
     const isSome = value !== null
     writer.writeUint8(isSome ? 1 : 0)
@@ -486,19 +532,27 @@ registry.register<unknown | null, OptionOptions<unknown>>("option", {
     }
   },
   read: (reader, options) => {
-    if (!options) return null
+    if (!options) {
+      return null
+    }
     const { valueType, valueOptions } = options
     const tag = reader.readUint8()
     if (tag === 1) {
       const handler = registry.getHandler<unknown>(valueType)
       return handler.read(reader, valueOptions)
     }
-    if (tag === 0) return null
+    if (tag === 0) {
+      return null
+    }
     throw new Error(`Invalid Option representation: ${tag}. The first byte must be 0 or 1`)
   },
   compare: (a, b, options) => {
-    if (a === null || b === null) return Number(a !== null) - Number(b !== null)
-    if (!options) return 0
+    if (a === null || b === null) {
+      return Number(a !== null) - Number(b !== null)
+    }
+    if (!options) {
+      return 0
+    }
     const { valueType, valueOptions } = options
     return registry.getHandler<unknown>(valueType).compare(a, b, valueOptions)
   },
@@ -536,7 +590,9 @@ function resolveEnumVariant(
 
 registry.register<Record<string, unknown>, EnumOptions>("enum", {
   write: (writer, value, options) => {
-    if (!options) return
+    if (!options) {
+      return
+    }
 
     const { variant, payload: variantValue } = resolveEnumVariant(value, options)
 
@@ -550,7 +606,9 @@ registry.register<Record<string, unknown>, EnumOptions>("enum", {
     }
   },
   read: (reader, options) => {
-    if (!options) return {}
+    if (!options) {
+      return {}
+    }
 
     const index = reader.readUint8()
     const variant = options.variants.find((v) => v.index === index)
@@ -569,13 +627,17 @@ registry.register<Record<string, unknown>, EnumOptions>("enum", {
     return { [variant.name]: value }
   },
   compare: (a, b, options) => {
-    if (!options) return 0
+    if (!options) {
+      return 0
+    }
     const left = resolveEnumVariant(a, options)
     const right = resolveEnumVariant(b, options)
     if (left.variant.index !== right.variant.index) {
       return left.variant.index - right.variant.index
     }
-    if (left.variant.type === "unit") return 0
+    if (left.variant.type === "unit") {
+      return 0
+    }
     const handler = registry.getHandler(left.variant.type)
     return handler.compare(left.payload, right.payload, left.variant.options)
   },
@@ -593,7 +655,9 @@ type TupleTypes = TupleElement[]
 // Add the tuple handler to the registry
 registry.register<unknown[], TupleTypes>("tuple", {
   write: (writer, value, types) => {
-    if (!types) return
+    if (!types) {
+      return
+    }
     if (value.length !== types.length) {
       throw new Error(`Tuple length mismatch: expected ${types.length}, got ${value.length}`)
     }
@@ -607,7 +671,9 @@ registry.register<unknown[], TupleTypes>("tuple", {
     }
   },
   read: (reader, types) => {
-    if (!types) return []
+    if (!types) {
+      return []
+    }
     const result = []
     for (const type of types) {
       const handler = registry.getHandler(type.type)
@@ -616,7 +682,9 @@ registry.register<unknown[], TupleTypes>("tuple", {
     return result
   },
   compare: (a, b, types) => {
-    if (!types) return 0
+    if (!types) {
+      return 0
+    }
     for (let i = 0; i < types.length; i++) {
       const typeInfo = types[i]
       if (!typeInfo) {
@@ -624,7 +692,9 @@ registry.register<unknown[], TupleTypes>("tuple", {
       }
       const handler = registry.getHandler(typeInfo.type)
       const result = handler.compare(a[i], b[i], typeInfo.options)
-      if (result !== 0) return result
+      if (result !== 0) {
+        return result
+      }
     }
     return 0
   },
@@ -639,7 +709,9 @@ interface ArrayOptions<T> {
 
 registry.register<unknown[], ArrayOptions<unknown>>("array", {
   write: (writer, value, options) => {
-    if (!options) return
+    if (!options) {
+      return
+    }
     const { elementType, elementOptions, length } = options
     if (value.length !== length) {
       throw new Error(`Array length mismatch: expected ${length}, got ${value.length}`)
@@ -650,13 +722,17 @@ registry.register<unknown[], ArrayOptions<unknown>>("array", {
     }
   },
   read: (reader, options) => {
-    if (!options) return []
+    if (!options) {
+      return []
+    }
     const { elementType, elementOptions, length } = options
     const handler = registry.getHandler<unknown>(elementType)
     return Array.from({ length }, () => handler.read(reader, elementOptions))
   },
   compare: (a, b, options) => {
-    if (!options) return 0
+    if (!options) {
+      return 0
+    }
     const { elementType, elementOptions } = options
     return compareSequences(a, b, registry.getHandler(elementType), elementOptions)
   },
@@ -702,7 +778,9 @@ registry.register<
   }
 >("nativeEnum", {
   write: (writer, value, options) => {
-    if (!options) return
+    if (!options) {
+      return
+    }
     const { valueToIndexMap } = options
 
     // Cast to string | number to satisfy TypeScript
@@ -716,7 +794,9 @@ registry.register<
     writer.writeUint8(index)
   },
   read: (reader, options) => {
-    if (!options) return null
+    if (!options) {
+      return null
+    }
     const { indexToValueMap } = options
 
     const index = reader.readUint8()
@@ -729,12 +809,18 @@ registry.register<
     return value
   },
   compare: (a, b, options) => {
-    if (!options) return 0
+    if (!options) {
+      return 0
+    }
     const { valueToIndexMap } = options
     const indexA = valueToIndexMap.get(a as string | number)
     const indexB = valueToIndexMap.get(b as string | number)
-    if (indexA === undefined) throw new Error(`Invalid enum value: ${String(a)}`)
-    if (indexB === undefined) throw new Error(`Invalid enum value: ${String(b)}`)
+    if (indexA === undefined) {
+      throw new Error(`Invalid enum value: ${String(a)}`)
+    }
+    if (indexB === undefined) {
+      throw new Error(`Invalid enum value: ${String(b)}`)
+    }
     return indexA - indexB
   },
 })

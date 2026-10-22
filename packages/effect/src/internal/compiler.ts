@@ -16,29 +16,35 @@ export interface Layout {
 
 export type Compile = (ast: SchemaAST.AST, path: string) => Layout
 
-/** Inspect visible nodes without evaluating Suspend thunks, including the type side. */
-export function rejectSuspensions(ast: SchemaAST.AST): void {
+/**
+ * Recursive schemas are unsupported, so any Suspend on the encoded or type side fails here with its
+ * path, without calling its thunk.
+ */
+export function rejectSuspensions(root: SchemaAST.AST): void {
   const seen = new Set<SchemaAST.AST>()
-  const pending = [{ ast, path: "$" }]
+  const pending = [{ ast: root, path: "$" }]
   while (pending.length > 0) {
     const node = pending.pop()
-    if (node === undefined || seen.has(node.ast)) continue
+    if (node === undefined || seen.has(node.ast)) {
+      continue
+    }
     seen.add(node.ast)
     const { ast, path } = node
-    if (ast._tag === "Suspend")
+    if (ast._tag === "Suspend") {
       throw new Error(`${path}: Suspend/recursive schemas are unsupported`)
+    }
     ast.encoding?.forEach((link, i) =>
       pending.push({ ast: link.to, path: `${path}.encoding[${i}]` }),
     )
     switch (ast._tag) {
       case "Declaration":
-        ast.typeParameters.forEach((ast, i) =>
-          pending.push({ ast, path: `${path}.typeParameters[${i}]` }),
+        ast.typeParameters.forEach((child, i) =>
+          pending.push({ ast: child, path: `${path}.typeParameters[${i}]` }),
         )
         break
       case "Arrays":
-        ast.elements.forEach((ast, i) => pending.push({ ast, path: `${path}[${i}]` }))
-        ast.rest.forEach((ast, i) => pending.push({ ast, path: `${path}.rest[${i}]` }))
+        ast.elements.forEach((child, i) => pending.push({ ast: child, path: `${path}[${i}]` }))
+        ast.rest.forEach((child, i) => pending.push({ ast: child, path: `${path}.rest[${i}]` }))
         break
       case "Objects":
         ast.propertySignatures.forEach((field) =>
@@ -50,35 +56,41 @@ export function rejectSuspensions(ast: SchemaAST.AST): void {
         })
         break
       case "Union":
-        ast.types.forEach((ast, i) => pending.push({ ast, path: `${path}.union[${i}]` }))
+        ast.types.forEach((child, i) => pending.push({ ast: child, path: `${path}.union[${i}]` }))
         break
       case "TemplateLiteral":
-        ast.parts.forEach((ast, i) => pending.push({ ast, path: `${path}.parts[${i}]` }))
+        ast.parts.forEach((child, i) => pending.push({ ast: child, path: `${path}.parts[${i}]` }))
         break
     }
   }
 }
 
-export function compile(ast: SchemaAST.AST): Layout {
+export function compile(root: SchemaAST.AST): Layout {
+  // A node reused across the schema compiles once.
   const memo = new Map<SchemaAST.AST, Layout>()
-  const compile: Compile = (ast, path) => {
+  const compileCached: Compile = (ast, path) => {
     const cached = memo.get(ast)
-    if (cached !== undefined) return cached
-    const layout = compileNode(ast, path, compile)
+    if (cached !== undefined) {
+      return cached
+    }
+    const layout = compileNode(ast, path, compileCached)
     memo.set(ast, layout)
     return layout
   }
-  return compile(ast, "$")
+  return compileCached(root, "$")
 }
 
 /** An explicit layout annotation owns its node; natives and AST tags apply only without one. */
 function compileNode(ast: SchemaAST.AST, path: string, compile: Compile): Layout {
-  if (ast.context?.isOptional)
+  if (ast.context?.isOptional) {
     throw new Error(
       `${path}: Optional properties and elements have no Borsh layout on the encoded side; use Schema.Option for a Rust Option`,
     )
+  }
   const layout = descriptor(ast, path)
-  if (layout !== undefined) return compileDescriptor(ast, layout, path, compile)
+  if (layout !== undefined) {
+    return compileDescriptor(ast, layout, path, compile)
+  }
   switch (ast._tag) {
     case "Declaration":
       return compileDeclaration(ast, path, compile)
@@ -113,17 +125,23 @@ function compileDescriptor(
   compile: Compile,
 ): Layout {
   switch (layout.kind) {
-    case "integer":
-      if (ast._tag !== (layout.bits > 32 ? "BigInt" : "Number"))
+    case "integer": {
+      // Integers up to 32 bits are numbers; u64 and wider can exceed 2^53, so they are bigints.
+      const encoded = layout.bits > 32 ? "BigInt" : "Number"
+      if (ast._tag !== encoded) {
         throw new Error(`${path}: Integer layout does not match encoded ${ast._tag}`)
+      }
       return integer(layout.bits, layout.signed)
+    }
     case "float":
-      if (ast._tag !== "Number")
+      if (ast._tag !== "Number") {
         throw new Error(`${path}: Float layout does not match encoded ${ast._tag}`)
+      }
       return float(layout.bits)
     case "fixedBytes":
-      if (!isUint8Array(ast))
+      if (!isUint8Array(ast)) {
         throw new Error(`${path}: Fixed bytes layout requires an encoded Uint8Array`)
+      }
       return bytes(layout.length)
     case "fixedArray":
       return fixedArray(ast, layout.length, path, compile)

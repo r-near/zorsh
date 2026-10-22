@@ -29,7 +29,9 @@ it("retains native union helpers, checks and discriminant narrowing", () => {
   ).toBe(513)
   const value = Schema.decodeSync(codec)(Uint8Array.of(17, 1, 2))
   expectTypeOf(value).toEqualTypeOf<typeof variants.Type>()
-  if (value._tag === "Count") expectTypeOf(value.value).toEqualTypeOf<number>()
+  if (value._tag === "Count") {
+    expectTypeOf(value.value).toEqualTypeOf<number>()
+  }
   const checked = Borsh.toCodec(
     schema.check(Schema.makeFilter((v) => v._tag !== "Count" || v.value > 0)),
   )
@@ -45,16 +47,19 @@ it("writes explicit Rust enum tags and only the selected payload", () => {
     const bytes = Uint8Array.from(raw)
     expect(Schema.encodeSync(codec)(value)).toEqual(bytes)
     expect(Schema.decodeSync(codec)(bytes)).toEqual(value)
-    for (let cut = 0; cut < bytes.length; cut++)
+    for (let cut = 0; cut < bytes.length; cut++) {
       expect(() => Schema.decodeSync(codec)(bytes.subarray(0, cut))).toThrow(Schema.SchemaError)
+    }
     expect(() => Schema.decodeSync(codec)(Uint8Array.of(...bytes, 0))).toThrow(/Trailing/)
   }
   for (let tag = 0; tag < 256; tag++) {
-    if (tag === 3) expect(Schema.decodeSync(codec)(Uint8Array.of(tag))).toEqual({ _tag: "Idle" })
-    else
+    if (tag === 3) {
+      expect(Schema.decodeSync(codec)(Uint8Array.of(tag))).toEqual({ _tag: "Idle" })
+    } else {
       expect(() => Schema.decodeSync(codec)(Uint8Array.of(tag))).toThrow(
         tag === 17 || tag === 250 ? /Truncated/ : /Invalid enum tag/,
       )
+    }
   }
   expect(() => Schema.encodeUnknownSync(codec)({ _tag: "Other" })).toThrow(Schema.SchemaError)
 })
@@ -136,16 +141,23 @@ it("checks every tag byte for value enums and rejects unknown values", () => {
   const literals = Borsh.toCodec(Schema.Literals(["A", "B", "C"]))
   const numeric = Borsh.toCodec(Schema.Enum(Numeric))
   for (let tag = 0; tag < 256; tag++) {
-    if (tag < 3) expect(Schema.decodeSync(literals)(Uint8Array.of(tag))).toBe("ABC"[tag])
-    else expect(() => Schema.decodeSync(literals)(Uint8Array.of(tag))).toThrow(/Invalid enum tag/)
-    if (tag < 2) expect(Schema.decodeSync(numeric)(Uint8Array.of(tag))).toBe(tag)
-    else expect(() => Schema.decodeSync(numeric)(Uint8Array.of(tag))).toThrow(/Invalid enum tag/)
+    if (tag < 3) {
+      expect(Schema.decodeSync(literals)(Uint8Array.of(tag))).toBe("ABC"[tag])
+    } else {
+      expect(() => Schema.decodeSync(literals)(Uint8Array.of(tag))).toThrow(/Invalid enum tag/)
+    }
+    if (tag < 2) {
+      expect(Schema.decodeSync(numeric)(Uint8Array.of(tag))).toBe(tag)
+    } else {
+      expect(() => Schema.decodeSync(numeric)(Uint8Array.of(tag))).toThrow(/Invalid enum tag/)
+    }
   }
   expect(() => Schema.decodeSync(literals)(new Uint8Array())).toThrow(/Truncated/)
   expect(() => Schema.decodeSync(literals)(Uint8Array.of(0, 0))).toThrow(/Trailing/)
   const layout = compile(Schema.Literals(["A", "B"]).ast)
-  for (const value of ["C", 0, null, Numeric.Up])
+  for (const value of ["C", 0, null, Numeric.Up]) {
     expect(() => layout.write(new Writer(4), value)).toThrow(/Invalid enum value/)
+  }
   expect(layout.minBytes).toBe(1)
 })
 
@@ -200,10 +212,11 @@ it("requires explicit discriminants for numeric and non-string enums", () => {
     A = 1,
     B = 0,
   }
-  for (const enums of [Sparse, Swapped])
+  for (const enums of [Sparse, Swapped]) {
     expect(() => Borsh.toCodec(Schema.Enum(enums))).toThrow(
       /\$: Numeric enum values must be 0..n-1 in declaration order; pass the Rust wire discriminants \(declaration indices unless #\[borsh\(use_discriminant = true\)\]\) to Borsh.discriminants/,
     )
+  }
   const sparse = Borsh.toCodec(Schema.Enum(Sparse).pipe(Borsh.discriminants({ A: 1, B: 5 })))
   expect(Schema.encodeSync(sparse)(Sparse.B)).toEqual(Uint8Array.of(5))
   expect(Schema.decodeSync(sparse)(Uint8Array.of(1))).toBe(Sparse.A)
@@ -233,10 +246,11 @@ it("requires explicit discriminants for numeric and non-string enums", () => {
     Schema.Enum(Sparse).pipe(Schema.refine((v): v is Sparse => v !== undefined)),
     Schema.toEncoded(Schema.Enum(Sparse)),
     Schema.flip(Schema.Enum(Sparse)),
-  ])
+  ]) {
     expect(
       Schema.encodeSync(Borsh.toCodec(wrapped.pipe(Borsh.discriminants({ A: 1, B: 5 }))))(Sparse.B),
     ).toEqual(Uint8Array.of(5))
+  }
   const typed = Schema.toType(
     Schema.String.pipe(
       Schema.decodeTo(
@@ -245,10 +259,11 @@ it("requires explicit discriminants for numeric and non-string enums", () => {
       ),
     ),
   )
-  for (const wrapped of [typed, Schema.flip(typed)])
+  for (const wrapped of [typed, Schema.flip(typed)]) {
     expect(
       Schema.encodeSync(Borsh.toCodec(wrapped.pipe(Borsh.discriminants({ A: 1, B: 5 }))))(Sparse.B),
     ).toEqual(Uint8Array.of(5))
+  }
   const integerKeys = Schema.Enum({ 0: "zero", 1: "one" } as const)
   expect(
     Schema.encodeSync(Borsh.toCodec(integerKeys.pipe(Borsh.discriminants({ 0: 1, 1: 5 }))))("one"),
@@ -268,10 +283,11 @@ it("requires explicit discriminants for numeric and non-string enums", () => {
     Schema.Literals([1, 5]),
     Schema.Literals(["A", true]),
     Schema.Literals([2n]),
-  ])
+  ]) {
     expect(() => Borsh.toCodec(literals)).toThrow(
       /Non-string literal enums have no Rust variant order; pass the Rust wire discriminants/,
     )
+  }
   const numbers = Borsh.toCodec(Schema.Literals([1, 5]).pipe(Borsh.discriminants({ 1: 4, 5: 9 })))
   expect(Schema.encodeSync(numbers)(5)).toEqual(Uint8Array.of(9))
   expect(Schema.decodeSync(numbers)(Uint8Array.of(4))).toBe(1)
@@ -289,8 +305,9 @@ it("validates explicit maps eagerly and keeps tag keys for object variants", () 
   for (const [value, map] of [
     [Schema.Literals(["A"]), { A: 0 }],
     [Schema.Enum(Text), { Pending: 0, Done: 1 }],
-  ] as const)
+  ] as const) {
     expect(() => unchecked(value, map, "kind")).toThrow(/Only object enum variants have a tag key/)
+  }
   const kinds = Schema.Union([
     Schema.Struct({ kind: Schema.Literal("A") }),
     Schema.Struct({ kind: Schema.Literal("B"), v: Borsh.U8 }),
@@ -323,10 +340,11 @@ it("rejects malformed enums and descriptors", () => {
     { ...discriminants, Count: 1.5 },
     { ...discriminants, Count: NaN },
     { ...discriminants, Count: "17" },
-  ])
+  ]) {
     expect(() => Borsh.discriminants(invalidMap as never)).toThrow(
       /discriminants must be unique integers from 0 to 255/,
     )
+  }
   for (const [map, message] of [
     [{ Idle: 3, Count: 17 }, /Missing enum discriminant for Named/],
     [{ ...discriminants, Extra: 9, Other: 8 }, /Unknown enum discriminants Extra, Other/],
@@ -343,8 +361,9 @@ it("rejects malformed enums and descriptors", () => {
     { version: 1, kind: "enum" },
     { version: 1, kind: "enum", tag: "_tag", discriminants: [] },
     { version: 1, kind: "enum", tag: "_tag", discriminants: { Idle: "3" } },
-  ])
+  ]) {
     expect(() => Borsh.toCodec(variants.annotate({ [key]: raw } as never))).toThrow(/Borsh/)
+  }
   expect(() => unchecked(Borsh.Bytes, { Idle: 0 })).toThrow(/Enum layout requires/)
   expect(() =>
     Borsh.toCodec(
@@ -379,8 +398,9 @@ it("rejects duplicate enum labels independently of map coverage", () => {
   ])
   expect(() => Borsh.toCodec(duplicate)).toThrow(/Duplicate enum label Idle/)
   expect(() => unchecked(duplicate, { Idle: 0 })).toThrow(/Duplicate enum label Idle/)
-  for (const literals of [Schema.Literals(["A", "A"]), Schema.Literals([1, "1"])])
+  for (const literals of [Schema.Literals(["A", "A"]), Schema.Literals([1, "1"])]) {
     expect(() => unchecked(literals, { A: 0, "1": 1 })).toThrow(/Duplicate enum label/)
+  }
 })
 
 it("rejects optional enum tags independently of map coverage", () => {
@@ -419,10 +439,11 @@ it("requires unannotated, required enum members and rejects mixed unions", () =>
     Schema.NullOr(Borsh.U8),
     Schema.UndefinedOr(Borsh.U8),
     Schema.Union([Schema.Literal("A"), Schema.TaggedStruct("B", {})]),
-  ])
+  ]) {
     expect(() => Borsh.toCodec(union)).toThrow(
       /\$: Union has no Borsh layout; use Schema.Option for nullable values, or a tagged union, Schema.Literals or Schema.Enum for Rust enums/,
     )
+  }
   expect(() => Borsh.toCodec(Schema.Struct({ value: Schema.NullOr(Borsh.U8) }))).toThrow(
     /\$\["value"\]: Union has no Borsh layout/,
   )
@@ -502,12 +523,14 @@ it("preserves native Option values and distinguishes every nested state", () => 
     expect(Schema.encodeSync(c)(value)).toEqual(bytes)
     expect(Schema.decodeSync(c)(bytes)).toEqual(value)
     expect(Option.isOption(Schema.decodeSync(c)(bytes))).toBe(true)
-    for (let cut = 0; cut < bytes.length; cut++)
+    for (let cut = 0; cut < bytes.length; cut++) {
       expect(() => Schema.decodeSync(c)(bytes.subarray(0, cut))).toThrow(/Truncated/)
+    }
     expect(() => Schema.decodeSync(c)(Uint8Array.of(...bytes, 0))).toThrow(/Trailing/)
   }
-  for (let tag = 2; tag < 256; tag++)
+  for (let tag = 2; tag < 256; tag++) {
     expect(() => Schema.decodeSync(c)(Uint8Array.of(tag))).toThrow(/Invalid Option tag/)
+  }
   expect(() => Schema.encodeUnknownSync(c)({ _tag: "None" })).toThrow(Schema.SchemaError)
 })
 
@@ -637,10 +660,11 @@ it("does not share struct layouts that omit an enum tag", () => {
   for (const fields of [
     { action: schema, plain: schema.cases.Count },
     { plain: schema.cases.Count, action: schema },
-  ])
+  ]) {
     expect(() => Borsh.toCodec(Schema.Struct(fields))).toThrow(
       /Unsupported encoded schema Literal; use Schema.Literals or a tagged union for a Rust enum/,
     )
+  }
   const shared = Borsh.toCodec(Schema.Struct({ first: schema, second: schema }))
   expect(() => Schema.decodeSync(shared)(Uint8Array.of(3, 250, 0, 0, 0, 0, 2))).toThrow(
     /\n {2}at \["second"\]\["enabled"\]$/,
@@ -657,14 +681,16 @@ it("checks malformed Option declarations and binary encoder inputs", () => {
   }
   expect(() => compile(ast).write(new Writer(20), {})).toThrow(/Expected Option/)
   const layout = compile(Schema.toEncoded(schema).ast)
-  for (const value of [null, 1])
+  for (const value of [null, 1]) {
     expect(() => layout.write(new Writer(20), value)).toThrow(
       expect.objectContaining({ message: "Expected enum object at byte 0", path: [] }),
     )
-  for (const value of [{}, { _tag: "toString" }, { _tag: 3 }])
+  }
+  for (const value of [{}, { _tag: "toString" }, { _tag: 3 }]) {
     expect(() => layout.write(new Writer(20), value)).toThrow(
       expect.objectContaining({ message: "Invalid enum label at byte 0", path: ["_tag"] }),
     )
+  }
   expect(() => compile(Schema.Option(Borsh.U8).ast).read(new Reader(Uint8Array.of(1), 20))).toThrow(
     expect.objectContaining({
       message: "Truncated input: need 1 bytes at byte 1",
@@ -723,16 +749,19 @@ it("handles all 256 variants and rejects larger enums", () => {
   }
   const labels = members.map((_, i) => `V${i}`)
   const literals = Borsh.toCodec(Schema.Literals(labels))
-  for (let i = 0; i < 256; i++)
+  for (let i = 0; i < 256; i++) {
     expect(Schema.decodeSync(literals)(Schema.encodeSync(literals)(`V${i}`))).toBe(`V${i}`)
+  }
   for (const larger of [
     Schema.Union([...members, Schema.TaggedStruct("extra", {})]),
     Schema.Literals([...labels, "extra"]),
     Schema.Enum(Object.fromEntries([...labels, "extra"].map((label) => [label, label]))),
-  ])
+  ]) {
     expect(() => Borsh.toCodec(larger)).toThrow(/Enums require 1 through 256 variants/)
-  for (const empty of [Schema.Literals([]), Schema.Enum({})])
+  }
+  for (const empty of [Schema.Literals([]), Schema.Enum({})]) {
     expect(() => Borsh.toCodec(empty)).toThrow(/Enums require 1 through 256 variants/)
+  }
 })
 
 it("runs the README enum and Option examples", () => {
@@ -775,12 +804,16 @@ it("preserves application transformations over a whole encoded enum", () => {
     Schema.decodeTo(
       Schema.String,
       SchemaTransformation.transform({
-        decode: (value) =>
-          value._tag === "Idle"
-            ? "idle"
-            : value._tag === "Count"
-              ? String(value.value)
-              : value.label,
+        decode: (value) => {
+          switch (value._tag) {
+            case "Idle":
+              return "idle"
+            case "Count":
+              return String(value.value)
+            default:
+              return value.label
+          }
+        },
         encode: (text) =>
           text === "idle"
             ? { _tag: "Idle" as const }

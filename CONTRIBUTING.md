@@ -24,6 +24,10 @@ On this Mac, check `command -v cargo` before building. Use the Mr Boxington Carg
 
 The required CI jobs remain `lint-and-typecheck` and `tests`. Codecov requires 100% for `packages/zorsh/src`, 95% for `packages/effect/src`, and 95% for changed code, with zero tolerance. Do not suppress coverage to reach those targets.
 
+## Style
+
+`vp check` enforces the code style, configured in the root `vite.config.ts`. Formatting uses 2 spaces, double quotes, no semicolons and 100 columns. Imports are sorted with packages before relative paths. Every `if`, `else` and loop body takes braces. Lint also rejects nested ternaries, `else` after `return`, a lone `if` inside `else`, parameter reassignment, the comma operator and `==` other than `== null`. Beyond the rules, prefer guard clauses to nesting, name long conditions, and comment why, not what.
+
 ## Packages
 
 - `packages/zorsh`: public `@zorsh/zorsh`, including the existing API and Rust fixture tests.

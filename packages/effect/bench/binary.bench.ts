@@ -26,29 +26,33 @@ const Action = Schema.TaggedUnion({
   Cancel: { nonce: Borsh.U64 },
 })
 const Batch = Schema.Struct({ nonce: Borsh.U64, actions: Schema.Array(Action) })
+function actionAt(i: number): typeof Action.Type {
+  switch (i % 3) {
+    case 0:
+      return {
+        _tag: "Transfer",
+        transfer: {
+          asset: { contractId: "token.near" },
+          recipient: { accountId: "alice.near", memo: Option.some("invoice 42") },
+          amount: 1_000_000n + BigInt(i),
+        },
+      }
+    case 1:
+      return {
+        _tag: "Call",
+        contractId: "exchange.near",
+        method: "refresh",
+        args: new TextEncoder().encode("{}"),
+        deposit: 0n,
+        gas: 30_000_000_000_000n,
+      }
+    default:
+      return { _tag: "Cancel", nonce: BigInt(i) }
+  }
+}
 const batch: typeof Batch.Type = {
   nonce: 7n,
-  actions: Array.from({ length: 100 }, (_, i): typeof Action.Type =>
-    i % 3 === 0
-      ? {
-          _tag: "Transfer",
-          transfer: {
-            asset: { contractId: "token.near" },
-            recipient: { accountId: "alice.near", memo: Option.some("invoice 42") },
-            amount: 1_000_000n + BigInt(i),
-          },
-        }
-      : i % 3 === 1
-        ? {
-            _tag: "Call",
-            contractId: "exchange.near",
-            method: "refresh",
-            args: new TextEncoder().encode("{}"),
-            deposit: 0n,
-            gas: 30_000_000_000_000n,
-          }
-        : { _tag: "Cancel", nonce: BigInt(i) },
-  ),
+  actions: Array.from({ length: 100 }, (_, i) => actionAt(i)),
 }
 
 const ZAction = b.enum({
@@ -69,34 +73,35 @@ const ZAction = b.enum({
   Cancel: b.struct({ nonce: b.u64() }),
 })
 const ZBatch = b.struct({ nonce: b.u64(), actions: b.vec(ZAction) })
-const zbatch = {
-  nonce: batch.nonce,
-  actions: batch.actions.map((action) =>
-    action._tag === "Transfer"
-      ? {
-          Transfer: {
-            transfer: {
-              ...action.transfer,
-              recipient: {
-                accountId: action.transfer.recipient.accountId,
-                memo: Option.getOrNull(action.transfer.recipient.memo),
-              },
+function toZorshAction(action: typeof Action.Type) {
+  switch (action._tag) {
+    case "Transfer":
+      return {
+        Transfer: {
+          transfer: {
+            ...action.transfer,
+            recipient: {
+              accountId: action.transfer.recipient.accountId,
+              memo: Option.getOrNull(action.transfer.recipient.memo),
             },
           },
-        }
-      : action._tag === "Call"
-        ? {
-            Call: {
-              contractId: action.contractId,
-              method: action.method,
-              args: action.args,
-              deposit: action.deposit,
-              gas: action.gas,
-            },
-          }
-        : { Cancel: { nonce: action.nonce } },
-  ),
+        },
+      }
+    case "Call":
+      return {
+        Call: {
+          contractId: action.contractId,
+          method: action.method,
+          args: action.args,
+          deposit: action.deposit,
+          gas: action.gas,
+        },
+      }
+    case "Cancel":
+      return { Cancel: { nonce: action.nonce } }
+  }
 }
+const zbatch = { nonce: batch.nonce, actions: batch.actions.map(toZorshAction) }
 
 interface Case<A> {
   readonly name: string

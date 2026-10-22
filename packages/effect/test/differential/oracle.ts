@@ -40,13 +40,15 @@ export class Oracle {
     this.child = spawn(command, args, { stdio: "pipe" })
     this.exit = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
       this.child.on("close", (code, signal) => {
-        if (this.pending || !this.closing || code !== 0 || signal !== null)
+        if (this.pending || !this.closing || code !== 0 || signal !== null) {
           this.fail(new HarnessError(`Oracle exited (${code ?? signal}): ${this.stderr.trim()}`))
+        }
         resolve({ code, signal })
       })
     })
-    for (const stream of [this.child.stdin, this.child.stdout, this.child.stderr])
+    for (const stream of [this.child.stdin, this.child.stdout, this.child.stderr]) {
       stream.on("error", (cause) => this.fail(new HarnessError("Oracle I/O failed", { cause })))
+    }
     this.child.on("error", (cause) =>
       this.fail(
         new HarnessError("Cannot start Rust oracle; run vp run test-effect-differential", {
@@ -57,10 +59,14 @@ export class Oracle {
     this.child.stderr.on("data", (chunk: Buffer) => {
       this.stderrBytes += chunk.length
       this.stderr += chunk.toString("utf8").slice(0, 4096 - this.stderr.length)
-      if (this.stderrBytes > 65536) this.fail(new HarnessError("Oracle stderr exceeded 64 KiB"))
+      if (this.stderrBytes > 65536) {
+        this.fail(new HarnessError("Oracle stderr exceeded 64 KiB"))
+      }
     })
     this.child.stdout.on("end", () => {
-      if (this.buffer.length) this.fail(new HarnessError("Partial oracle response at EOF"))
+      if (this.buffer.length) {
+        this.fail(new HarnessError("Partial oracle response at EOF"))
+      }
     })
     this.child.stdout.on("data", (chunk: Buffer) => {
       try {
@@ -68,7 +74,9 @@ export class Oracle {
         assert.ok(this.buffer.length + chunk.length <= 1048576, "Oracle stdout exceeded 1 MiB")
         this.buffer = Buffer.concat([this.buffer, chunk])
         const end = this.buffer.indexOf(10)
-        if (end < 0) return
+        if (end < 0) {
+          return
+        }
         assert.equal(end, this.buffer.length - 1, "Extra oracle response bytes")
         const response: unknown = JSON.parse(
           new TextDecoder("utf-8", { fatal: true }).decode(this.buffer.subarray(0, end)),
@@ -128,7 +136,9 @@ export class Oracle {
     operation: "encode" | "decode",
     payload: { value: unknown } | { hex: string },
   ): Promise<Response> {
-    if (this.failure) return Promise.reject(this.failure)
+    if (this.failure) {
+      return Promise.reject(this.failure)
+    }
     assert.ok(!this.pending && !this.closing, "Oracle requests must be sequential")
     const request = {
       protocolVersion: 1,
@@ -158,7 +168,9 @@ export class Oracle {
     )
     try {
       await this.exit
-      if (this.failure) throw this.failure
+      if (this.failure) {
+        throw this.failure
+      }
     } finally {
       clearTimeout(timer)
     }
@@ -175,7 +187,9 @@ export async function assertProperty<A>(
   try {
     await fc.assert(
       fc.asyncProperty(arbitrary, async (input) => {
-        if (infrastructure) throw new fc.PreconditionFailure(true)
+        if (infrastructure) {
+          throw new fc.PreconditionFailure(true)
+        }
         try {
           await predicate(input)
         } catch (error) {
@@ -183,16 +197,21 @@ export async function assertProperty<A>(
             infrastructure = new Error(`Oracle failed while evaluating ${fc.stringify(input)}`, {
               cause: error,
             })
-            if (mismatch) throw new fc.PreconditionFailure(true)
-          } else mismatch = true
+            if (mismatch) {
+              throw new fc.PreconditionFailure(true)
+            }
+          } else {
+            mismatch = true
+          }
           throw error
         }
       }),
       parameters,
     )
   } catch (error) {
-    if (infrastructure)
+    if (infrastructure) {
       throw new AggregateError([error, infrastructure], "Oracle infrastructure failed")
+    }
     throw error
   }
 }

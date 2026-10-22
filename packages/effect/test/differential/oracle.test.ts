@@ -47,7 +47,9 @@ it("shrinks and replays an actual Rust byte mismatch", async () => {
     assert.ok(rust.ok)
     const output = new Uint8Array(2)
     new DataView(output.buffer).setUint16(0, value, true)
-    if (corrupt) output[0] = (output[0] ?? 0) ^ 1
+    if (corrupt) {
+      output[0] = (output[0] ?? 0) ^ 1
+    }
     assert.equal(Buffer.from(output).toString("hex"), rust.hex)
   }
   try {
@@ -80,7 +82,9 @@ it("retains the real mismatch if the oracle fails during shrinking", async () =>
       fc.integer({ min: 0, max: 900 }).map((n) => (n === 0 ? 777 : 900)),
       async (input) => {
         seen.push(input)
-        if (input === 777) throw new HarnessError("child crashed")
+        if (input === 777) {
+          throw new HarnessError("child crashed")
+        }
         assert.fail("real codec mismatch")
       },
       { seed: 42, numRuns: 1 },

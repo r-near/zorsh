@@ -55,17 +55,22 @@ it("samples every Borsh constructor as encodable values", () => {
     Schema.TaggedUnion({ Off: {}, On: { level: Borsh.U8 } }).pipe(
       Borsh.discriminants({ Off: 1, On: 5 }),
     ),
-  ])
+  ]) {
     expectRoundTrips(schema)
-  for (const length of [0, 1, 5, 32, 64])
-    for (const bytes of expectRoundTrips(Borsh.fixedBytes(length)))
+  }
+  for (const length of [0, 1, 5, 32, 64]) {
+    for (const bytes of expectRoundTrips(Borsh.fixedBytes(length))) {
       expect(bytes).toHaveLength(length)
+    }
+  }
   for (const [length, count] of [
     [1952, 10],
     [65536, 2],
-  ] as const)
-    for (const bytes of expectRoundTrips(Borsh.fixedBytes(length), count))
+  ] as const) {
+    for (const bytes of expectRoundTrips(Borsh.fixedBytes(length), count)) {
       expect(bytes).toHaveLength(length)
+    }
+  }
 })
 
 it("samples F32 as exact binary32 integers", () => {
@@ -88,18 +93,22 @@ it("samples fixed arrays at their length unless transformed", () => {
     Schema.Array(item).pipe(Schema.brand("Triple"), Borsh.fixedArray(3)),
     Schema.mutable(Schema.Array(item)).pipe(Borsh.fixedArray(3)),
     Schema.Array(Schema.FiniteFromString).pipe(Borsh.fixedArray(3)),
-  ])
-    for (const value of expectRoundTrips(schema)) expect(value).toHaveLength(3)
+  ]) {
+    for (const value of expectRoundTrips(schema)) {
+      expect(value).toHaveLength(3)
+    }
+  }
   expectRoundTrips(Schema.Array(Borsh.Unit).pipe(Borsh.fixedArray(2)))
   expectRoundTrips(Schema.Array(Borsh.U8).pipe(Borsh.fixedArray(0)))
   const codec = Borsh.toCodec(Schema.Struct({ a: Schema.Array(item).pipe(Borsh.fixedArray(3)) }))
   for (const a of [
     [1, 2],
     [1, 2, 3, 4],
-  ])
+  ]) {
     expect(() => Schema.encodeSync(codec)({ a })).toThrow(
       /^Expected a value with a length of 3\n {2}at \["a"\]$/,
     )
+  }
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(1, 0))).toThrow(
     /^Truncated fixed array payload at byte 0\n {2}at \["a"\]$/,
   )
@@ -240,8 +249,9 @@ it("samples native composites as encodable values", () => {
       Square: { value: Borsh.U32 },
       Rect: { width: Borsh.U16, height: Borsh.F32 },
     }),
-  ])
+  ]) {
     expectRoundTrips(schema)
+  }
 })
 
 it("keeps lone surrogates and zero-sized vectors unencodable", () => {
@@ -250,17 +260,22 @@ it("keeps lone surrogates and zero-sized vectors unencodable", () => {
   expect(() => Schema.encodeSync(strings)("\uD800")).toThrow(/^Lone UTF-16 surrogate at byte 0$/)
   const raw = sample(Schema.String, 200)
   expect(raw.some((s) => !s.isWellFormed())).toBe(true)
-  for (const s of raw)
-    if (s.isWellFormed()) expect(Schema.decodeSync(strings)(Schema.encodeSync(strings)(s))).toBe(s)
-    else expect(() => Schema.encodeSync(strings)(s)).toThrow(/Lone UTF-16 surrogate/)
+  for (const s of raw) {
+    if (s.isWellFormed()) {
+      expect(Schema.decodeSync(strings)(Schema.encodeSync(strings)(s))).toBe(s)
+    } else {
+      expect(() => Schema.encodeSync(strings)(s)).toThrow(/Lone UTF-16 surrogate/)
+    }
+  }
   expect(() => Schema.encodeSync(Borsh.toCodec(WellFormed))("\uD800")).toThrow(
     /^Expected well-formed Unicode$/,
   )
   const units = Borsh.toCodec(Schema.Array(Borsh.Unit))
-  for (const value of sample(Schema.Array(Borsh.Unit)))
+  for (const value of sample(Schema.Array(Borsh.Unit))) {
     expect(() => Schema.encodeSync(units)(value)).toThrow(
       /^Borsh forbids vectors of zero-sized values at byte 0$/,
     )
+  }
   const none = Schema.Option(Schema.Array(Borsh.Unit))
   expect(Schema.encodeSync(Borsh.toCodec(none))(Option.none())).toEqual(Uint8Array.of(0))
 })

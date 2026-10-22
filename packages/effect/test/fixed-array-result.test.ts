@@ -10,14 +10,17 @@ it("writes fixed arrays without a prefix and enforces their binary length", () =
   const raw = Uint8Array.of(0, 0, 1, 0, 255, 255)
   expect(Schema.encodeSync(codec)([0, 1, 65535])).toEqual(raw)
   expect(Schema.decodeSync(codec)(raw)).toEqual([0, 1, 65535])
-  for (let cut = 0; cut < raw.length; cut++)
+  for (let cut = 0; cut < raw.length; cut++) {
     expect(() => Schema.decodeSync(codec)(raw.subarray(0, cut))).toThrow(/Truncated fixed array/)
+  }
   expect(() => Schema.decodeSync(codec)(Uint8Array.of(...raw, 0))).toThrow(/Trailing/)
-  for (const value of [[], [1, 2], [1, 2, 3, 4], {}, null])
+  for (const value of [[], [1, 2], [1, 2, 3, 4], {}, null]) {
     expect(() => Schema.encodeUnknownSync(codec)(value)).toThrow(Schema.SchemaError)
+  }
   const layout = compile(Schema.toEncoded(schema).ast)
-  for (const value of [[], [1, 2, 3, 4], {}])
+  for (const value of [[], [1, 2, 3, 4], {}]) {
     expect(() => layout.write(new Writer(32), value)).toThrow(/Expected fixed array of length 3/)
+  }
   expect(() => Schema.encodeSync(Borsh.toCodec(schema, { maxBytes: 5 }))([0, 1, 2])).toThrow(
     /maxBytes/,
   )
@@ -27,17 +30,19 @@ it("writes fixed arrays without a prefix and enforces their binary length", () =
 })
 
 it("rejects invalid fixed-array schemas and conflicting metadata at construction", () => {
-  for (const length of [-1, 0.5, NaN, Infinity, 0x1_0000_0000])
+  for (const length of [-1, 0.5, NaN, Infinity, 0x1_0000_0000]) {
     expect(() => Borsh.fixedArray(length)).toThrow(/fixedArray length must be a safe integer/)
+  }
   for (const schema of [
     Borsh.U8,
     Schema.Tuple([Borsh.U8]),
     Schema.NonEmptyArray(Borsh.U8),
     Schema.TupleWithRest(Schema.Tuple([]), [Borsh.U8, Borsh.U16]),
-  ])
+  ]) {
     expect(() => schema.pipe(Borsh.fixedArray(1))).toThrow(
       /fixedArray requires a homogeneous encoded array/,
     )
+  }
   const schema = Schema.Array(Borsh.U8).pipe(Borsh.fixedArray(1))
   expect(() => schema.pipe(Borsh.fixedArray(2))).toThrow(/Conflicting Borsh layout annotations/)
   expect(Schema.encodeSync(Borsh.toCodec(schema.pipe(Borsh.fixedArray(1))))([7])).toEqual(
@@ -128,14 +133,16 @@ it("uses native Result values and Rust Err=0, Ok=1 tags", () => {
   ] as const) {
     expect(Schema.encodeSync(codec)(value)).toEqual(raw)
     expect(Schema.decodeSync(codec)(raw)).toEqual(value)
-    for (let cut = 0; cut < raw.length; cut++)
+    for (let cut = 0; cut < raw.length; cut++) {
       expect(() => Schema.decodeSync(codec)(raw.subarray(0, cut))).toThrow(Schema.SchemaError)
+    }
     expect(() => Schema.decodeSync(codec)(Uint8Array.of(...raw, 0))).toThrow(/Trailing/)
   }
-  for (let tag = 2; tag < 256; tag++)
+  for (let tag = 2; tag < 256; tag++) {
     expect(() => Schema.decodeSync(codec)(Uint8Array.of(tag))).toThrow(
       new RegExp(`Invalid Result tag ${tag}`),
     )
+  }
   const boundary = compile(Schema.toEncoded(Schema.Result(Borsh.U8, Borsh.Unit)).ast)
   expect(() => boundary.write(new Writer(16), { _tag: "Success", success: 1 })).toThrow(
     /Expected Result/,
@@ -278,8 +285,12 @@ it("accepts vectors and fixed arrays of Results with zero-byte payloads", () => 
 
 it("rejects truncated Result vectors before visiting their payloads", () => {
   const codec = Borsh.toCodec(Schema.Array(Schema.Result(Borsh.U16, Borsh.U64)))
-  for (const raw of [Uint8Array.of(1, 0, 0, 0, 255, 0), Uint8Array.of(2, 0, 0, 0, 255, 0, 0, 0, 0)])
+  for (const raw of [
+    Uint8Array.of(1, 0, 0, 0, 255, 0),
+    Uint8Array.of(2, 0, 0, 0, 255, 0, 0, 0, 0),
+  ]) {
     expect(() => Schema.decodeSync(codec)(raw)).toThrow(/^Truncated vector payload at byte 4$/)
+  }
 })
 
 it("rejects fixed-array Suspend at helper construction without evaluating its thunk", () => {

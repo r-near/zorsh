@@ -80,10 +80,11 @@ it("rejects duplicate and descending wire keys before native construction", () =
     for (const raw of [
       Uint8Array.of(2, 0, 0, 0, 1, 0, 1, 0),
       Uint8Array.of(2, 0, 0, 0, 0, 1, 1, 0),
-    ])
+    ]) {
       expect(() => Schema.decodeSync(codec)(raw)).toThrow(
         /Collection keys must be strictly increasing at byte 6\n {2}at \["entries"\]\[1\]\["key"\]$/,
       )
+    }
     expect(() => Schema.decodeSync(codec)(Uint8Array.of(255, 255, 255, 255))).toThrow(
       /Truncated collection payload/,
     )
@@ -99,16 +100,18 @@ it("rejects unsupported key orderings at construction, including empty collectio
     Schema.Struct({ n: Borsh.U8 }),
     Schema.Option(Borsh.U8),
     Schema.Array(Borsh.U8),
-  ])
+  ]) {
     for (const [schema, name] of [
       [Schema.ReadonlyMap(key, Borsh.U8), "ReadonlyMap"],
       [Schema.HashMap(key, Borsh.U8), "HashMap"],
       [Schema.ReadonlySet(key), "ReadonlySet"],
       [Schema.HashSet(key), "HashSet"],
-    ] as const)
+    ] as const) {
       expect(() => Borsh.toCodec(schema)).toThrow(
         new Error(`$: ${name} keys require Boolean, integer or String Rust ordering`),
       )
+    }
+  }
 })
 
 it("validates collection arities and native binary shapes", () => {
@@ -116,7 +119,9 @@ it("validates collection arities and native binary shapes", () => {
   for (const [i, schema] of [...mapSchemas, ...setSchemas].entries()) {
     const ast = Schema.toEncoded(schema).ast
     expect(ast._tag).toBe("Declaration")
-    if (ast._tag !== "Declaration") throw new Error("Expected Declaration")
+    if (ast._tag !== "Declaration") {
+      throw new Error("Expected Declaration")
+    }
     const arity = i < 2 ? "2 encoded type parameters" : "1 encoded type parameter"
     const message = new Error(`$: ${names[i]} requires exactly ${arity}`)
     expect(() => compile(new SchemaAST.Declaration([], ast.run, ast.annotations))).toThrow(message)
@@ -127,17 +132,11 @@ it("validates collection arities and native binary shapes", () => {
       message,
     )
     const layout = compile(ast)
-    for (const value of [null, [], {}, 1])
+    for (const value of [null, [], {}, 1]) {
       expect(() => layout.write(new Writer(64), value)).toThrow(/Expected native collection/)
+    }
     expect(() => Schema.encodeUnknownSync(Borsh.toCodec(schema))([])).toThrow(Schema.SchemaError)
-    const empty =
-      schema === mapSchemas[0]
-        ? new Map()
-        : schema === mapSchemas[1]
-          ? HashMap.empty()
-          : schema === setSchemas[0]
-            ? new Set()
-            : HashSet.empty()
+    const empty = [new Map(), HashMap.empty(), new Set(), HashSet.empty()][i]
     expect(Schema.encodeUnknownSync(Borsh.toCodec(schema))(empty)).toEqual(new Uint8Array(4))
     expect(() => Schema.encodeUnknownSync(Borsh.toCodec(schema, { maxBytes: 3 }))(empty)).toThrow(
       /maxBytes/,
@@ -340,7 +339,9 @@ it("checks encoded iterator duplicates and invalid primitive comparison inputs",
 
 it("encodes empty native maps when a shared value layout overflows its minimum size", () => {
   let value: Schema.Codec<unknown> = Schema.Array(Borsh.U8).pipe(Borsh.fixedArray(0xffff_ffff))
-  for (let i = 0; i < 500; i++) value = Schema.Struct({ a: value, b: value, c: value, d: value })
+  for (let i = 0; i < 500; i++) {
+    value = Schema.Struct({ a: value, b: value, c: value, d: value })
+  }
   expect(compile(Schema.toEncoded(value).ast).minBytes).toBe(Infinity)
   for (const [schema, empty] of [
     [Schema.ReadonlyMap(Borsh.U8, value), new Map()],
@@ -357,10 +358,11 @@ it("rejects lone surrogates in multi-entry sets without conflating distinct keys
   for (const [schema, value] of [
     [Schema.ReadonlySet(Schema.String), new Set(["\u2400\u0000", "\ud800\u0000"])],
     [Schema.HashSet(Schema.String), HashSet.fromIterable(["\u2400\u0000", "\ud800\u0000"])],
-  ] as const)
+  ] as const) {
     expect(() => Schema.encodeUnknownSync(Borsh.toCodec(schema))(value)).toThrow(
       /Lone UTF-16 surrogate/,
     )
+  }
 })
 
 it("preserves native decoding collisions while rejecting duplicate encoded keys", () => {

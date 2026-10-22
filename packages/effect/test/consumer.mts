@@ -10,8 +10,8 @@ import {
   SchemaTransformation,
 } from "effect"
 import { expectTypeOf } from "vite-plus/test"
-import { Borsh } from "../src/index.js"
 import { U16 } from "../src/Borsh.js"
+import { Borsh } from "../src/index.js"
 
 class Decode extends Context.Service<Decode, { readonly prefix: string }>()("Decode") {}
 class Encode extends Context.Service<Encode, { readonly prefix: string }>()("Encode") {}

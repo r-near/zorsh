@@ -1,5 +1,5 @@
-import { b, Schema, type EnumLike } from "../../src/index.js"
 import { BinaryReader } from "../../src/binary-io.js"
+import { b, Schema, type EnumLike } from "../../src/index.js"
 import type { TypeOf, VecType } from "../../src/types.js"
 const schema = b.struct({
   id: b.u64(),

@@ -123,7 +123,9 @@ describe("Borsh primitives", () => {
       const carry = new Uint8Array(width)
       carry[4] = 1
       expect(encode(4294967296n)).toEqual(carry)
-      if (min < 0n) expect(encode(-1n)).toEqual(new Uint8Array(width).fill(255))
+      if (min < 0n) {
+        expect(encode(-1n)).toEqual(new Uint8Array(width).fill(255))
+      }
       fc.assert(
         fc.property(fc.bigInt({ min, max }), (value) => {
           const bytes = encode(value)
@@ -141,8 +143,9 @@ describe("Borsh primitives", () => {
     expect(Schema.encodeSync(bool)(true)).toEqual(Uint8Array.of(1))
     expect(Schema.decodeSync(bool)(Uint8Array.of(0))).toBe(false)
     expect(Schema.decodeSync(bool)(Uint8Array.of(1))).toBe(true)
-    for (const tag of [2, 128, 255])
+    for (const tag of [2, 128, 255]) {
       expect(() => Schema.decodeSync(bool)(Uint8Array.of(tag))).toThrow(/bool tag.* at byte 0$/)
+    }
     expect(() => Schema.encodeUnknownSync(bool)(1)).toThrow(Schema.SchemaError)
     const unit = Borsh.toCodec(Borsh.Unit)
     expect(Schema.encodeSync(unit)([])).toEqual(new Uint8Array())
@@ -213,9 +216,11 @@ describe("Borsh primitives", () => {
         fc.property(fc.uint8Array({ minLength: width, maxLength: width }), (bytes) => {
           const view = new DataView(bytes.buffer, bytes.byteOffset, width)
           const value = width === 4 ? view.getFloat32(0, true) : view.getFloat64(0, true)
-          if (Number.isNaN(value))
+          if (Number.isNaN(value)) {
             expect(() => Schema.decodeSync(codec)(bytes)).toThrow(Schema.SchemaError)
-          else expect(Schema.encodeSync(codec)(Schema.decodeSync(codec)(bytes))).toEqual(bytes)
+          } else {
+            expect(Schema.encodeSync(codec)(Schema.decodeSync(codec)(bytes))).toEqual(bytes)
+          }
         }),
         { numRuns: 500 },
       )
@@ -231,8 +236,9 @@ describe("Borsh primitives", () => {
     expect(Schema.encodeSync(codec)("\uFEFFa")).toEqual(
       Uint8Array.of(4, 0, 0, 0, 239, 187, 191, 97),
     )
-    for (const value of ["\uD800", "a\uDC00", "\uD800x", "\uD800\uD800"])
+    for (const value of ["\uD800", "a\uDC00", "\uD800x", "\uD800\uD800"]) {
       expect(() => Schema.encodeSync(codec)(value)).toThrow(/Lone UTF-16/)
+    }
     fc.assert(
       fc.property(fc.string({ unit: "grapheme", maxLength: 100 }), (value) => {
         expect(Schema.decodeSync(codec)(Schema.encodeSync(codec)(value))).toBe(value)
@@ -357,10 +363,11 @@ describe("Borsh primitives", () => {
     const codec = Borsh.toCodec(Borsh.U16)
     expect(() => Schema.decodeSync(codec)(Uint8Array.of(1))).toThrow(/Truncated.* at byte 0$/)
     expect(() => Schema.decodeSync(codec)(Uint8Array.of(1, 0, 9))).toThrow(/Trailing.* at byte 2$/)
-    for (const schema of [Schema.String, Borsh.Bytes])
+    for (const schema of [Schema.String, Borsh.Bytes]) {
       expect(() =>
         Schema.decodeSync(Borsh.toCodec(schema))(Uint8Array.of(255, 255, 255, 255)),
       ).toThrow(/Truncated.* at byte 4$/)
+    }
   })
 
   it("enforces custom and default byte caps before allocating payloads", () => {
@@ -386,9 +393,11 @@ describe("Borsh primitives", () => {
     expect(() =>
       Schema.encodeSync(Borsh.toCodec(Schema.String))("a".repeat(16 * 1024 * 1024)),
     ).toThrow(/byte budget/)
-    for (const maxBytes of [0, -1, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1])
+    for (const maxBytes of [0, -1, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1]) {
       expect(() => Borsh.toCodec(Borsh.U8, { maxBytes })).toThrow(/positive safe integer/)
-    for (const length of [-1, 1.5, Infinity, NaN, 0x100000000])
+    }
+    for (const length of [-1, 1.5, Infinity, NaN, 0x100000000]) {
       expect(() => Borsh.fixedBytes(length)).toThrow(/fixedBytes length/)
+    }
   })
 })
