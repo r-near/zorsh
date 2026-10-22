@@ -34,7 +34,7 @@ function bigInteger(bits: 64 | 128, signed: boolean): Schema.BigInt {
   }).check(Schema.isBetweenBigInt(integerRange(bits, signed)))
 }
 
-/** Reject Suspend before Schema.toEncoded can evaluate a thunk. */
+/** Reject Suspend, with its path, before deriving the encoded AST. */
 function encodedAST(schema: Schema.Constraint): SchemaAST.AST {
   rejectSuspensions(schema.ast)
   return Schema.toEncoded(schema).ast
@@ -327,6 +327,7 @@ type EnumNames<S, Side extends "Encoded" | "Type" = "Encoded"> = S extends {
             : never
           : never
       : never
+// The labels a discriminant map must cover: TS enum names, literal values or variant tags.
 type EnumLabels<S extends Schema.Top, Tag extends string> = [EnumNames<S>] extends [never]
   ? S["Encoded"] extends infer E
     ? E extends SchemaAST.LiteralValue
@@ -340,10 +341,12 @@ type EnumLabels<S extends Schema.Top, Tag extends string> = [EnumNames<S>] exten
   : Tag extends "_tag"
     ? EnumNames<S>
     : never
+// The keys of a discriminant map, or only its required keys.
 type MapLabels<D, Required = false> = `${Extract<
   { [K in keyof D]-?: Required extends true ? ({} extends Pick<D, K> ? never : K) : K }[keyof D],
   string | number
 >}`
+// True only for a single string literal, not `string` or a union.
 type SingleTag<Tag extends string> = string extends Tag
   ? false
   : [Tag] extends [infer T]
@@ -353,6 +356,7 @@ type SingleTag<Tag extends string> = string extends Tag
         : false
       : never
     : never
+// A type error naming the problem unless Tag is one literal and the map covers exactly the labels.
 type ExactDiscriminants<S extends Schema.Top, D, Tag extends string> = [SingleTag<Tag>] extends [
   true,
 ]
@@ -436,6 +440,7 @@ export interface Options {
   readonly maxBytes?: number | undefined
 }
 
+/** Turn a binary failure into a schema issue; any other error is a defect and is rethrown. */
 function binaryFailure(error: unknown): SchemaIssue.Issue {
   if (!(error instanceof BinaryError)) {
     throw error
@@ -448,6 +453,7 @@ const codecCache = new WeakMap<
   Schema.Constraint,
   { readonly layout: Layout; readonly codecs: Map<number, unknown> }
 >()
+const defaultMaxBytes = 16 * 1024 * 1024
 /** Bound the codecs retained per schema when callers vary maxBytes. */
 const maxBytesCacheSize = 8
 
@@ -484,12 +490,18 @@ export function toCodec<S extends Schema.Constraint>(
   schema: S,
   options?: Options,
 ): Schema.Codec<S["Type"], Uint8Array, S["DecodingServices"], S["EncodingServices"]> {
-  const maxBytes = options?.maxBytes === undefined ? 16 * 1024 * 1024 : options.maxBytes
+  // Only an absent option takes the default; null is rejected like any other non-integer.
+  const maxBytes = options?.maxBytes === undefined ? defaultMaxBytes : options.maxBytes
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
     throw new Error("$: maxBytes must be a positive safe integer")
   }
   let entry = codecCache.get(schema)
-  const cached = entry?.codecs.get(maxBytes)
+  if (entry === undefined) {
+    entry = { layout: compile(encodedAST(schema)), codecs: new Map() }
+    codecCache.set(schema, entry)
+  }
+  const { layout, codecs } = entry
+  const cached = codecs.get(maxBytes)
   if (cached !== undefined) {
     return cached as Schema.Codec<
       S["Type"],
@@ -498,12 +510,18 @@ export function toCodec<S extends Schema.Constraint>(
       S["EncodingServices"]
     >
   }
-  if (entry === undefined) {
-    entry = { layout: compile(encodedAST(schema)), codecs: new Map() }
-    codecCache.set(schema, entry)
+  const codec = binaryCodec(layout, maxBytes).pipe(Schema.decodeTo(schema))
+  // Maps iterate in insertion order, so this evicts the oldest maxBytes.
+  if (codecs.size >= maxBytesCacheSize) {
+    codecs.delete(codecs.keys().next().value as number)
   }
-  const { layout, codecs } = entry
-  const binary = Schema.Uint8Array.pipe(
+  codecs.set(maxBytes, codec)
+  return codec
+}
+
+/** Bytes to the schema's encoded value and back; toCodec layers the schema itself on top. */
+function binaryCodec(layout: Layout, maxBytes: number) {
+  return Schema.Uint8Array.pipe(
     Schema.decodeTo(
       Schema.Unknown,
       SchemaTransformation.transformEffect({
@@ -531,10 +549,4 @@ export function toCodec<S extends Schema.Constraint>(
       }),
     ),
   )
-  const codec = binary.pipe(Schema.decodeTo(schema))
-  if (codecs.size >= maxBytesCacheSize) {
-    codecs.delete(codecs.keys().next().value as number)
-  }
-  codecs.set(maxBytes, codec)
-  return codec
 }

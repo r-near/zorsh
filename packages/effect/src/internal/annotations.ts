@@ -90,43 +90,42 @@ export function parseDescriptor(value: unknown, path: string): LayoutDescriptor 
         value.discriminants !== null &&
         !Array.isArray(value.discriminants)
       ) {
-        const entries = Object.entries(value.discriminants).sort(([a], [b]) => (a < b ? -1 : 1))
-        const tags = new Set<number>()
-        for (const [, tag] of entries) {
-          if (
-            typeof tag !== "number" ||
-            !Number.isInteger(tag) ||
-            tag < 0 ||
-            tag > 255 ||
-            tags.has(tag)
-          ) {
-            throw new Error(
-              `${path}: Borsh enum discriminants must be unique integers from 0 to 255`,
-            )
-          }
-          tags.add(tag)
-        }
-        return Object.freeze({
-          version: 1,
-          kind: "enum",
-          tag: value.tag,
-          discriminants: Object.freeze(Object.fromEntries(entries)),
-        })
+        const discriminants = parseDiscriminants(value.discriminants, path)
+        return Object.freeze({ version: 1, kind: "enum", tag: value.tag, discriminants })
       }
+      break
   }
   throw new Error(`${path}: Invalid Borsh layout annotation`)
 }
 
+/** A frozen copy sorted by label, so equal maps serialize identically when merged. */
+function parseDiscriminants(map: object, path: string): Readonly<Record<string, number>> {
+  const entries = Object.entries(map).sort(([a], [b]) => (a < b ? -1 : 1))
+  const seen = new Set<number>()
+  for (const [, discriminant] of entries) {
+    if (!isU8(discriminant) || seen.has(discriminant)) {
+      throw new Error(`${path}: Borsh enum discriminants must be unique integers from 0 to 255`)
+    }
+    seen.add(discriminant)
+  }
+  return Object.freeze(Object.fromEntries(entries))
+}
+
+function isU8(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 255
+}
+
 export function descriptor(ast: SchemaAST.AST, path: string): LayoutDescriptor | undefined {
   let found = parseDescriptor(ast.annotations?.[key], path)
-  const checks = [...(ast.checks ?? [])]
-  for (let check = checks.pop(); check !== undefined; check = checks.pop()) {
+  // Checks can nest in filter groups; every annotated one, at any depth, must agree.
+  const pending = [...(ast.checks ?? [])]
+  for (let check = pending.pop(); check !== undefined; check = pending.pop()) {
     const next = parseDescriptor(check.annotations?.[key], path)
     if (next !== undefined) {
       found = merge(found, next, path)
     }
     if (check._tag === "FilterGroup") {
-      checks.push(...check.checks)
+      pending.push(...check.checks)
     }
   }
   return found
@@ -148,6 +147,7 @@ export function withLayout<S extends Schema.Top>(
   layout: LayoutDescriptor,
 ): S["Rebuild"] {
   const next = parseDescriptor(layout, "$")
-  const merged = merge(descriptor(Schema.toEncoded(schema).ast, "$"), next, "$")
+  const existing = descriptor(Schema.toEncoded(schema).ast, "$")
+  const merged = merge(existing, next, "$")
   return schema.pipe(Schema.annotateEncoded({ [key]: Object.freeze(merged) }))
 }

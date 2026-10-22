@@ -82,6 +82,7 @@ export class Reader {
     for (; i + 8 <= end; i += 8) {
       const low = view.getUint32(i, true)
       const high = view.getUint32(i + 4, true)
+      // Any byte at or above 0x80 is not ASCII.
       if ((low | high) & 0x80808080) {
         return undefined
       }
@@ -126,9 +127,9 @@ export class Writer {
     if (needed <= this.buffer.byteLength) {
       return
     }
-    const buffer = new Uint8Array(
-      Math.min(this.maxBytes, Math.max(needed, this.buffer.byteLength * 2)),
-    )
+    // Double to amortize growth, but never allocate past maxBytes.
+    const capacity = Math.min(this.maxBytes, Math.max(needed, this.buffer.byteLength * 2))
+    const buffer = new Uint8Array(capacity)
     buffer.set(this.buffer)
     this.buffer = buffer
     this.view = new DataView(buffer.buffer)
@@ -160,6 +161,7 @@ export class Writer {
   /** Write a string whose UTF-8 length utf8Length has already validated. */
   string(value: string, length: number): void {
     const offset = this.advance(length)
+    // Equal UTF-16 and UTF-8 lengths mean every character is ASCII, so each code is its byte.
     if (length === value.length && length <= shortString) {
       const buffer = this.buffer
       for (let i = 0; i < length; i++) {
@@ -185,6 +187,7 @@ export function utf8Length(value: string, budget: number, offset: number): numbe
     } else if (code < 0x800) {
       length += 2
     } else if (code >= 0xd800 && code <= 0xdbff) {
+      // A high surrogate must pair with a low one. Past the end, charCodeAt is NaN and fails too.
       const next = value.charCodeAt(++i)
       if (!(next >= 0xdc00 && next <= 0xdfff)) {
         throw new BinaryError(offset, "Lone UTF-16 surrogate")

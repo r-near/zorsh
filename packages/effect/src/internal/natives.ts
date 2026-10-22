@@ -13,10 +13,12 @@ export function compileDeclaration(
   compile: Compile,
 ): Layout {
   const id = representationId(ast)
+  // Own keys only, so an id such as "constructor" cannot select an Object.prototype member.
   const native = id !== undefined && Object.hasOwn(natives, id) ? natives[id] : undefined
   if (native === undefined) {
+    const subject = id === undefined ? "Declaration" : `Declaration ${id}`
     throw new Error(
-      `${path}: ${id === undefined ? "Declaration" : `Declaration ${id}`} has no Borsh layout; decode it from a Borsh-encodable schema with Schema.decodeTo`,
+      `${path}: ${subject} has no Borsh layout; decode it from a Borsh-encodable schema with Schema.decodeTo`,
     )
   }
   return native(ast, path, compile)
@@ -29,12 +31,15 @@ export function isUint8Array(ast: SchemaAST.AST): boolean {
 
 function representationId(ast: SchemaAST.Declaration): string | undefined {
   const representation = ast.annotations?.representation
-  return typeof representation === "object" &&
+  if (
+    typeof representation === "object" &&
     representation !== null &&
     "id" in representation &&
     typeof representation.id === "string"
-    ? representation.id
-    : undefined
+  ) {
+    return representation.id
+  }
+  return undefined
 }
 
 /** Effect's constructors fix these arities; only hand-built declarations can differ. */
@@ -92,6 +97,7 @@ function option(ast: SchemaAST.Declaration, path: string, compile: Compile): Lay
   }
 }
 
+/** Rust Result<T, E>: tag 1 then the Ok value, or tag 0 then the Err value. */
 function result(ast: SchemaAST.Declaration, path: string, compile: Compile): Layout {
   const [success, failure] = parameters(ast, 2, "Result", path)
   const ok = compile(success, `${path}["success"]`)
@@ -139,7 +145,9 @@ interface CollectionAdapter {
   make(entries: [unknown, unknown][]): unknown
 }
 
-/** Rust BTreeMap/BTreeSet, also for Hash collections: a u32 count, then strictly increasing keys. */
+/**
+ * Rust BTreeMap/BTreeSet, also for Hash collections: a u32 count, then strictly increasing keys.
+ */
 function collectionLayout(adapter: CollectionAdapter) {
   return (ast: SchemaAST.Declaration, path: string, compile: Compile): Layout => {
     const [key, value] = parameters(ast, adapter.arity, adapter.name, path)
@@ -151,8 +159,8 @@ function collectionLayout(adapter: CollectionAdapter) {
       )
     }
     const valueLayout = value === undefined ? undefined : compile(value, `${path}["value"]`)
-    const minimum = keyLayout.minBytes + (valueLayout?.minBytes ?? 0)
-    const ordered = (previous: unknown, key: unknown, offset: number) => {
+    const minEntryBytes = keyLayout.minBytes + (valueLayout?.minBytes ?? 0)
+    const assertIncreasing = (previous: unknown, key: unknown, offset: number) => {
       if (compare(previous, key) >= 0) {
         throw new BinaryError(offset, "Collection keys must be strictly increasing")
       }
@@ -162,10 +170,12 @@ function collectionLayout(adapter: CollectionAdapter) {
       isZeroSized: false,
       read: (r) => {
         const count = r.u32()
-        if (count > Math.floor((r.input.byteLength - r.offset) / minimum)) {
+        // Each entry needs at least minEntryBytes, so reject an impossible count before allocating.
+        if (count > Math.floor((r.input.byteLength - r.offset) / minEntryBytes)) {
           throw new BinaryError(r.offset, "Truncated collection payload")
         }
         const entries: [unknown, unknown][] = []
+        // The entry index and part locate a failure, as in [3]["value"].
         let i = 0
         let part = "key"
         try {
@@ -174,7 +184,7 @@ function collectionLayout(adapter: CollectionAdapter) {
             part = "key"
             const key = keyLayout.read(r)
             if (i > 0) {
-              ordered(entries[i - 1]?.[0], key, offset)
+              assertIncreasing(entries[i - 1]?.[0], key, offset)
             }
             part = "value"
             entries.push([key, valueLayout === undefined ? undefined : valueLayout.read(r)])
@@ -189,7 +199,8 @@ function collectionLayout(adapter: CollectionAdapter) {
         if (collection === undefined || collection.size > 0xffff_ffff) {
           throw new BinaryError(w.offset, "Expected native collection with u32 length")
         }
-        w.ensure(4 + (collection.size === 0 ? 0 : collection.size * minimum))
+        w.ensure(4 + (collection.size === 0 ? 0 : collection.size * minEntryBytes))
+        // Sorted into Rust order, so the increasing check below only rejects keys Rust deems equal.
         const entries = Array.from(collection.entries).sort(([a], [b]) => compare(a, b))
         w.u32(entries.length)
         let i = 0
@@ -198,7 +209,7 @@ function collectionLayout(adapter: CollectionAdapter) {
           for (const [key, value] of entries) {
             part = "key"
             if (i > 0) {
-              ordered(entries[i - 1]?.[0], key, w.offset)
+              assertIncreasing(entries[i - 1]?.[0], key, w.offset)
             }
             keyLayout.write(w, key)
             part = "value"
@@ -239,18 +250,16 @@ const hashSet = collectionLayout({
   name: "HashSet",
   arity: 1,
   get: (value) =>
-    HashSet.isHashSet(value)
-      ? {
-          size: HashSet.size(value),
-          entries: (function* () {
-            for (const key of value) {
-              yield [key, key] as const
-            }
-          })(),
-        }
-      : undefined,
+    HashSet.isHashSet(value) ? { size: HashSet.size(value), entries: keyPairs(value) } : undefined,
   make: (entries) => HashSet.fromIterable(entries.map(([key]) => key)),
 })
+
+/** Set members as [key, key] entries, the shape Set.prototype.entries yields. */
+function* keyPairs<K>(keys: Iterable<K>): Generator<readonly [K, K]> {
+  for (const key of keys) {
+    yield [key, key] as const
+  }
+}
 
 /** Effect declarations with a Borsh layout, keyed by their representation id. */
 const natives: Readonly<Record<string, Native>> = {

@@ -2,56 +2,66 @@ import { Order } from "effect"
 import type { Layout } from "./compiler.js"
 import { BinaryError, utf8Length } from "./io.js"
 
+type IntegerBits = 8 | 16 | 32 | 64 | 128
+
 /** Rust's inclusive iN/uN bounds. */
-export function integerRange(bits: 8 | 16 | 32 | 64 | 128, signed: boolean) {
+export function integerRange(bits: IntegerBits, signed: boolean) {
   const minimum = signed ? -(1n << BigInt(bits - 1)) : 0n
   const maximum = (1n << BigInt(signed ? bits - 1 : bits)) - 1n
   return { minimum, maximum }
 }
 
-/** Native DataView access; 128-bit values are two little-endian 64-bit halves. */
-export function integer(bits: 8 | 16 | 32 | 64 | 128, signed: boolean): Layout {
+/** Native DataView access; up to 32 bits as a number, wider as a bigint. */
+export function integer(bits: IntegerBits, signed: boolean): Layout {
+  return bits <= 32 ? numberInteger(bits, signed) : bigintInteger(bits, signed)
+}
+
+function numberInteger(bits: IntegerBits, signed: boolean): Layout {
   const width = bits / 8
   const name = `${signed ? "i" : "u"}${bits}`
   const range = integerRange(bits, signed)
-  if (bits <= 32) {
-    const minimum = Number(range.minimum)
-    const maximum = Number(range.maximum)
-    return {
-      compare: comparePrimitive,
-      minBytes: width,
-      isZeroSized: false,
-      read: (r) => {
-        const offset = r.advance(width)
-        const view = r.view
-        if (bits === 8) {
-          return signed ? view.getInt8(offset) : view.getUint8(offset)
-        }
-        if (bits === 16) {
-          return signed ? view.getInt16(offset, true) : view.getUint16(offset, true)
-        }
-        return signed ? view.getInt32(offset, true) : view.getUint32(offset, true)
-      },
-      write: (w, value) => {
-        if (typeof value !== "number" || !Number.isInteger(value)) {
-          throw new BinaryError(w.offset, `Expected ${name}`)
-        }
-        if (value < minimum || value > maximum) {
-          throw new BinaryError(w.offset, `Integer outside ${name} range`)
-        }
-        // Unsigned setters wrap negative values to the same two's complement bytes.
-        const offset = w.advance(width)
-        if (bits === 8) {
-          w.view.setUint8(offset, value)
-        } else if (bits === 16) {
-          w.view.setUint16(offset, value, true)
-        } else {
-          w.view.setUint32(offset, value, true)
-        }
-      },
-    }
+  const minimum = Number(range.minimum)
+  const maximum = Number(range.maximum)
+  return {
+    compare: comparePrimitive,
+    minBytes: width,
+    isZeroSized: false,
+    read: (r) => {
+      const offset = r.advance(width)
+      const view = r.view
+      if (bits === 8) {
+        return signed ? view.getInt8(offset) : view.getUint8(offset)
+      }
+      if (bits === 16) {
+        return signed ? view.getInt16(offset, true) : view.getUint16(offset, true)
+      }
+      return signed ? view.getInt32(offset, true) : view.getUint32(offset, true)
+    },
+    write: (w, value) => {
+      if (typeof value !== "number" || !Number.isInteger(value)) {
+        throw new BinaryError(w.offset, `Expected ${name}`)
+      }
+      if (value < minimum || value > maximum) {
+        throw new BinaryError(w.offset, `Integer outside ${name} range`)
+      }
+      // Unsigned setters wrap negative values to the same two's complement bytes.
+      const offset = w.advance(width)
+      if (bits === 8) {
+        w.view.setUint8(offset, value)
+      } else if (bits === 16) {
+        w.view.setUint16(offset, value, true)
+      } else {
+        w.view.setUint32(offset, value, true)
+      }
+    },
   }
-  const { minimum, maximum } = range
+}
+
+/** 64-bit values are one BigInt64; 128-bit values are two little-endian 64-bit halves. */
+function bigintInteger(bits: IntegerBits, signed: boolean): Layout {
+  const width = bits / 8
+  const name = `${signed ? "i" : "u"}${bits}`
+  const { minimum, maximum } = integerRange(bits, signed)
   return {
     compare: comparePrimitive,
     minBytes: width,
@@ -128,7 +138,10 @@ export function bytes(length?: number): Layout {
       if (value.byteLength > 0xffff_ffff) {
         throw new BinaryError(w.offset, "Byte array exceeds u32 length")
       }
-      w.ensure(value.byteLength + (length === undefined ? 4 : 0))
+      // Reserve the prefix with the payload, so an oversized array fails at the prefix offset. Both
+      // shapes reserve here, reading byteLength as often as the checks above expect.
+      const prefixBytes = length === undefined ? 4 : 0
+      w.ensure(value.byteLength + prefixBytes)
       if (length === undefined) {
         w.u32(value.byteLength)
       }
@@ -147,6 +160,8 @@ export function string(): Layout {
       if (typeof value !== "string") {
         throw new BinaryError(w.offset, "Expected string")
       }
+      // Check room for the prefix first, so fewer than 4 bytes left reports maxBytes rather than
+      // the string budget.
       w.ensure(4)
       const length = utf8Length(value, w.maxBytes - w.offset - 4, w.offset)
       w.ensure(4 + length)
@@ -191,22 +206,21 @@ function comparePrimitive(a: unknown, b: unknown): number {
   throw new BinaryError(0, "Expected ordered primitive")
 }
 
+/** Rust orders str by UTF-8 bytes, which is Unicode scalar order rather than UTF-16 order. */
 function compareString(a: unknown, b: unknown): number {
   if (typeof a !== "string" || typeof b !== "string") {
     throw new BinaryError(0, "Expected string key")
   }
+  // One index serves both strings: it only moves past equal code points, which have equal width.
   let i = 0
-  let j = 0
-  for (
-    let left = a.codePointAt(i), right = b.codePointAt(j);
-    left !== undefined && right !== undefined;
-    left = a.codePointAt(i), right = b.codePointAt(j)
-  ) {
+  while (i < a.length && i < b.length) {
+    const left = a.codePointAt(i) as number
+    const right = b.codePointAt(i) as number
     if (left !== right) {
       return left < right ? -1 : 1
     }
     i += left > 0xffff ? 2 : 1
-    j += right > 0xffff ? 2 : 1
   }
+  // One string is a prefix of the other, so the shorter sorts first.
   return a.length - b.length
 }

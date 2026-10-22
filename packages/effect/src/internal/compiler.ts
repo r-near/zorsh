@@ -16,10 +16,13 @@ export interface Layout {
 
 export type Compile = (ast: SchemaAST.AST, path: string) => Layout
 
-/** Inspect visible nodes without evaluating Suspend thunks, including the type side. */
-export function rejectSuspensions(ast: SchemaAST.AST): void {
+/**
+ * Recursive schemas are unsupported, so any Suspend on the encoded or type side fails here with its
+ * path, without calling its thunk.
+ */
+export function rejectSuspensions(root: SchemaAST.AST): void {
   const seen = new Set<SchemaAST.AST>()
-  const pending = [{ ast, path: "$" }]
+  const pending = [{ ast: root, path: "$" }]
   while (pending.length > 0) {
     const node = pending.pop()
     if (node === undefined || seen.has(node.ast)) {
@@ -35,13 +38,13 @@ export function rejectSuspensions(ast: SchemaAST.AST): void {
     )
     switch (ast._tag) {
       case "Declaration":
-        ast.typeParameters.forEach((ast, i) =>
-          pending.push({ ast, path: `${path}.typeParameters[${i}]` }),
+        ast.typeParameters.forEach((child, i) =>
+          pending.push({ ast: child, path: `${path}.typeParameters[${i}]` }),
         )
         break
       case "Arrays":
-        ast.elements.forEach((ast, i) => pending.push({ ast, path: `${path}[${i}]` }))
-        ast.rest.forEach((ast, i) => pending.push({ ast, path: `${path}.rest[${i}]` }))
+        ast.elements.forEach((child, i) => pending.push({ ast: child, path: `${path}[${i}]` }))
+        ast.rest.forEach((child, i) => pending.push({ ast: child, path: `${path}.rest[${i}]` }))
         break
       case "Objects":
         ast.propertySignatures.forEach((field) =>
@@ -53,27 +56,28 @@ export function rejectSuspensions(ast: SchemaAST.AST): void {
         })
         break
       case "Union":
-        ast.types.forEach((ast, i) => pending.push({ ast, path: `${path}.union[${i}]` }))
+        ast.types.forEach((child, i) => pending.push({ ast: child, path: `${path}.union[${i}]` }))
         break
       case "TemplateLiteral":
-        ast.parts.forEach((ast, i) => pending.push({ ast, path: `${path}.parts[${i}]` }))
+        ast.parts.forEach((child, i) => pending.push({ ast: child, path: `${path}.parts[${i}]` }))
         break
     }
   }
 }
 
-export function compile(ast: SchemaAST.AST): Layout {
+export function compile(root: SchemaAST.AST): Layout {
+  // A node reused across the schema compiles once.
   const memo = new Map<SchemaAST.AST, Layout>()
-  const compile: Compile = (ast, path) => {
+  const compileCached: Compile = (ast, path) => {
     const cached = memo.get(ast)
     if (cached !== undefined) {
       return cached
     }
-    const layout = compileNode(ast, path, compile)
+    const layout = compileNode(ast, path, compileCached)
     memo.set(ast, layout)
     return layout
   }
-  return compile(ast, "$")
+  return compileCached(root, "$")
 }
 
 /** An explicit layout annotation owns its node; natives and AST tags apply only without one. */
@@ -121,11 +125,14 @@ function compileDescriptor(
   compile: Compile,
 ): Layout {
   switch (layout.kind) {
-    case "integer":
-      if (ast._tag !== (layout.bits > 32 ? "BigInt" : "Number")) {
+    case "integer": {
+      // Integers up to 32 bits are numbers; u64 and wider can exceed 2^53, so they are bigints.
+      const encoded = layout.bits > 32 ? "BigInt" : "Number"
+      if (ast._tag !== encoded) {
         throw new Error(`${path}: Integer layout does not match encoded ${ast._tag}`)
       }
       return integer(layout.bits, layout.signed)
+    }
     case "float":
       if (ast._tag !== "Number") {
         throw new Error(`${path}: Float layout does not match encoded ${ast._tag}`)

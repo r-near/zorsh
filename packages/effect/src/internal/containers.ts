@@ -2,13 +2,14 @@ import type { SchemaAST } from "effect"
 import type { Compile, Layout } from "./compiler.js"
 import { BinaryError, prepend, type Reader, type Writer } from "./io.js"
 
+/** A Rust struct: fields in declaration order. `omit` skips an enum variant's tag field. */
 export function compileObject(
   ast: SchemaAST.Objects,
   path: string,
   compile: Compile,
   omit?: string,
 ): Layout {
-  if (ast.indexSignatures.length) {
+  if (ast.indexSignatures.length > 0) {
     throw new Error(
       `${path}: Index signatures have no Borsh layout; use Schema.ReadonlyMap or Schema.HashMap for a Rust map`,
     )
@@ -83,9 +84,10 @@ export function defineField(target: object, name: PropertyKey, value: unknown): 
 
 /** The item of a plain `ReadonlyArray<T>`, with no leading or trailing elements. */
 export function homogeneousItem(ast: SchemaAST.AST): SchemaAST.AST | undefined {
-  return ast._tag === "Arrays" && ast.elements.length === 0 && ast.rest.length === 1
-    ? ast.rest[0]
-    : undefined
+  if (ast._tag === "Arrays" && ast.elements.length === 0 && ast.rest.length === 1) {
+    return ast.rest[0]
+  }
+  return undefined
 }
 
 export function compileArrays(ast: SchemaAST.Arrays, path: string, compile: Compile): Layout {
@@ -137,7 +139,7 @@ function tuple(items: ReadonlyArray<Layout>): Layout {
 
 /** Rust Vec<T>. Zero-sized items are rejected when visited, as borsh-rs does. */
 function vector(item: Layout): Layout {
-  const checkItem = (offset: number) => {
+  const rejectZeroSizedItem = (offset: number) => {
     if (item.isZeroSized) {
       throw new BinaryError(offset, "Borsh forbids vectors of zero-sized values")
     }
@@ -146,15 +148,16 @@ function vector(item: Layout): Layout {
     minBytes: 4,
     isZeroSized: false,
     read: (r) => {
-      checkItem(r.offset)
+      rejectZeroSizedItem(r.offset)
       const count = r.u32()
+      // Each item needs at least minBytes, so reject an impossible count before allocating.
       if (count > Math.floor((r.input.byteLength - r.offset) / item.minBytes)) {
         throw new BinaryError(r.offset, "Truncated vector payload")
       }
       return readItems(r, item, count)
     },
     write: (w, value) => {
-      checkItem(w.offset)
+      rejectZeroSizedItem(w.offset)
       if (!Array.isArray(value) || value.length > 0xffff_ffff) {
         throw new BinaryError(w.offset, "Expected array with u32 length")
       }
@@ -176,6 +179,7 @@ export function fixedArray(
     throw new Error(`${path}: Fixed array layout requires a homogeneous encoded array`)
   }
   const item = compile(rest, `${path}[]`)
+  // Nested fixed arrays can multiply past 2^53, so clamp to stay a safe integer.
   const minBytes = length === 0 ? 0 : Math.min(Number.MAX_SAFE_INTEGER, length * item.minBytes)
   return {
     minBytes,
