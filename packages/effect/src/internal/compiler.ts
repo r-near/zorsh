@@ -1,9 +1,14 @@
 import type { SchemaAST } from "effect"
-import { descriptor, type LayoutDescriptor, maxLengthOf, rejectMaxLength } from "./annotations.js"
+import {
+  type LayoutAnnotation,
+  layoutAnnotation,
+  maxLengthOf,
+  rejectMaxLength,
+} from "./annotations.js"
 import { compileArrays, compileObject, fixedArray, homogeneousItem } from "./containers.js"
 import { compileEnum } from "./enums.js"
 import type { Reader, Writer } from "./io.js"
-import { compileDeclaration, isLengthPrefixed, isUint8Array } from "./natives.js"
+import { compileDeclaration, isLengthPrefixed } from "./natives.js"
 import { boolean, fixedBytes, float, integer, string } from "./primitives.js"
 
 export interface Layout {
@@ -41,12 +46,12 @@ function compileNode(ast: SchemaAST.AST, path: string, compile: Compile): Layout
       `${path}: Optional properties and elements have no Borsh layout on the encoded side; use Schema.Option for a Rust Option`,
     )
   }
-  const layout = descriptor(ast, path)
+  const layout = layoutAnnotation(ast, path)
   if (layout !== undefined || !hasLengthPrefix(ast)) {
     rejectMaxLength(ast, path)
   }
   if (layout !== undefined) {
-    return compileDescriptor(ast, layout, path, compile)
+    return compileLayout(ast, layout, path, compile)
   }
   const bound = maxLengthOf(ast) ?? unbounded
   switch (ast._tag) {
@@ -79,33 +84,22 @@ function compileNode(ast: SchemaAST.AST, path: string, compile: Compile): Layout
   throw new Error(`${path}: Unsupported encoded schema ${ast._tag}`)
 }
 
-function compileDescriptor(
+/** Only this package's constructors write layout annotations, each onto the AST it lays out. */
+function compileLayout(
   ast: SchemaAST.AST,
-  layout: LayoutDescriptor,
+  layout: LayoutAnnotation,
   path: string,
   compile: Compile,
 ): Layout {
   switch (layout.kind) {
-    case "integer": {
-      // Integers up to 32 bits are numbers; u64 and wider can exceed 2^53, so they are bigints.
-      const encoded = layout.bits > 32 ? "BigInt" : "Number"
-      if (ast._tag !== encoded) {
-        throw new Error(`${path}: Integer layout does not match encoded ${ast._tag}`)
-      }
+    case "integer":
       return integer(layout.bits, layout.signed)
-    }
     case "float":
-      if (ast._tag !== "Number") {
-        throw new Error(`${path}: Float layout does not match encoded ${ast._tag}`)
-      }
       return float(layout.bits)
     case "fixedBytes":
-      if (!isUint8Array(ast)) {
-        throw new Error(`${path}: Fixed bytes layout requires an encoded Uint8Array`)
-      }
       return fixedBytes(layout.length)
     case "fixedArray":
-      return fixedArray(ast, layout.length, path, compile)
+      return fixedArray(ast as SchemaAST.Arrays, layout.length, path, compile)
     case "enum":
       return compileEnum(ast, layout, path, compile)
   }

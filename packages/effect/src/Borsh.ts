@@ -20,7 +20,7 @@ import {
   SchemaParser,
   SchemaTransformation,
 } from "effect"
-import { isU32Length, maxLengthId, parseDescriptor, withLayout } from "./internal/annotations.js"
+import { isU32Length, maxLengthId, parseDiscriminants, withLayout } from "./internal/annotations.js"
 import { compile, type Layout } from "./internal/compiler.js"
 import { enumVariants } from "./internal/enums.js"
 import { BinaryError, Reader, type ReaderOptions, utf8Length, Writer } from "./internal/io.js"
@@ -30,7 +30,6 @@ import { integerRange } from "./internal/primitives.js"
 function integer(bits: 8 | 16 | 32, signed: boolean) {
   const { minimum, maximum } = integerRange(bits, signed)
   return withLayout(Schema.Int, {
-    version: 1,
     kind: "integer",
     bits,
     signed,
@@ -39,7 +38,6 @@ function integer(bits: 8 | 16 | 32, signed: boolean) {
 
 function bigInteger(bits: 64 | 128, signed: boolean): Schema.BigInt {
   return withLayout(Schema.BigInt, {
-    version: 1,
     kind: "integer",
     bits,
     signed,
@@ -129,7 +127,7 @@ export const I128 = bigInteger(128, true)
  * @category floats
  * @since 0.1.0
  */
-export const F32 = withLayout(Schema.Number, { version: 1, kind: "float", bits: 32 }).check(
+export const F32 = withLayout(Schema.Number, { kind: "float", bits: 32 }).check(
   Schema.makeFilter((n) => !Number.isNaN(n) && Object.is(Math.fround(n), n), {
     expected: "an exactly representable binary32 number",
     arbitraryConstraint: {
@@ -148,7 +146,6 @@ export const F32 = withLayout(Schema.Number, { version: 1, kind: "float", bits: 
  * @since 0.1.0
  */
 export const F64 = withLayout(Schema.Number, {
-  version: 1,
   kind: "float",
   bits: 64,
 }).check(Schema.makeFilter((n) => !Number.isNaN(n), { expected: "a non-NaN number" }))
@@ -196,7 +193,6 @@ export function fixedBytes(length: number): Schema.Uint8Array {
     throw new Error("$: fixedBytes length must be a safe integer between 0 and 2^32 - 1")
   }
   return withLayout(Bytes, {
-    version: 1,
     kind: "fixedBytes",
     length,
   }).check(Schema.isBetweenLength(length, length))
@@ -232,7 +228,7 @@ export function fixedArray<S extends Schema.Constraint>(item: S, length: number)
   if (!isU32Length(length)) {
     throw new Error("$: fixedArray length must be a safe integer between 0 and 2^32 - 1")
   }
-  return withLayout(Schema.Array(item), { version: 1, kind: "fixedArray", length }).check(
+  return withLayout(Schema.Array(item), { kind: "fixedArray", length }).check(
     Schema.isBetweenLength(length, length),
   )
 }
@@ -473,15 +469,11 @@ export function discriminants<
   map: D,
   options?: { readonly tag?: Tag | undefined },
 ): <S extends Schema.Top>(schema: S & ExactDiscriminants<S, D, Tag>) => S["Rebuild"] {
-  const layout = parseDescriptor(
-    {
-      version: 1,
-      kind: "enum",
-      tag: options?.tag ?? "_tag",
-      discriminants: map,
-    },
-    "$",
-  )
+  const layout = {
+    kind: "enum",
+    tag: options?.tag ?? "_tag",
+    discriminants: parseDiscriminants(map),
+  } as const
   return (schema) => {
     enumVariants(Schema.toEncoded(schema).ast, layout, "$")
     return withLayout(schema, layout)

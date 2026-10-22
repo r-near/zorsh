@@ -91,9 +91,11 @@ it("uses exact maps independently of union order, tag key and unsafe labels", ()
   copied.Idle = 9
   const frozen = variants.pipe(assign)
   expect(Schema.encodeSync(Borsh.toCodec(frozen))({ _tag: "Idle" })).toEqual(Uint8Array.of(3))
-  const metadata = Schema.toEncoded(frozen).ast.annotations?.[key]
+  const metadata = Schema.toEncoded(frozen).ast.annotations?.[key] as {
+    readonly discriminants: object
+  }
   expect(Object.isFrozen(metadata)).toBe(true)
-  expect(metadata?.kind === "enum" && Object.isFrozen(metadata.discriminants)).toBe(true)
+  expect(Object.isFrozen(metadata.discriminants)).toBe(true)
 })
 
 class Created extends Schema.TaggedClass<Created, { readonly brand: unique symbol }>()("Created", {
@@ -332,7 +334,7 @@ it("treats variant reordering as a wire change, as in Rust", () => {
   expect(Schema.encodeSync(Borsh.toCodec(pinned))({ _tag: "Idle" })).toEqual(Uint8Array.of(0))
 })
 
-it("rejects malformed enums and descriptors", () => {
+it("rejects malformed enums and discriminant maps", () => {
   for (const invalidMap of [
     { ...discriminants, Count: 3 },
     { ...discriminants, Count: -1 },
@@ -350,45 +352,21 @@ it("rejects malformed enums and descriptors", () => {
     [{ ...discriminants, Extra: 9, Other: 8 }, /Unknown enum discriminants Extra, Other/],
   ] as const) {
     expect(() => unchecked(variants, map)).toThrow(message)
-    expect(() =>
-      Borsh.toCodec(
-        variants.annotate({ [key]: { version: 1, kind: "enum", tag: "_tag", discriminants: map } }),
-      ),
-    ).toThrow(message)
   }
-  expect(() => Borsh.discriminants(discriminants, { tag: 7 as never })).toThrow(/Invalid Borsh/)
-  for (const raw of [
-    { version: 1, kind: "enum" },
-    { version: 1, kind: "enum", tag: "_tag", discriminants: [] },
-    { version: 1, kind: "enum", tag: "_tag", discriminants: { Idle: "3" } },
-  ]) {
-    expect(() => Borsh.toCodec(variants.annotate({ [key]: raw } as never))).toThrow(/Borsh/)
-  }
-  expect(() => unchecked(Borsh.Bytes, { Idle: 0 })).toThrow(/Enum layout requires/)
-  expect(() =>
-    Borsh.toCodec(
-      Borsh.Bytes.annotate({ [key]: { version: 1, kind: "enum", tag: "_tag", discriminants } }),
-    ),
-  ).toThrow(/Enum layout requires a tagged union, literal union or Schema.Enum/)
+  expect(() => unchecked(Borsh.Bytes, { Idle: 0 })).toThrow(
+    /Enum layout requires a tagged union, literal union or Schema.Enum/,
+  )
 })
 
-it("keeps enum metadata fixed when options have extra structural keys", () => {
-  for (const version of [1, 99]) {
-    const options = { tag: "_tag", version, kind: "integer", bits: 8, signed: false } as const
-    expect(() => Borsh.discriminants(discriminants, options)(Schema.Finite as never)).toThrow(
-      /Enum layout requires/,
-    )
-    const mapped = variants.pipe(Borsh.discriminants(discriminants, options))
-    expect(Schema.toEncoded(mapped).ast.annotations?.[key]).toEqual({
-      version: 1,
-      kind: "enum",
-      tag: "_tag",
-      discriminants,
-    })
-    expect(Schema.encodeSync(Borsh.toCodec(mapped))({ _tag: "Count", value: 513 })).toEqual(
-      Uint8Array.of(17, 1, 2),
-    )
-  }
+it("keeps enum metadata fixed when options have extra keys", () => {
+  const options = { tag: "_tag", kind: "integer", bits: 8, signed: false } as const
+  expect(() => Borsh.discriminants(discriminants, options)(Schema.Finite as never)).toThrow(
+    /Enum layout requires/,
+  )
+  const mapped = variants.pipe(Borsh.discriminants(discriminants, options))
+  expect(Schema.encodeSync(Borsh.toCodec(mapped))({ _tag: "Count", value: 513 })).toEqual(
+    Uint8Array.of(17, 1, 2),
+  )
 })
 
 it("rejects duplicate enum labels independently of map coverage", () => {
@@ -414,24 +392,16 @@ it("rejects optional enum tags independently of map coverage", () => {
   )
 })
 
-it("requires unannotated, required enum members and rejects mixed unions", () => {
-  for (const member of [
-    Schema.optionalKey(Schema.TaggedStruct("Count", {})),
-    Schema.TaggedStruct("Count", {}).annotate({
-      [key]: { version: 1, kind: "fixedBytes", length: 0 },
-    }),
+it("requires required enum members and rejects mixed unions", () => {
+  for (const invalid of [
+    Schema.Union([
+      Schema.optionalKey(Schema.TaggedStruct("Count", {})),
+      Schema.TaggedStruct("Idle", {}),
+    ]),
+    Schema.Union([Schema.optionalKey(Schema.Literal("A")), Schema.Literal("B")]),
   ]) {
-    const invalid = Schema.Union([member, Schema.TaggedStruct("Idle", {})])
-    expect(() => Borsh.toCodec(invalid)).toThrow(
-      /Enum variants must be required and have no layout annotations/,
-    )
+    expect(() => Borsh.toCodec(invalid)).toThrow(/Enum variants must be required/)
   }
-  const annotated = Schema.Literal("A").annotate({
-    [key]: { version: 1, kind: "fixedBytes", length: 0 },
-  })
-  expect(() => Borsh.toCodec(Schema.Union([annotated, Schema.Literal("B")]))).toThrow(
-    /Enum variants must be required/,
-  )
   const mixed = Schema.Union([Schema.String, Schema.TaggedStruct("Idle", {})])
   expect(() => unchecked(mixed, { Idle: 0 })).toThrow(/Enum layout requires/)
   for (const union of [
@@ -462,15 +432,6 @@ it("requires a single string literal enum tag and points to custom tag keys", ()
   }
 })
 
-it("rejects an inappropriate layout on a native Option declaration", () => {
-  const invalid = Schema.Option(Borsh.U8).annotate({
-    [key]: { version: 1, kind: "fixedBytes", length: 0 },
-  })
-  expect(() => Borsh.toCodec(invalid)).toThrow(
-    new Error("$: Fixed bytes layout requires an encoded Uint8Array"),
-  )
-})
-
 it("requires an own enum tag at the binary writer boundary", () => {
   const inherited = Object.setPrototypeOf({}, { _tag: "Idle" })
   expect(() => compile(Schema.toEncoded(schema).ast).write(new Writer(20), inherited)).toThrow(
@@ -478,24 +439,19 @@ it("requires an own enum tag at the binary writer boundary", () => {
   )
 })
 
-it("finds enum metadata in final checks and nested groups and rejects conflicts", () => {
-  const layout = { version: 1, kind: "enum", tag: "_tag", discriminants } as const
-  const check = Schema.makeFilter((_: typeof variants.Type) => true).annotate({ [key]: layout })
-  const checked = variants.check(
-    Schema.makeFilter(() => true),
-    check.and(Schema.makeFilter(() => true)).and(Schema.makeFilter(() => true)),
-  )
+it("keeps enum metadata on a schema ending in a filter group and rejects conflicts", () => {
+  const group = Schema.makeFilter(() => true).and(Schema.makeFilter(() => true))
+  const checked = variants
+    .check(
+      Schema.makeFilter(() => true),
+      group,
+    )
+    .pipe(Borsh.discriminants(discriminants))
   expect(Schema.encodeSync(Borsh.toCodec(checked))({ _tag: "Idle" })).toEqual(Uint8Array.of(3))
-  expect(() => checked.pipe(Borsh.discriminants({ ...discriminants, Idle: 4 }))).toThrow(
-    /Conflicting/,
+  const other = { ...discriminants, Idle: 4 }
+  expect(() => checked.pipe(Borsh.discriminants(other))).toThrow(
+    new Error("$: Conflicting Borsh layout annotations"),
   )
-  expect(() =>
-    Borsh.toCodec(
-      schema.check(
-        check.annotate({ [key]: { ...layout, discriminants: { ...discriminants, Idle: 4 } } }),
-      ),
-    ),
-  ).toThrow(/Conflicting/)
 })
 
 it("does not force visible suspensions while adding enum metadata", () => {

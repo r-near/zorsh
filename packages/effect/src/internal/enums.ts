@@ -1,5 +1,5 @@
 import { SchemaAST } from "effect"
-import { descriptor, type EnumDescriptor, rejectMaxLength } from "./annotations.js"
+import { type EnumAnnotation, rejectMaxLength } from "./annotations.js"
 import type { Compile, Layout } from "./compiler.js"
 import { compileObject, defineField } from "./containers.js"
 import { BinaryError, prepend, type Reader } from "./io.js"
@@ -23,7 +23,7 @@ const explicitDiscriminantsHint =
 /** Read Rust enum variants with declaration-order or explicit discriminants. */
 export function enumVariants(
   ast: SchemaAST.AST,
-  layout: EnumDescriptor | undefined,
+  layout: EnumAnnotation | undefined,
   path: string,
 ): ReadonlyArray<EnumVariant> {
   const tag = layout === undefined ? "_tag" : layout.tag
@@ -82,7 +82,7 @@ function taggedVariants(
 
 function literalVariants(
   members: ReadonlyArray<SchemaAST.Literal>,
-  layout: EnumDescriptor | undefined,
+  layout: EnumAnnotation | undefined,
   path: string,
 ): ReadonlyArray<UnnumberedVariant> {
   const variants = members.map((member) => {
@@ -99,7 +99,7 @@ function literalVariants(
 
 function tsEnumVariants(
   ast: SchemaAST.Enum,
-  layout: EnumDescriptor | undefined,
+  layout: EnumAnnotation | undefined,
   path: string,
 ): ReadonlyArray<UnnumberedVariant> {
   const variants = ast.enums.map(([label, value]) => ({ label, value }))
@@ -123,8 +123,8 @@ function tsEnumVariants(
 
 /** Variants are compiled here rather than through compile, so check what it would. */
 function assertPlainVariant(member: SchemaAST.AST, path: string): void {
-  if (member.context?.isOptional || descriptor(member, path) !== undefined) {
-    throw new Error(`${path}: Enum variants must be required and have no layout annotations`)
+  if (member.context?.isOptional) {
+    throw new Error(`${path}: Enum variants must be required`)
   }
   rejectMaxLength(member, path)
 }
@@ -163,7 +163,7 @@ function withDiscriminants(
 
 export function compileEnum(
   ast: SchemaAST.AST,
-  layout: EnumDescriptor | undefined,
+  layout: EnumAnnotation | undefined,
   path: string,
   compile: Compile,
 ): Layout {

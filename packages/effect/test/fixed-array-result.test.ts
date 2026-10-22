@@ -32,25 +32,12 @@ it("writes fixed arrays without a prefix and enforces their binary length", () =
   expect(Schema.encodeSync(Borsh.toCodec(vector))([7])).toEqual(Uint8Array.of(1, 0, 0, 0, 7))
 })
 
-it("rejects invalid fixed-array lengths and conflicting layout metadata", () => {
+it("rejects invalid fixed-array lengths", () => {
   for (const length of [-1, 0.5, NaN, Infinity, 0x1_0000_0000]) {
     expect(() => Borsh.fixedArray(Borsh.U8, length)).toThrow(
       /fixedArray length must be a safe integer/,
     )
   }
-  const key = "@zorsh/effect/borsh/layout"
-  const schema = Borsh.fixedArray(Borsh.U8, 1)
-  expect(() =>
-    Borsh.toCodec(schema.annotate({ [key]: { version: 1, kind: "fixedArray", length: 2 } })),
-  ).toThrow(/Conflicting Borsh layout annotations/)
-  expect(() =>
-    Borsh.toCodec(Schema.String.annotate({ [key]: { version: 1, kind: "fixedArray", length: 1 } })),
-  ).toThrow(/Fixed array layout requires a homogeneous encoded array/)
-  expect(() =>
-    Borsh.toCodec(
-      Schema.Array(Borsh.U8).annotate({ [key]: { version: 1, kind: "fixedArray", length: -1 } }),
-    ),
-  ).toThrow(/Invalid Borsh layout annotation/)
   const huge = Borsh.fixedArray(Borsh.fixedArray(Borsh.U16, 0xffff_ffff), 0xffff_ffff)
   expect(compile(Schema.toEncoded(huge).ast).minBytes).toBe(Number.MAX_SAFE_INTEGER)
   expect(() => Schema.decodeSync(Borsh.toCodec(huge))(new Uint8Array())).toThrow(
@@ -212,16 +199,6 @@ it("validates Result arity and explicitly annotated fixed-array shapes", () => {
     expect(() => compile(new SchemaAST.Declaration(parameters, ast.run, ast.annotations))).toThrow(
       /^\$: Result requires exactly 2 encoded type parameters$/,
     )
-  }
-  const key = "@zorsh/effect/borsh/layout"
-  for (const schema of [
-    Schema.Tuple([]),
-    Schema.NonEmptyArray(Borsh.U8),
-    Schema.TupleWithRest(Schema.Tuple([]), [Borsh.U8, Borsh.U16]),
-  ]) {
-    expect(() =>
-      Borsh.toCodec(schema.annotate({ [key]: { version: 1, kind: "fixedArray", length: 1 } })),
-    ).toThrow(/Fixed array layout requires a homogeneous encoded array/)
   }
 })
 

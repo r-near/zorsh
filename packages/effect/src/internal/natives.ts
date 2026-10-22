@@ -36,11 +36,6 @@ export function isLengthPrefixed(ast: SchemaAST.Declaration): boolean {
   return id !== undefined && lengthPrefixedIds.has(id)
 }
 
-/** The declaration fixedBytes may annotate. */
-export function isUint8Array(ast: SchemaAST.AST): boolean {
-  return ast._tag === "Declaration" && representationId(ast) === uint8ArrayId
-}
-
 function representationId(ast: SchemaAST.Declaration): string | undefined {
   const representation = ast.annotations?.representation
   if (
