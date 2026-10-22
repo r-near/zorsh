@@ -213,7 +213,9 @@ const checkKeys = new Set([
 
 /** Effect resolves annotations from the last check, so the new check keeps the schema's. */
 function exactLength(ast: SchemaAST.AST, length: number) {
-  const kept = Object.entries({ ...SchemaAST.resolve(ast) }).filter(([key]) => !checkKeys.has(key))
+  // `.check()` with no checks leaves an empty array, which `SchemaAST.resolve` does not handle.
+  const resolved = ast.checks?.length ? SchemaAST.resolve(ast) : ast.annotations
+  const kept = Object.entries({ ...resolved }).filter(([key]) => !checkKeys.has(key))
   return Schema.isBetweenLength(length, length, Object.fromEntries(kept))
 }
 

@@ -1,4 +1,4 @@
-import { Arbitrary, Effect, Option, Schema, SchemaTransformation } from "effect"
+import { Arbitrary, Effect, Option, Schema, type SchemaAST, SchemaTransformation } from "effect"
 import { expect, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
 
@@ -163,6 +163,14 @@ it("keeps schema annotations when fixedArray adds its length check", () => {
     Schema.isMaxLength(5, { arbitraryConstraint: { minLength: 3, maxLength: 3 } }),
   )
   expect(Schema.is(hinted.pipe(Borsh.fixedArray(3)))([1])).toBe(false)
+  // Spreading a list that turns out empty leaves `checks` as `[]`.
+  const none = [] as unknown as [SchemaAST.Check<ReadonlyArray<number>>]
+  const unchecked = Schema.Array(Borsh.U8)
+    .annotate({ identifier: "Pair" })
+    .check(...none)
+    .pipe(Borsh.fixedArray(2))
+  expect(Schema.encodeSync(Borsh.toCodec(unchecked))([1, 2])).toEqual(Uint8Array.of(1, 2))
+  expect(() => Schema.encodeUnknownSync(Borsh.toCodec(unchecked))("x")).toThrow(/^Expected Pair$/)
   const custom = Schema.Array(Borsh.U8).check(Schema.isMinLength(1, { message: "need one" }))
   expect(() => Schema.encodeSync(Borsh.toCodec(custom.pipe(Borsh.fixedArray(3))))([])).toThrow(
     /^need one$/,
