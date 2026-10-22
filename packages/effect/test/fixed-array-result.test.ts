@@ -18,6 +18,9 @@ it("writes fixed arrays without a prefix and enforces their binary length", () =
   for (const value of [[], [1, 2], [1, 2, 3, 4], {}, null]) {
     expect(() => Schema.encodeUnknownSync(codec)(value)).toThrow(Schema.SchemaError)
   }
+  expect(() => Schema.encodeUnknownSync(codec, { disableChecks: true })([1, 2])).toThrow(
+    /^Expected fixed array of length 3 at byte 0$/,
+  )
   const layout = compile(Schema.toEncoded(schema).ast, noLimits)
   for (const value of [[], [1, 2, 3, 4], {}]) {
     expect(() => layout.write(new Writer(32), value)).toThrow(/Expected fixed array of length 3/)

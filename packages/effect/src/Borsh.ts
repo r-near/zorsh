@@ -215,7 +215,8 @@ export function fixedBytes(length: number): Schema.Uint8Array {
  * The schema is a native `Schema.Array(item)` with an exact-length check, so
  * other lengths fail Schema validation, samples have `length` items and JSON
  * Schema gets `minItems` and `maxItems`. Annotate, brand or transform the
- * result like any other array schema. `length` must be an integer from 0
+ * result like any other array schema; as with any checked schema, later
+ * annotations attach to the length check. `length` must be an integer from 0
  * through 2^32 - 1.
  *
  * **Example** (Rust `[u16; 3]`)
