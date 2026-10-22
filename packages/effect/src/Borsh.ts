@@ -738,10 +738,11 @@ function binarySchemaError(error: unknown): Schema.SchemaError {
  *
  * It uses the same layout, limits, schema pass and errors as {@link toCodec},
  * but stops after one value instead of requiring the whole input. `maxBytes`
- * caps the bytes this value may use, not the length of `bytes`: a value that
- * needs more fails with "Value exceeds maxBytes", while "Truncated" means
- * `bytes` ended first, so more input might complete it. Byte offsets in errors
- * are positions in `bytes`. Binary failures carry the same issue `toCodec`
+ * caps the bytes this value may use, not the length of `bytes`: as soon as a
+ * read's length or count shows that the value cannot fit, it fails with
+ * "Value exceeds maxBytes", however short `bytes` is. "Truncated" only means
+ * `bytes` ended before the current read. Byte offsets in errors are positions
+ * in `bytes`. Binary failures carry the same issue `toCodec`
  * reports, without the `Encoding` wrappers of its codec. Decoding middleware
  * on the schema, such as `Schema.catchDecoding`, can recover from schema-pass
  * failures but not from binary ones, unlike with `toCodec`, because a value

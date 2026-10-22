@@ -137,6 +137,20 @@ describe("decodePrefixSync", () => {
     }
   })
 
+  it("judges maxBytes by the current read alone, not by fields still to come", () => {
+    const decode = Borsh.decodePrefixSync(
+      Schema.Struct({ payload: Borsh.Bytes, tail: Borsh.U32 }),
+      { maxBytes: 8 },
+    )
+    // The payload fits, so its truncation is reported; the tail then overruns once it arrives.
+    expect(failure(() => decode(Uint8Array.of(...u32(2)))).message).toBe(
+      'Truncated input: need 2 bytes at byte 4\n  at ["payload"]',
+    )
+    expect(failure(() => decode(Uint8Array.of(...u32(2), 1, 2))).message).toBe(
+      'Value exceeds maxBytes (8) at byte 6\n  at ["tail"]',
+    )
+  })
+
   it("reports truncation when the buffer, not maxBytes, ends first", () => {
     const decode = Borsh.decodePrefixSync(Frame, { maxBytes: 64 })
     const buffer = Uint8Array.of(0, ...frame(5, "abc").slice(0, -1))
