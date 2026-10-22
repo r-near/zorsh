@@ -1,7 +1,7 @@
 import { Context, Effect, Exit, Result, Schema, SchemaTransformation } from "effect"
 import { expect, expectTypeOf, it } from "vite-plus/test"
 import { Borsh } from "../src/index.js"
-import { compile } from "../src/internal/compiler.js"
+import { compile } from "../src/internal/compile.js"
 import { Writer } from "../src/internal/io.js"
 
 it("writes fixed arrays without a prefix and enforces their binary length", () => {
