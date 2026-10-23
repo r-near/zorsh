@@ -9,7 +9,8 @@ We have a quick list of common questions to get you started engaging with this p
 
 ## npm publishing
 
-The Release workflow runs on `main`. Pending changesets produce a "Version Packages"
+The Release workflow runs on `main` for pushes that touch `.changeset/**` or the workflow,
+and on manual dispatch. Pending changesets produce a "Version Packages"
 pull request; merging it publishes the bumped packages through npm trusted publishing,
 then pushes `<package-name>@<version>` tags, such as `@zorsh/effect@0.1.0`, and creates
 GitHub releases. A run with no pending changesets publishes any package version not yet
