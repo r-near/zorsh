@@ -9,20 +9,11 @@ We have a quick list of common questions to get you started engaging with this p
 
 ## npm publishing
 
-The updated Release workflow runs its release job only on `main` and keeps creating
-version PRs while npm publishing is disabled. Publishing is default-off. To opt in,
-set the repository Actions variable `NPM_PUBLISH_ENABLED` to exactly `true`, review
-the package versions, then deliberately run Release manually **on `main`**. Setting
-the variable alone triggers nothing; matching main-branch pushes can also trigger
-a release while it is enabled. Set the variable back to `false` after the release.
-
-When enabled, a run with no pending changesets can publish unpublished package
-versions. These controls apply to the updated workflow on `main`; older workflow
-revisions can behave differently. The gate does not revoke npm publishing
-authority or change npm-side credentials.
-
-Future releases use Changesets monorepo tags: `@zorsh/zorsh@X.Y.Z`, with separate
-`<package-name>@<version>` tags for other public packages, such as `@zorsh/effect@X.Y.Z`.
-The first `@zorsh/effect` release is published by hand; see "Hooks and releases" in
-`CONTRIBUTING.md`. Existing `vX.Y.Z`
-tags remain as historical releases; no alias tagging step is needed.
+The Release workflow runs on `main` for pushes that touch `.changeset/**` or the workflow,
+and on manual dispatch. Pending changesets produce a "Version Packages"
+pull request; merging it publishes the bumped packages through npm trusted publishing,
+then pushes `<package-name>@<version>` tags, such as `@zorsh/effect@0.1.0`, and creates
+GitHub releases. A run with no pending changesets publishes any package version not yet
+on npm. Set the repository Actions variable `NPM_PUBLISH_ENABLED` to anything other than
+`true` to pause publishing; see "Hooks and releases" in `CONTRIBUTING.md`. Existing
+`vX.Y.Z` tags remain as historical releases.
