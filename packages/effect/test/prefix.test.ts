@@ -280,7 +280,7 @@ describe("decodePrefixSync", () => {
     })
   })
 
-  it("rethrows defects from the schema unchanged", () => {
+  it("throws defects from the schema as Schema.decodeUnknownSync does", () => {
     const defect = new Error("boom")
     const Exploding = Borsh.U8.pipe(
       Schema.decodeTo(Schema.Finite, {
@@ -290,7 +290,18 @@ describe("decodePrefixSync", () => {
         encode: SchemaGetter.transform((value) => value),
       }),
     )
-    expect(() => Borsh.decodePrefixSync(Exploding)(Uint8Array.of(1))).toThrow(defect)
+    const thrown = (run: () => unknown): unknown => {
+      try {
+        run()
+      } catch (error) {
+        return error
+      }
+      throw new Error("expected a throw")
+    }
+    // Effect's sync adapters decide how a defect surfaces; the value pass must not change it
+    const expected = thrown(() => Schema.decodeUnknownSync(Exploding)(1))
+    expect(expected).not.toBeInstanceOf(Schema.SchemaError)
+    expect(thrown(() => Borsh.decodePrefixSync(Exploding)(Uint8Array.of(1)))).toEqual(expected)
   })
 })
 
