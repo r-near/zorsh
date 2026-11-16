@@ -47,7 +47,7 @@
     "prepublishOnly": "vp pack"
   },
   "devDependencies": {
-    "effect": "4.1.3"
+    "effect": "4.1.4"
   },
   "peerDependencies": {
     "effect": "^4.0.5"
